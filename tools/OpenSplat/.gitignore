@@ -1,0 +1,8 @@
+# MacOS
+.DS_Store
+
+# build
+build/
+my_build/
+.idea/
+.vscode/

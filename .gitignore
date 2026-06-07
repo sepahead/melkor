@@ -25,9 +25,10 @@ Makefile
 
 # Large directories installed by setup scripts
 tools/libtorch/
-tools/OpenSplat/
+tools/OpenSplat/build/
 tools/gsplat-mps/
-third_party/spz/
+third_party/spz/samples/
+third_party/spz/build/
 
 # Python
 venv/
