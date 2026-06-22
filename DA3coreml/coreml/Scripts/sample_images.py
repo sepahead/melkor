@@ -136,14 +136,14 @@ Examples:
                 dest.symlink_to(rel_target)
 
         print(f"Done! {len(sampled)} images in {output_dir}/")
-        print(f"\nTo process with DA3-Giant:")
-        print(f"  .build/release/da3-coreml infer \\")
-        print(f"    --backbone Models/compiled/da3_backbone_giant_official.mlmodelc \\")
-        print(f"    --head Models/compiled/dualdpt_giant_da3.mlmodelc \\")
-        print(f"    --model-size giant \\")
-        print(f"    --output output_sampled \\")
-        print(f"    --include-rays \\")
-        print(f"    -v \\")
+        print("\nTo process with DA3-Giant:")
+        print("  .build/release/da3-coreml infer \\")
+        print("    --backbone Models/compiled/da3_backbone_giant_official.mlmodelc \\")
+        print("    --head Models/compiled/dualdpt_giant_da3.mlmodelc \\")
+        print("    --model-size giant \\")
+        print("    --output output_sampled \\")
+        print("    --include-rays \\")
+        print("    -v \\")
         print(f"    \"{output_dir}\"/*.jpg")
     else:
         # Just print file paths

@@ -14,7 +14,6 @@ import argparse
 import torch
 import torch.nn as nn
 import coremltools as ct
-from pathlib import Path
 import numpy as np
 
 # Workaround: coremltools 7.x cannot handle the explicit `scale` parameter in
@@ -73,10 +72,13 @@ class DINOv3Wrapper(nn.Module):
                output dimension (required for DA3 which uses cat_token=True).
     """
 
-    def __init__(self, model, output_layers=[5, 7, 9, 11], model_name="", cat_token=False):
+    _DEFAULT_OUTPUT_LAYERS = (5, 7, 9, 11)
+
+    def __init__(self, model, output_layers=None, model_name="", cat_token=False):
         super().__init__()
         self.model = model
-        self.output_layers = output_layers
+        # Avoid a mutable default argument; materialize a list per instance.
+        self.output_layers = list(output_layers) if output_layers is not None else list(self._DEFAULT_OUTPUT_LAYERS)
         self.model_name = model_name.lower()
         self.cat_token = cat_token
 
@@ -85,14 +87,14 @@ class DINOv3Wrapper(nn.Module):
         # DINOv3: skip 5 (CLS + 4 registers)
         if 'dinov3' in self.model_name or 'dino_v3' in self.model_name:
             self.skip_tokens = 5
-            print(f"  Token skip mode: 5 (DINOv3 - CLS + 4 registers)")
+            print("  Token skip mode: 5 (DINOv3 - CLS + 4 registers)")
         else:
             # Default to DINOv2 behavior (most common)
             self.skip_tokens = 1
-            print(f"  Token skip mode: 1 (DINOv2 - CLS only)")
+            print("  Token skip mode: 1 (DINOv2 - CLS only)")
 
         if cat_token:
-            print(f"  cat_token: True (output dim = 2 * hidden_dim)")
+            print("  cat_token: True (output dim = 2 * hidden_dim)")
 
         # Register hooks to capture intermediate features
         self.features = {}
@@ -184,7 +186,7 @@ class DINOv3CoreMLExporter:
         
         # Get model config
         config = self.model.config
-        print(f"Model config:")
+        print("Model config:")
         print(f"  Hidden size: {config.hidden_size}")
         print(f"  Num layers: {config.num_hidden_layers}")
         print(f"  Num heads: {config.num_attention_heads}")
@@ -192,18 +194,20 @@ class DINOv3CoreMLExporter:
         
         return self.model
     
-    def create_wrapper(self, output_layers=[5, 7, 9, 11], cat_token=False):
+    def create_wrapper(self, output_layers=None, cat_token=False):
         """Create wrapper that extracts multi-scale features."""
         if self.model is None:
             self.load_model()
+        if output_layers is None:
+            output_layers = list(self._DEFAULT_OUTPUT_LAYERS)
         return DINOv3Wrapper(self.model, output_layers, model_name=self.model_name, cat_token=cat_token)
-    
+
     def convert_to_coreml(
         self,
         output_path: str,
         input_shape: tuple = (1, 3, 518, 518),
         compute_precision: str = "float16",
-        output_layers: list = [5, 7, 9, 11],
+        output_layers: list = None,
         cat_token: bool = False
     ):
         """

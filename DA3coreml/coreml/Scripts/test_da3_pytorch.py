@@ -16,9 +16,9 @@ import torch
 import torch.nn.functional as F
 import numpy as np
 from PIL import Image
-# matplotlib is optional
+# matplotlib is optional; importing it sets HAS_MPL even if plt is unused here.
 try:
-    import matplotlib.pyplot as plt
+    import matplotlib.pyplot as plt  # noqa: F401
     HAS_MPL = True
 except ImportError:
     HAS_MPL = False
@@ -69,9 +69,11 @@ def test_da3_pytorch(checkpoint_path, image_path, output_dir):
     print("=" * 60)
 
     try:
-        from depth_anything_3.model.da3 import DepthAnything3Net
-        from depth_anything_3.model.dinov2.dinov2 import DinoV2
-        from depth_anything_3.model.dualdpt import DualDPT
+        # These imports prove the DA3 source tree is importable; the names are
+        # exercised via the head() call below rather than referenced directly.
+        from depth_anything_3.model.da3 import DepthAnything3Net  # noqa: F401
+        from depth_anything_3.model.dinov2.dinov2 import DinoV2  # noqa: F401
+        from depth_anything_3.model.dualdpt import DualDPT  # noqa: F401
         from safetensors.torch import load_file as load_safetensors
         print("DA3 modules loaded successfully")
     except ImportError as e:
@@ -173,6 +175,8 @@ def test_da3_pytorch(checkpoint_path, image_path, output_dir):
 
         print(f"Depth shape: {depth.shape}")
         print(f"Depth range: [{depth.min().item():.4f}, {depth.max().item():.4f}]")
+        print(f"Confidence shape: {depth_conf.shape if depth_conf is not None else 'n/a'}")
+        print(f"Rays present: {rays is not None}")
 
     # Visualize
     output_dir = Path(output_dir)

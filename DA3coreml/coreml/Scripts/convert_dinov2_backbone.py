@@ -22,7 +22,6 @@ Usage:
 import argparse
 import torch
 import torch.nn as nn
-import torch.nn.functional as F
 import coremltools as ct
 import numpy as np
 from pathlib import Path
@@ -123,7 +122,7 @@ def main():
     hf_model_name = args.hf_model or config['hf_name']
 
     print("=" * 60)
-    print(f"Converting DINOv2 to CoreML")
+    print("Converting DINOv2 to CoreML")
     print("=" * 60)
     print(f"Model: {hf_model_name}")
     print(f"Size: {args.size}")
@@ -151,7 +150,7 @@ def main():
     with torch.no_grad():
         outputs = model(example)
 
-    print(f"Output shapes:")
+    print("Output shapes:")
     for i, o in enumerate(outputs):
         print(f"  Layer {config['output_layers'][i]}: {o.shape}")
 
@@ -208,10 +207,10 @@ def main():
     print("\n" + "=" * 60)
     print("Done!")
     print("=" * 60)
-    print(f"\nTo use with DPT head, note:")
+    print("\nTo use with DPT head, note:")
     print(f"  - Output dim: {config['embed_dim']} (NOT doubled like DA3's cat_token)")
-    print(f"  - You may need to adjust the DPT head dim_in accordingly")
-    print(f"  - Or use the DA3 backbone converter for cat_token=True behavior")
+    print("  - You may need to adjust the DPT head dim_in accordingly")
+    print("  - Or use the DA3 backbone converter for cat_token=True behavior")
 
 
 if __name__ == '__main__':

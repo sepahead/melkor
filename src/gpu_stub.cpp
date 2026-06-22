@@ -153,19 +153,10 @@ GaussianFitResult GaussianFitter::fitFromGlb(const std::string& /*glb_path*/,
     return result;
 }
 
-GaussianFitResult GaussianFitter::fitFromImages(const std::vector<std::string>& /*image_paths*/,
+GaussianFitResult GaussianFitter::fitFromImages(const std::vector<std::vector<uint8_t>>& /*images*/,
                                                  const std::vector<Camera>& /*cameras*/,
+                                                 const GaussianCloud& /*initial_cloud*/,
                                                  const GaussianFitConfig& /*config*/) {
-    GaussianFitResult result;
-    result.success = false;
-    result.error_message = "Gaussian fitting requires Metal GPU acceleration (macOS only)";
-    return result;
-}
-
-GaussianFitResult GaussianFitter::refine(GaussianCloud& /*cloud*/,
-                                          const std::vector<std::string>& /*image_paths*/,
-                                          const std::vector<Camera>& /*cameras*/,
-                                          const GaussianFitConfig& /*config*/) {
     GaussianFitResult result;
     result.success = false;
     result.error_message = "Gaussian fitting requires Metal GPU acceleration (macOS only)";
@@ -175,6 +166,13 @@ GaussianFitResult GaussianFitter::refine(GaussianCloud& /*cloud*/,
 // ============================================================================
 // DifferentiableRenderer Stub
 // ============================================================================
+// NOTE: forward()/backward() are only declared in the header and implemented
+// in the Metal path (gaussian_fitter.mm). The previous stub defined render()
+// and computeGradients() returning a GaussianGradient type that no longer
+// exist in the public API, which broke Linux/CPU fallback builds. Those dead
+// stubs were removed; on non-Metal platforms the renderer simply isn't
+// constructible into a working state, which is consistent with the Fit mode
+// requiring Metal (see main.cpp).
 
 class DifferentiableRenderer::Impl {
 public:
@@ -183,20 +181,6 @@ public:
 
 DifferentiableRenderer::DifferentiableRenderer(metal::MetalContext& /*ctx*/) : impl_(nullptr) {}
 DifferentiableRenderer::~DifferentiableRenderer() = default;
-
-std::vector<uint8_t> DifferentiableRenderer::render(const GaussianCloud& /*cloud*/,
-                                                     const Camera& /*camera*/,
-                                                     int /*width*/, int /*height*/) {
-    return {};
-}
-
-std::vector<GaussianGradient> DifferentiableRenderer::computeGradients(
-    const GaussianCloud& /*cloud*/,
-    const std::vector<uint8_t>& /*target_image*/,
-    const Camera& /*camera*/,
-    int /*width*/, int /*height*/) {
-    return {};
-}
 
 // ============================================================================
 // MeshRenderer Stub
@@ -210,12 +194,18 @@ public:
 MeshRenderer::MeshRenderer(metal::MetalContext& /*ctx*/) : impl_(nullptr) {}
 MeshRenderer::~MeshRenderer() = default;
 
-std::vector<uint8_t> MeshRenderer::renderMesh(const std::vector<float>& /*vertices*/,
-                                               const std::vector<uint32_t>& /*indices*/,
-                                               const std::vector<float>& /*colors*/,
-                                               const Camera& /*camera*/,
-                                               int /*width*/, int /*height*/) {
+std::vector<uint8_t> MeshRenderer::render(const Camera& /*camera*/, int /*width*/, int /*height*/) {
+    // No-op: mesh rendering is only available with Metal. Return an empty
+    // buffer; callers on non-Metal builds should not depend on visual output.
     return {};
+}
+
+void MeshRenderer::getBoundingBox(float /*min*/[3], float /*max*/[3]) const {
+    // No-op: bounding box stays at caller-initialized values.
+}
+
+bool MeshRenderer::loadGlb(const std::string& /*path*/) {
+    return false;
 }
 
 } // namespace melkor

@@ -23,8 +23,10 @@ import sys
 sys.path.insert(0, str(Path(__file__).parent.parent.parent / "src"))
 
 try:
-    from depth_anything_3.model.dualdpt import DualDPT
-    from depth_anything_3.model.dpt import DPTHead
+    # Importing these proves DA3 source is importable; HAS_DA3 reflects that.
+    # The names themselves are not referenced below, hence the noqa.
+    from depth_anything_3.model.dualdpt import DualDPT  # noqa: F401
+    from depth_anything_3.model.dpt import DPTHead  # noqa: F401
     HAS_DA3 = True
 except ImportError:
     HAS_DA3 = False
@@ -449,7 +451,7 @@ class DualDPTCoreMLExporter:
 
                 # Initialize BilinearUpsampleConv conv layers to identity-ish mapping
                 # The bilinear upsample does the spatial work, conv refines
-                for i, layer in enumerate(model.resize_layers):
+                for layer in model.resize_layers:
                     if isinstance(layer, BilinearUpsampleConv):
                         # Initialize conv to near-identity (preserve upsampled values)
                         nn.init.kaiming_normal_(layer.conv.weight, mode='fan_out', nonlinearity='relu')
