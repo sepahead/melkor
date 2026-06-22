@@ -472,34 +472,29 @@ FeedforwardResult FeedforwardModel::predict(
     }
     
     auto start_time = std::chrono::high_resolution_clock::now();
-    
-    // Run DA3 inference via tools/da3/inference.py
+
+    // Run DA3 inference via tools/da3/inference.py. The bridge consumes a file
+    // path, so persist the incoming RGBA buffer as a PPM (binary, no external
+    // image deps required from the C++ side). DA3's loader reads via PIL, which
+    // understands PPM.
     PlyReader ply_reader;
     std::string temp_dir = "/tmp/melkor_feedforward";
-    std::string image_path = temp_dir + "/input.png";
     std::string output_ply = temp_dir + "/output.ply";
-    
+    std::string image_path = temp_dir + "/input.ppm";
+
     fs::create_directories(temp_dir);
-    
-    // Save image as PNG (what DA3 inference expects)
-    std::string save_cmd = "python3 -c \"from PIL import Image; import struct; w="
-        + std::to_string(width) + "; h=" + std::to_string(height) + "; "
-        + "img = Image.new('RGB', (w,h)); "
-        + "px = img.load(); "
-        + "open('/dev/null','w').close()\"";  // dummy, just test PIL
-    
-    // Simple PPM save (PIL might not be available in the C++ context)
     {
-        std::string ppm_path = temp_dir + "/input.ppm";
-        std::ofstream img_file(ppm_path, std::ios::binary);
+        std::ofstream img_file(image_path, std::ios::binary);
+        if (!img_file.is_open()) {
+            result.error_message = "Failed to open temp image for write: " + image_path;
+            return result;
+        }
         img_file << "P6\n" << width << " " << height << "\n255\n";
         for (int i = 0; i < width * height; ++i) {
             img_file.put(static_cast<char>(image_rgba[i * 4 + 0]));
             img_file.put(static_cast<char>(image_rgba[i * 4 + 1]));
             img_file.put(static_cast<char>(image_rgba[i * 4 + 2]));
         }
-        img_file.close();
-        image_path = ppm_path;
     }
     
     if (!impl_->runDA3Inference(image_path, output_ply)) {
@@ -528,9 +523,63 @@ FeedforwardResult FeedforwardModel::predictMultiView(
     const std::vector<std::vector<uint8_t>>& images_rgba,
     const std::vector<int>& widths,
     const std::vector<int>& heights) {
-    
+
     FeedforwardResult result;
-    result.error_message = "Multi-view prediction not yet implemented";
+
+    if (!impl_->initialized_) {
+        result.error_message = "Model not initialized";
+        return result;
+    }
+    if (images_rgba.empty()) {
+        result.error_message = "No input views";
+        return result;
+    }
+    if (images_rgba.size() != widths.size() || images_rgba.size() != heights.size()) {
+        result.error_message = "Mismatched image/width/height counts";
+        return result;
+    }
+
+    // Persist every view as a PPM in a temp directory and hand the directory to
+    // the bridge. inference.py treats a directory as a multi-view set and calls
+    // DA3.inference() exactly once, which is what makes cross-view geometry
+    // consistent. (Writing one file per view avoids any in-memory image-size
+    // assumptions inside the Python loader.)
+    std::string temp_dir = "/tmp/melkor_feedforward_multiview";
+    fs::remove_all(temp_dir);
+    fs::create_directories(temp_dir);
+
+    for (size_t i = 0; i < images_rgba.size(); ++i) {
+        std::string path = temp_dir + "/view_" + std::to_string(i) + ".ppm";
+        std::ofstream img(path, std::ios::binary);
+        if (!img.is_open()) {
+            result.error_message = "Failed to open temp view for write: " + path;
+            return result;
+        }
+        const int w = widths[i];
+        const int h = heights[i];
+        img << "P6\n" << w << " " << h << "\n255\n";
+        for (int px = 0; px < w * h; ++px) {
+            img.put(static_cast<char>(images_rgba[i][px * 4 + 0]));
+            img.put(static_cast<char>(images_rgba[i][px * 4 + 1]));
+            img.put(static_cast<char>(images_rgba[i][px * 4 + 2]));
+        }
+    }
+
+    std::string output_ply = temp_dir + "/output.ply";
+    if (!impl_->runDA3Inference(temp_dir, output_ply)) {
+        result.error_message = "DA3 multi-view inference failed. Run setup_da3.sh first.";
+        return result;
+    }
+
+    PlyReader ply_reader;
+    auto read_result = ply_reader.readFromFile(output_ply);
+    if (!read_result.success) {
+        result.error_message = "Failed to parse DA3 output: " + read_result.error_message;
+        return result;
+    }
+    result.cloud = std::move(read_result.cloud);
+    result.num_gaussians = result.cloud.size();
+    result.success = true;
     return result;
 }
 
@@ -695,18 +744,22 @@ FeedforwardResult FeedforwardModel::predictFromGlb(
         heights.push_back(render_height);
     }
     
-    // Use multi-view prediction if we have multiple views, otherwise single view
+    // Dispatch to inference. The single-image predict() path writes one PPM
+    // and invokes the bridge. For multiple views we cannot use predict()
+    // per-image (that would lose DA3's cross-view geometry); instead we write
+    // every rendered view and hand the directory to the bridge so inference.py
+    // can run a single batched DA3 call. predictMultiView() implements that.
     if (num_views > 1 && impl_->config_.num_input_views > 1) {
         result = predictMultiView(rendered_views, widths, heights);
     } else {
-        // Use the first (front) view for single-view prediction
+        // Single (front) view for single-view prediction.
         result = predict(rendered_views[0], widths[0], heights[0]);
     }
-    
+
     auto end_time = std::chrono::high_resolution_clock::now();
     auto duration = std::chrono::duration_cast<std::chrono::milliseconds>(end_time - start_time);
     result.inference_time_ms = static_cast<float>(duration.count());
-    
+
     return result;
 }
 

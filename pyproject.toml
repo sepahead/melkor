@@ -1,0 +1,29 @@
+# Root project metadata for Melkor. The C++/Metal/Swift build is driven by
+# CMakeLists.txt and Package.swift; this file exists primarily to configure
+# ruff for the Python code Melkor authors and maintains (tools/da3), while
+# excluding vendored upstream trees that ship their own lint config.
+
+[tool.ruff]
+line-length = 100
+extend-exclude = [
+    # ByteDance Depth-Anything-3 upstream snapshot. It carries its own
+    # .flake8 / pre-commit config and style conventions (E731 lambdas, etc.);
+    # linting it here would force us to fork upstream. CI lints Melkor's own
+    # Python instead.
+    "DA3coreml/src",
+    "DA3coreml/da3_streaming",
+    "DA3coreml/notebooks",
+    # Apple ml-sharp research snapshot, same rationale.
+    "ml-sharp/src",
+    # Vendored third-party code is never Melkor's to lint.
+    "third_party",
+]
+
+[tool.ruff.lint]
+# High-signal rules only: pyflakes (F) catches real bugs (unused imports,
+# undefined names, dead f-strings, unused locals) and bugbear (B) catches
+# common footguns (mutable default args, bare except, etc.). Stylistic and
+# typing-modernization rules (E/W/I/UP) are intentionally left out of CI so
+# the lint gate tracks correctness rather than formatting churn.
+select = ["F", "B"]
+ignore = []

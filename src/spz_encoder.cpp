@@ -41,12 +41,15 @@ static spz::GaussianCloud toSpzCloud(const GaussianCloud& cloud) {
         spz_cloud.scales.push_back(splat.scale_1);
         spz_cloud.scales.push_back(splat.scale_2);
         
-        // Rotation quaternion (w, x, y, z) - SPZ uses x, y, z, w order internally
-        // but the API expects w, x, y, z
-        spz_cloud.rotations.push_back(splat.rot_0);  // w
+        // Rotation quaternion. SPZ's GaussianCloud stores quaternions as
+        // (x, y, z, w) -- scalar last (see spz splat-types.h: "xyzw quaternion"
+        // and UnpackedGaussian.rotation = {x, y, z, w}; packQuaternionSmallestThree
+        // only ever flips the x/y/z components, never w). Melkor stores rotations
+        // as (rot_0=w, rot_1=x, rot_2=y, rot_3=z), so we must reorder here.
         spz_cloud.rotations.push_back(splat.rot_1);  // x
         spz_cloud.rotations.push_back(splat.rot_2);  // y
         spz_cloud.rotations.push_back(splat.rot_3);  // z
+        spz_cloud.rotations.push_back(splat.rot_0);  // w
         
         // Alpha (logit space)
         spz_cloud.alphas.push_back(splat.opacity);
@@ -88,11 +91,12 @@ static GaussianCloud fromSpzCloud(const spz::GaussianCloud& spz_cloud) {
         splat.scale_1 = spz_cloud.scales[i * 3 + 1];
         splat.scale_2 = spz_cloud.scales[i * 3 + 2];
         
-        // Rotation (w, x, y, z)
-        splat.rot_0 = spz_cloud.rotations[i * 4 + 0];
-        splat.rot_1 = spz_cloud.rotations[i * 4 + 1];
-        splat.rot_2 = spz_cloud.rotations[i * 4 + 2];
-        splat.rot_3 = spz_cloud.rotations[i * 4 + 3];
+        // Rotation. SPZ provides quaternions as (x, y, z, w) -- scalar last;
+        // convert to Melkor's (w, x, y, z) layout. See toSpzCloud for details.
+        splat.rot_0 = spz_cloud.rotations[i * 4 + 3];  // w
+        splat.rot_1 = spz_cloud.rotations[i * 4 + 0];  // x
+        splat.rot_2 = spz_cloud.rotations[i * 4 + 1];  // y
+        splat.rot_3 = spz_cloud.rotations[i * 4 + 2];  // z
         
         // Alpha
         splat.opacity = spz_cloud.alphas[i];

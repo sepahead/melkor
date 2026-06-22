@@ -178,7 +178,7 @@ class DA3MultiGPUGenerator:
             # Warn if using monocular model with multi-GPU (data parallelism won't help much)
             if self.is_monocular and self.world_size > 1:
                 print(f"  Note: {self.model_name} is monocular-optimized. Multi-GPU provides")
-                print(f"        parallel processing of multiple single images, not multi-view fusion.")
+                print("        parallel processing of multiple single images, not multi-view fusion.")
         
         try:
             # Try to load from local path first
@@ -260,7 +260,7 @@ class DA3MultiGPUGenerator:
         disable_tqdm = self.rank != 0  # Only show progress bar on rank 0
         
         with torch.no_grad():
-            for img_tensor, img_path in tqdm(zip(images, image_paths), 
+            for img_tensor, img_path in tqdm(zip(images, image_paths, strict=False),
                                               total=len(images),
                                               desc=desc,
                                               disable=disable_tqdm):
@@ -361,7 +361,7 @@ class DA3MultiGPUGenerator:
         all_rotations = []
         all_opacities = []
         
-        for depth, ray, color in zip(depths, rays, colors):
+        for depth, ray, color in zip(depths, rays, colors, strict=True):
             h, w = depth.shape
             
             # Subsample if requested
@@ -410,7 +410,7 @@ class DA3MultiGPUGenerator:
             if self.rank == 0:
                 print("Warning: No valid Gaussians generated on this GPU. Check depth range and input images.")
                 print(f"  - min_depth: {min_depth}, max_depth: {max_depth}")
-                print(f"  - Try adjusting --min-depth and --max-depth parameters.")
+                print("  - Try adjusting --min-depth and --max-depth parameters.")
             return {
                 'positions': np.zeros((0, 3)),
                 'colors': np.zeros((0, 3)),
@@ -601,7 +601,7 @@ def _gather_gaussians_file_based(local_gaussians: dict, rank: int, world_size: i
                         if attempt < 4:
                             time.sleep(0.5 * (2 ** attempt))
                         else:
-                            raise RuntimeError(f"Failed to load Gaussians from rank {r}: {e}")
+                            raise RuntimeError(f"Failed to load Gaussians from rank {r}: {e}") from e
             
             result = {
                 'positions': np.concatenate(all_gaussians['positions'], axis=0),
@@ -761,7 +761,7 @@ Examples:
                                 'da3mono-large', 'da3metric-large', 'da3nested-giant-large'],
                        help=f'DA3 model to use (default: {DEFAULT_MODEL})')
     parser.add_argument('--model-dir', default=DEFAULT_MODEL_DIR,
-                       help=f'Directory containing model weights')
+                       help='Directory containing model weights')
     parser.add_argument('--scale', type=float, default=0.01,
                        help='Base scale for Gaussians (default: 0.01)')
     parser.add_argument('--subsample', type=int, default=1,
@@ -785,7 +785,7 @@ Examples:
     try:
         if rank == 0:
             print(f"\n{'='*50}")
-            print(f"Depth-Anything-3 Multi-GPU Inference")
+            print("Depth-Anything-3 Multi-GPU Inference")
             print(f"{'='*50}")
             print(f"GPUs: {world_size}")
             for i in range(torch.cuda.device_count()):

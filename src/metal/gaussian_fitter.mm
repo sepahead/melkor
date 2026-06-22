@@ -576,89 +576,57 @@ GaussianFitResult GaussianFitter::fitFromGlb(
     }
     
     GaussianCloud cloud = std::move(conv_result.cloud);
-    
+
     std::cout << "Initialized " << cloud.size() << " Gaussians" << std::endl;
-    std::cout << "Starting optimization with " << config.num_iterations << " iterations..." << std::endl;
-    
-    // Optimization loop
-    float best_loss = 1e10f;
-    
-    for (int iter = 0; iter < config.num_iterations; ++iter) {
-        float total_loss = 0.0f;
-        
-        // Render from each camera and compute loss
-        auto packed = cloud.toPackedFormat();
-        
-        for (size_t cam_idx = 0; cam_idx < cameras.size(); ++cam_idx) {
-            const auto& cam = cameras[cam_idx];
-            
-            // Forward pass
-            auto forward_result = impl_->renderer_->forward(packed, cam, config.background);
-            
-            // Compute L1 loss against target
-            const auto& target = target_images[cam_idx];
-            float loss = 0.0f;
-            
-            for (int py = 0; py < cam.height; ++py) {
-                for (int px = 0; px < cam.width; ++px) {
-                    size_t img_idx = (py * cam.width + px) * 3;
-                    size_t tgt_idx = (py * cam.width + px) * 4;
-                    
-                    loss += std::abs(forward_result.image[img_idx + 0] - target[tgt_idx + 0] / 255.0f);
-                    loss += std::abs(forward_result.image[img_idx + 1] - target[tgt_idx + 1] / 255.0f);
-                    loss += std::abs(forward_result.image[img_idx + 2] - target[tgt_idx + 2] / 255.0f);
-                }
-            }
-            
-            loss /= (cam.width * cam.height * 3);
-            total_loss += loss;
-        }
-        
-        total_loss /= cameras.size();
-        
-        if (total_loss < best_loss) {
-            best_loss = total_loss;
-        }
-        
-        // Progress callback
-        if (config.progress_callback && iter % 100 == 0) {
-            config.progress_callback(iter, total_loss, cloud.size());
-        }
-        
-        if (iter % 500 == 0) {
-            std::cout << "Iteration " << iter << ": loss = " << total_loss << std::endl;
-        }
-        
-        // Simple gradient-free optimization: random perturbation
-        // In a full implementation, we'd use the backward pass gradients
-        if (iter < config.num_iterations - 1) {
-            std::random_device rd;
-            std::mt19937 gen(rd());
-            std::normal_distribution<float> noise(0.0f, 0.001f * std::exp(-iter * 0.001f));
-            
-            auto& splats = cloud.splats();
-            for (auto& splat : splats) {
-                // Small random perturbation to colors
-                splat.f_dc_0 += noise(gen);
-                splat.f_dc_1 += noise(gen);
-                splat.f_dc_2 += noise(gen);
+
+    // NOTE on optimization: this fitter has no working backward pass (see
+    // DifferentiableRenderer::backward, which is a stub). The previous loop
+    // perturbed Gaussian colors with random noise for `num_iterations` rounds
+    // and reported the minimum *observed* loss as "final_loss", which made the
+    // output strictly worse over time while advertising improvement. Rather
+    // than fake gradient descent, we measure the L1 reprojection error of the
+    // surface-aligned initialization once and return it honestly. Real
+    // differentiable fitting on Metal should be wired through the backward
+    // pipeline (see the 3DGS reference) before this mode claims to "fit".
+    auto packed = cloud.toPackedFormat();
+    float best_loss = 0.0f;
+    for (size_t cam_idx = 0; cam_idx < cameras.size(); ++cam_idx) {
+        const auto& cam = cameras[cam_idx];
+        auto forward_result = impl_->renderer_->forward(packed, cam, config.background);
+        const auto& target = target_images[cam_idx];
+        double loss_sum = 0.0;
+        for (int py = 0; py < cam.height; ++py) {
+            for (int px = 0; px < cam.width; ++px) {
+                size_t img_idx = (py * cam.width + px) * 3;
+                size_t tgt_idx = (py * cam.width + px) * 4;
+                loss_sum += std::abs(static_cast<double>(forward_result.image[img_idx + 0]) - target[tgt_idx + 0] / 255.0);
+                loss_sum += std::abs(static_cast<double>(forward_result.image[img_idx + 1]) - target[tgt_idx + 1] / 255.0);
+                loss_sum += std::abs(static_cast<double>(forward_result.image[img_idx + 2]) - target[tgt_idx + 2] / 255.0);
             }
         }
+        best_loss += static_cast<float>(loss_sum / (cam.width * cam.height * 3));
     }
-    
+    best_loss /= static_cast<float>(cameras.size());
+
+    if (config.progress_callback) {
+        config.progress_callback(0, best_loss, cloud.size());
+    }
+    std::cout << "Initialization L1 reprojection error: " << best_loss << std::endl;
+    std::cout << "(No gradient-based optimization available; returning surface-aligned init.)" << std::endl;
+
     auto end_time = std::chrono::high_resolution_clock::now();
     auto duration = std::chrono::duration_cast<std::chrono::milliseconds>(end_time - start_time);
-    
+
     result.success = true;
     result.cloud = std::move(cloud);
     result.final_loss = best_loss;
-    result.total_iterations = config.num_iterations;
+    result.total_iterations = 0;  // no optimization iterations were performed
     result.peak_gaussians = result.cloud.size();
     result.fitting_time_seconds = duration.count() / 1000.0f;
-    
+
     std::cout << "Fitting complete in " << result.fitting_time_seconds << "s" << std::endl;
     std::cout << "Final loss: " << result.final_loss << std::endl;
-    
+
     return result;
 }
 

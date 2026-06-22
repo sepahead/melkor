@@ -47,4 +47,9 @@ jobs:
       - name: Lint
         run: |
           pip install ruff
-          ruff check tools/da3/ DA3coreml/src/ --no-unsafe-fixes
+          # Lint Melkor-authored Python only. The root pyproject.toml excludes
+          # vendored upstream snapshots (DA3coreml/src is ByteDance code with its
+          # own .flake8; ml-sharp is Apple research code). Running ruff with no
+          # explicit paths makes it pick up the root config and respect those
+          # excludes.
+          ruff check . --no-unsafe-fixes

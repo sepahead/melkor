@@ -143,65 +143,146 @@ class DA3GaussianGenerator:
         image_paths: List[Path]
     ) -> Tuple[List[np.ndarray], List[np.ndarray], List[np.ndarray]]:
         """Predict depth and ray maps for images.
-        
+
+        DA3 is a multi-view model: feeding all images in a single inference()
+        call lets it jointly estimate consistent geometry, poses, and per-pixel
+        rays across views. Iterating per-image destroys this and falls back to
+        monocular depth, which is why this method now issues ONE batched call.
+
         Returns:
-            depths: List of depth maps (H, W)
-            rays: List of ray direction maps (H, W, 3)
-            colors: List of RGB color arrays (H, W, 3)
+            depths: List of depth maps, one per input image, each (H, W)
+            rays: List of ray direction maps, each (H, W, 3)
+            colors: List of RGB color arrays, each (H, W, 3)
         """
-        depths = []
-        rays = []
-        colors = []
-        
-        # Validate image dimensions - warn if images have different sizes
+        depths: List[np.ndarray] = []
+        rays: List[np.ndarray] = []
+        colors: List[np.ndarray] = []
+
+        # Warn (not fail) on dimension mismatch; DA3 resizes internally but the
+        # caller should ideally pre-normalize inputs.
         if images:
             first_shape = images[0].shape
-            mismatched = []
-            for i, img in enumerate(images):
-                if img.shape != first_shape:
-                    mismatched.append((i, image_paths[i], img.shape))
+            mismatched = [
+                (i, image_paths[i], img.shape)
+                for i, img in enumerate(images)
+                if img.shape != first_shape
+            ]
             if mismatched:
                 print(f"\nWarning: {len(mismatched)} images have different dimensions:")
-                for idx, path, shape in mismatched[:5]:  # Show first 5
+                for _idx, path, shape in mismatched[:5]:
                     print(f"  {path.name}: {shape} (expected {first_shape})")
                 if len(mismatched) > 5:
                     print(f"  ... and {len(mismatched) - 5} more")
-                print("Results may be inconsistent. Consider resizing images to uniform dimensions.\n")
-        
-        with torch.no_grad():
-            for img_tensor, img_path in tqdm(zip(images, image_paths), 
-                                              total=len(images),
-                                              desc="Predicting depth"):
-                img_batch = img_tensor.unsqueeze(0).to(self.device, self.dtype)
-                
-                if self.model is not None:
-                    # Use DA3 model
-                    try:
-                        output = self.model.inference([str(img_path)])
-                        depth = output.depth[0].cpu().numpy()
-                        ray = output.ray[0].cpu().numpy() if hasattr(output, 'ray') else None
-                    except Exception as e:
-                        print(f"Warning: DA3 inference failed for {img_path}: {e}")
-                        depth = self._fallback_depth(img_batch)
-                        ray = None
-                else:
-                    # Fallback depth estimation
+                print("DA3 will resize internally; results may be suboptimal.\n")
+
+        if self.model is not None:
+            # Single multi-view call: inference() takes the list of image paths
+            # (or arrays) and returns a Prediction whose arrays are indexed by
+            # view, i.e. depth has shape (N, H, W). infer_gs=True enables the
+            # Gaussian branch; it also forces depth/extrinsics/intrinsics to be
+            # populated consistently across views.
+            try:
+                with torch.no_grad():
+                    prediction = self.model.inference(
+                        [str(p) for p in image_paths],
+                        infer_gs=True,
+                    )
+                depth_stack = np.asarray(prediction.depth)  # (N, H, W)
+                if depth_stack.ndim == 2:
+                    # Single view came back unbatched; reintroduce the view axis.
+                    depth_stack = depth_stack[None]
+            except Exception as e:
+                print(f"Warning: DA3 multi-view inference failed: {e}")
+                depth_stack = None
+        else:
+            depth_stack = None
+
+        # Per-image fallback only if the model is missing or the batched call
+        # failed. This keeps the old code path alive for degraded environments
+        # but is explicitly NOT the primary route.
+        if depth_stack is None:
+            print("Falling back to per-image depth estimation.")
+            with torch.no_grad():
+                for img_tensor, _img_path in tqdm(
+                    zip(images, image_paths, strict=False),
+                    total=len(images),
+                    desc="Predicting depth",
+                ):
+                    img_batch = img_tensor.unsqueeze(0).to(self.device, self.dtype)
                     depth = self._fallback_depth(img_batch)
-                    ray = None
-                
-                # Generate rays if not provided by model
-                if ray is None:
-                    h, w = depth.shape
-                    ray = self._compute_rays(h, w)
-                
-                depths.append(depth)
-                rays.append(ray)
-                
-                # Get color from original image
-                img_np = img_tensor.permute(1, 2, 0).numpy()  # CHW -> HWC
-                colors.append(img_np)
-        
+                    depths.append(depth)
+                    rays.append(self._compute_rays(*depth.shape))
+                    colors.append(img_tensor.permute(1, 2, 0).numpy())
+            return depths, rays, colors
+
+        # Primary path: slice the batched prediction per view.
+        n_views = depth_stack.shape[0]
+        ext_np = np.asarray(prediction.extrinsics) if getattr(prediction, "extrinsics", None) is not None else None
+        ixt_np = np.asarray(prediction.intrinsics) if getattr(prediction, "intrinsics", None) is not None else None
+        for view_idx in range(n_views):
+            depth = depth_stack[view_idx]
+            depths.append(depth)
+
+            h, w = depth.shape
+            ray = self._ray_map_for_view(view_idx, h, w, ext_np, ixt_np)
+            rays.append(ray)
+
+            # Recover the (possibly resized) color image. The model's processed
+            # images are the ground truth for what the network actually saw.
+            if (
+                getattr(prediction, "processed_images", None) is not None
+                and view_idx < len(prediction.processed_images)
+            ):
+                colors.append(
+                    np.asarray(prediction.processed_images[view_idx], dtype=np.float32) / 255.0
+                )
+            else:
+                colors.append(images[view_idx].permute(1, 2, 0).numpy())
+
         return depths, rays, colors
+
+    def _ray_map_for_view(
+        self,
+        view_idx: int,
+        h: int,
+        w: int,
+        extrinsics: "np.ndarray | None",
+        intrinsics: "np.ndarray | None",
+    ) -> np.ndarray:
+        """Build a per-pixel world-space ray direction map for one view.
+
+        When DA3 provides camera extrinsics (w2c, (4,4)) and intrinsics (3,3)
+        we back out the ray directions from the pinhole model and rotate them
+        into world space -- this is the geometrically correct ray and replaces
+        the old FOV-guessed _compute_rays fallback. If either is missing we
+        keep the FOV-based approximation so single-image/metric-only models
+        still produce output.
+        """
+        if extrinsics is not None and intrinsics is not None:
+            try:
+                ext = extrinsics[view_idx] if extrinsics.ndim >= 3 else extrinsics
+                ixt = intrinsics[view_idx] if intrinsics.ndim >= 3 else intrinsics
+                w2c = np.eye(4, dtype=np.float64)
+                w2c[: ext.shape[0], : ext.shape[1]] = ext
+                c2w = np.linalg.inv(w2c)
+                fx, fy = float(ixt[0, 0]), float(ixt[1, 1])
+                cx, cy = float(ixt[0, 2]), float(ixt[1, 2])
+                u = np.arange(w, dtype=np.float64)
+                v = np.arange(h, dtype=np.float64)
+                uu, vv = np.meshgrid(u, v)
+                # Camera-space ray (before normalization).
+                dir_cam = np.stack(
+                    [(uu - cx) / fx, (vv - cy) / fy, np.ones_like(uu)], axis=-1
+                )
+                dir_cam /= np.linalg.norm(dir_cam, axis=-1, keepdims=True)
+                # Rotate into world space (extrinsics translate too, but ray
+                # directions are translation-invariant).
+                r_c2w = c2w[:3, :3].astype(np.float64)
+                dir_world = dir_cam @ r_c2w.T
+                return dir_world.astype(np.float32)
+            except Exception as e:
+                print(f"Warning: ray derivation from camera params failed ({e}); using FOV fallback.")
+        return self._compute_rays(h, w)
     
     def _fallback_depth(self, img_batch: torch.Tensor) -> np.ndarray:
         """Simple fallback depth estimation using image intensity.
@@ -282,7 +363,7 @@ class DA3GaussianGenerator:
         all_rotations = []
         all_opacities = []
         
-        for depth, ray, color in zip(depths, rays, colors):
+        for depth, ray, color in zip(depths, rays, colors, strict=True):
             h, w = depth.shape
             
             # Subsample if requested
@@ -331,7 +412,7 @@ class DA3GaussianGenerator:
         if not all_positions:
             print("Warning: No valid Gaussians generated. Check depth range and input images.")
             print(f"  - min_depth: {min_depth}, max_depth: {max_depth}")
-            print(f"  - Try adjusting --min-depth and --max-depth parameters.")
+            print("  - Try adjusting --min-depth and --max-depth parameters.")
             return {
                 'positions': np.zeros((0, 3)),
                 'colors': np.zeros((0, 3)),
@@ -605,7 +686,7 @@ Examples:
                                 'da3mono-large', 'da3metric-large', 'da3nested-giant-large'],
                        help=f'DA3 model to use (default: {DEFAULT_MODEL})')
     parser.add_argument('--model-dir', default=DEFAULT_MODEL_DIR,
-                       help=f'Directory containing model weights')
+                       help='Directory containing model weights')
     parser.add_argument('--device', default='cuda',
                        help='Device to use (cuda, cpu)')
     parser.add_argument('--scale', type=float, default=0.01,
