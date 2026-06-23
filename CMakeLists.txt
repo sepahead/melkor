@@ -269,6 +269,29 @@ set_target_properties(test_melkor_core PROPERTIES
 )
 add_test(NAME melkor_core_tests COMMAND test_melkor_core)
 
+# Fuzz test for SPZ quaternion rotation preservation across the full rotation
+# space (random + edge cases). Decodes with spz's own loader so a symmetric
+# double-bug cannot hide; compares rotation matrices since q/-q are equivalent.
+if(SPZ_AVAILABLE)
+    add_executable(test_spz_quaternion_fuzz tests/test_spz_quaternion_fuzz.cpp)
+    target_link_libraries(test_spz_quaternion_fuzz PRIVATE melkor_core spz)
+    target_compile_definitions(test_spz_quaternion_fuzz PRIVATE MELKOR_HAS_SPZ)
+    set_target_properties(test_spz_quaternion_fuzz PROPERTIES
+        RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}
+    )
+    add_test(NAME spz_quaternion_fuzz COMMAND test_spz_quaternion_fuzz)
+endif()
+
+# Fuzz test for the binary (and ASCII) PLY round-trip across random splats.
+# Catches stride/ordering/endian regressions in both the writer and the
+# header-driven reader.
+add_executable(test_ply_roundtrip_fuzz tests/test_ply_roundtrip_fuzz.cpp)
+target_link_libraries(test_ply_roundtrip_fuzz PRIVATE melkor_core)
+set_target_properties(test_ply_roundtrip_fuzz PROPERTIES
+    RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}
+)
+add_test(NAME ply_roundtrip_fuzz COMMAND test_ply_roundtrip_fuzz)
+
 # Python test for the DA3 model-direct Gaussians extraction path. It stubs
 # torch so it runs anywhere Python3 + numpy are available (no DA3 weights or
 # GPU needed). Validates that the field transforms match ByteDance's exporter

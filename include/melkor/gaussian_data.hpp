@@ -124,7 +124,26 @@ namespace utils {
     inline float logit(float x) {
         return std::log(x / (1.0f - x));
     }
-    
+
+    // Convert a quaternion (w, x, y, z) to a 3x3 rotation matrix stored
+    // row-major in out[9]. Used by tests to compare rotations: two quaternions
+    // q and -q encode the same rotation, so the correct invariant under
+    // encoding round-trips (which may canonicalize sign) is matrix equality,
+    // not component equality. Normalizes the input inline so it has no
+    // dependency on the (separately compiled) normalizeQuaternion.
+    inline void quatToRotationMatrix(float w, float x, float y, float z,
+                                     float out[9]) {
+        float len = std::sqrt(w * w + x * x + y * y + z * z);
+        if (len > 0.0f) { float inv = 1.0f / len; w *= inv; x *= inv; y *= inv; z *= inv; }
+        else { w = 1.0f; x = y = z = 0.0f; }
+        float xx = x * x, yy = y * y, zz = z * z;
+        float xy = x * y, xz = x * z, yz = y * z;
+        float wx = w * x, wy = w * y, wz = w * z;
+        out[0] = 1 - 2 * (yy + zz); out[1] = 2 * (xy - wz);     out[2] = 2 * (xz + wy);
+        out[3] = 2 * (xy + wz);     out[4] = 1 - 2 * (xx + zz); out[5] = 2 * (yz - wx);
+        out[6] = 2 * (xz - wy);     out[7] = 2 * (yz + wx);     out[8] = 1 - 2 * (xx + yy);
+    }
+
     // Normalize quaternion
     void normalizeQuaternion(float& w, float& x, float& y, float& z);
 }
