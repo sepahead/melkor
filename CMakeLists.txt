@@ -248,3 +248,23 @@ message(STATUS "  GPU Backend: ${MELKOR_GPU_BACKEND}")
 message(STATUS "  GPU Acceleration: ${MELKOR_HAS_GPU}")
 message(STATUS "  SPZ Support: ${SPZ_AVAILABLE}")
 message(STATUS "")
+
+# ============================================================================
+# Tests
+# ============================================================================
+# The previous CI "test" step was only `melkor --info`, which exercises no
+# conversion logic. These tests assert real correctness properties of the
+# platform-independent core: SPZ quaternion ordering, header-driven PLY
+# parsing, PCA normal estimation, and the SH C0 constant.
+enable_testing()
+
+add_executable(test_melkor_core tests/test_melkor_core.cpp)
+target_link_libraries(test_melkor_core PRIVATE melkor_core)
+if(SPZ_AVAILABLE)
+    target_link_libraries(test_melkor_core PRIVATE spz)
+    target_compile_definitions(test_melkor_core PRIVATE MELKOR_HAS_SPZ)
+endif()
+set_target_properties(test_melkor_core PROPERTIES
+    RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}
+)
+add_test(NAME melkor_core_tests COMMAND test_melkor_core)

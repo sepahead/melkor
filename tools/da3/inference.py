@@ -25,6 +25,12 @@ from tqdm import tqdm
 DEFAULT_MODEL_DIR = os.path.expanduser("~/.melkor/models/da3")
 DEFAULT_MODEL = "DA3-BASE"
 
+# Spherical-harmonics band-0 constant. Single source of truth for the 3DGS
+# color convention used by both the C++ core (melkor::utils::SH_C0) and these
+# Python tools. Value: 1 / (2 * sqrt(pi)). Keep in sync with
+# include/melkor/gaussian_data.hpp.
+SH_C0 = 0.28209479177387814
+
 
 def get_image_files(input_path: str) -> List[Path]:
     """Get list of image files from input path."""
@@ -89,7 +95,8 @@ class DA3GaussianGenerator:
         model_name: str = DEFAULT_MODEL,
         model_dir: str = DEFAULT_MODEL_DIR,
         device: str = "cuda",
-        dtype: torch.dtype = torch.float16
+        dtype: torch.dtype = torch.float16,
+        allow_fallback_depth: bool = False
     ):
         self.device = device
         self.dtype = dtype
@@ -97,7 +104,12 @@ class DA3GaussianGenerator:
         self.model_name = self.MODEL_NAME_MAP.get(model_name.lower(), model_name.upper())
         self.model_dir = Path(model_dir)
         self.model = None
-        
+        # When the DA3 model is unavailable, the intensity-based depth fallback
+        # is gated behind this explicit opt-in. The fallback output is
+        # preview-only and must never flow into a reconstruction pipeline
+        # unnoticed, so the default is False.
+        self.allow_fallback_depth = allow_fallback_depth
+
         # Determine model capabilities
         self.supports_multi_view = self.model_name in self.MULTI_VIEW_MODELS
         self.outputs_metric_depth = self.model_name in self.METRIC_MODELS
@@ -283,31 +295,40 @@ class DA3GaussianGenerator:
             except Exception as e:
                 print(f"Warning: ray derivation from camera params failed ({e}); using FOV fallback.")
         return self._compute_rays(h, w)
-    
+
     def _fallback_depth(self, img_batch: torch.Tensor) -> np.ndarray:
-        """Simple fallback depth estimation using image intensity.
-        
-        WARNING: This is a very crude approximation and should NOT be used
-        for production 3D reconstruction. It assumes darker pixels are farther,
-        which is often incorrect. Install the DA3 model for proper depth estimation.
+        """Preview-only intensity-based depth estimation.
+
+        This assumes darker pixels are farther away, which is frequently wrong
+        (shadows, dark surfaces, lighting). The output is NOT suitable for 3D
+        reconstruction and is gated behind `allow_fallback_depth` to prevent it
+        from silently flowing into a pipeline. Install the DA3 model for real
+        depth: ./scripts/setup_da3.sh
         """
+        if not self.allow_fallback_depth:
+            raise RuntimeError(
+                "DA3 model unavailable and intensity-based fallback is disabled. "
+                "The fallback produces preview-only output unsuitable for "
+                "reconstruction. Re-run with --allow-fallback-depth to override, "
+                "or install the model: ./scripts/setup_da3.sh"
+            )
         if not DA3GaussianGenerator._fallback_warned:
             DA3GaussianGenerator._fallback_warned = True
             print("\n" + "="*70)
             print("WARNING: Using FALLBACK depth estimation (intensity-based)")
-            print("This produces POOR quality results. For proper 3D reconstruction,")
-            print("install the DA3 model: ./scripts/setup_da3.sh")
+            print("This produces PREVIEW-ONLY results unsuitable for 3D")
+            print("reconstruction. Install the DA3 model: ./scripts/setup_da3.sh")
             print("="*70 + "\n")
-        
+
         # Convert to grayscale
         gray = 0.299 * img_batch[:, 0] + 0.587 * img_batch[:, 1] + 0.114 * img_batch[:, 2]
-        
+
         # Use intensity as rough depth proxy (darker = further)
         depth = 1.0 - gray.squeeze().cpu().numpy()
-        
+
         # Normalize to reasonable depth range
         depth = depth * 5.0 + 0.5  # Range ~0.5 to 5.5
-        
+
         return depth
     
     def _compute_rays(self, h: int, w: int, fov: float = 60.0) -> np.ndarray:
@@ -519,10 +540,9 @@ end_header
         print(f"Saved 0 Gaussians to {output_path}")
         return
     
-    # Convert colors to SH DC coefficients
-    # SH_DC = (RGB - 0.5) / C0 where C0 = 0.28209479177387814
-    C0 = 0.28209479177387814
-    sh_dc = ((colors - 0.5) / C0).astype(np.float32)
+    # Convert colors to SH DC coefficients using the centralized SH_C0 constant
+    # (kept in sync with include/melkor/gaussian_data.hpp).
+    sh_dc = ((colors - 0.5) / SH_C0).astype(np.float32)
     
     # Convert scales to log space
     scales_log = np.log(np.maximum(scales, 1e-7)).astype(np.float32)
@@ -706,7 +726,12 @@ Examples:
                        help='Use FP32 instead of FP16')
     parser.add_argument('--verbose', '-v', action='store_true',
                        help='Verbose output')
-    
+    parser.add_argument('--allow-fallback-depth', action='store_true',
+                       help='Permit the intensity-based depth fallback when the DA3 '
+                            'model is unavailable. The fallback produces PREVIEW-ONLY '
+                            'output that is NOT suitable for reconstruction; it is '
+                            'disabled by default to prevent silent low-quality results.')
+
     args = parser.parse_args()
     
     # Check CUDA availability
@@ -732,7 +757,8 @@ Examples:
         model_name=args.model,
         model_dir=args.model_dir,
         device=args.device,
-        dtype=dtype
+        dtype=dtype,
+        allow_fallback_depth=args.allow_fallback_depth,
     )
     generator.load_model()
     

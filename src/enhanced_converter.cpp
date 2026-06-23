@@ -1,5 +1,6 @@
 #include "melkor/enhanced_converter.hpp"
 #include "melkor/glb_reader.hpp"
+#include <array>
 #include <cmath>
 #include <algorithm>
 #include <numeric>
@@ -11,6 +12,101 @@
 #include "tiny_gltf.h"
 
 namespace melkor {
+
+namespace {
+
+// Analytical eigendecomposition of a real symmetric 3x3 matrix
+// (Smith, "The Eigenvalues and Eigenvectors of 3x3 Matrices", 2002).
+// Out: eigenvalues w0<=w1<=w2 (ascending), and corresponding unit eigenvectors.
+// Used for PCA normal estimation: the normal is the eigenvector for the
+// smallest eigenvalue (direction of least variance in the neighborhood).
+void eigenSymmetric3x3(
+    float a11, float a12, float a13,
+    float a22, float a23, float a33,
+    float& w0, float& w1, float& w2,  // eigenvalues, ascending
+    float v0[3], float v1[3], float v2[3]) {  // eigenvectors (unit)
+    float p1 = a12 * a12 + a13 * a13 + a23 * a23;
+    if (p1 < 1e-18f) {
+        // Matrix is already diagonal.
+        w0 = a11; w1 = a22; w2 = a33;
+        // Order them ascending with a stable sort of {0,1,2}.
+        struct E { float w; int i; };
+        E e[3] = {{a11, 0}, {a22, 1}, {a33, 2}};
+        std::sort(e, e + 3, [](const E& x, const E& y) { return x.w < y.w; });
+        w0 = e[0].w; w1 = e[1].w; w2 = e[2].w;
+        for (int k = 0; k < 3; ++k) {
+            float* v = (k == 0) ? v0 : (k == 1) ? v1 : v2;
+            v[0] = (e[k].i == 0) ? 1.0f : 0.0f;
+            v[1] = (e[k].i == 1) ? 1.0f : 0.0f;
+            v[2] = (e[k].i == 2) ? 1.0f : 0.0f;
+        }
+        return;
+    }
+    float q = (a11 + a22 + a33) / 3.0f;
+    float p2 = (a11 - q) * (a11 - q) + (a22 - q) * (a22 - q) +
+               (a33 - q) * (a33 - q) + 2.0f * p1;
+    float p = std::sqrt(p2 / 6.0f);
+    // B = (1/p) (A - q I)
+    float b11 = (a11 - q) / p, b12 = a12 / p, b13 = a13 / p;
+    float b22 = (a22 - q) / p, b23 = a23 / p;
+    float b33 = (a33 - q) / p;
+    // det(B)
+    float detB = b11 * (b22 * b33 - b23 * b23) -
+                 b12 * (b12 * b33 - b23 * b13) +
+                 b13 * (b12 * b23 - b22 * b13);
+    float r = std::clamp(detB / 2.0f, -1.0f, 1.0f);
+    float phi = std::acos(r) / 3.0f;
+    // Eigenvalues of A, ordered chi1 >= chi2 >= chi3.
+    float chi1 = q + 2.0f * p * std::cos(phi);
+    float chi3 = q + 2.0f * p * std::cos(phi + 2.0943951023931953f /* 2pi/3 */);
+    float chi2 = 3.0f * q - chi1 - chi3;
+    // Ascending.
+    w0 = chi3; w1 = chi2; w2 = chi1;
+
+    // Eigenvector for eigenvalue w: solve (A - w I) v = 0 via the cross product
+    // of two rows of (A - w I). Pick the two rows with the largest-magnitude
+    // entries to maximize numerical stability.
+    auto eigvec = [&](float w) -> std::array<float, 3> {
+        float m00 = a11 - w, m01 = a12, m02 = a13;
+        float m10 = a12, m11 = a22 - w, m12 = a23;
+        float m20 = a13, m21 = a23, m22 = a33 - w;
+        // Row norms.
+        float r0 = m00 * m00 + m01 * m01 + m02 * m02;
+        float r1 = m10 * m10 + m11 * m11 + m12 * m12;
+        float r2 = m20 * m20 + m21 * m21 + m22 * m22;
+        // Cross product of the two smallest-norm rows (least trust -> discard).
+        float ax, ay, az, bx, by, bz;
+        if (r0 <= r1 && r0 <= r2) { ax = m10; ay = m11; az = m12; bx = m20; by = m21; bz = m22; }
+        else if (r1 <= r0 && r1 <= r2) { ax = m00; ay = m01; az = m02; bx = m20; by = m21; bz = m22; }
+        else { ax = m00; ay = m01; az = m02; bx = m10; by = m11; bz = m12; }
+        float cx = ay * bz - az * by;
+        float cy = az * bx - ax * bz;
+        float cz = ax * by - ay * bx;
+        float len = std::sqrt(cx * cx + cy * cy + cz * cz);
+        if (len < 1e-12f) {
+            // Degenerate; fall back to an axis.
+            return {1.0f, 0.0f, 0.0f};
+        }
+        return {cx / len, cy / len, cz / len};
+    };
+    auto e0 = eigvec(w0); auto e1 = eigvec(w1); auto e2 = eigvec(w2);
+    v0[0] = e0[0]; v0[1] = e0[1]; v0[2] = e0[2];
+    v1[0] = e1[0]; v1[1] = e1[1]; v1[2] = e1[2];
+    v2[0] = e2[0]; v2[1] = e2[1]; v2[2] = e2[2];
+}
+
+// Return only the eigenvector for the smallest eigenvalue of the symmetric
+// covariance matrix (the surface normal under the local-plane PCA model).
+void smallestEigenvector3x3(
+    float sxx, float sxy, float sxz, float syy, float syz, float szz,
+    float& nx, float& ny, float& nz) {
+    float w0, w1, w2;
+    float v0[3], v1[3], v2[3];
+    eigenSymmetric3x3(sxx, sxy, sxz, syy, syz, szz, w0, w1, w2, v0, v1, v2);
+    nx = v0[0]; ny = v0[1]; nz = v0[2];
+}
+
+}  // namespace
 
 // Simple spatial hash for k-NN queries
 class SpatialHash {
@@ -572,24 +668,130 @@ void surfaceFrameToQuaternion(
 std::vector<float> estimateNormals(
     const std::vector<float>& positions,
     int k_neighbors) {
-    
+
     size_t num_points = positions.size() / 3;
     std::vector<float> normals(num_points * 3);
-    
-    // Simple PCA-based normal estimation
-    // For each point, fit a plane to k nearest neighbors
-    
-    auto knn_distances = computeKnnDistances(positions, k_neighbors, nullptr);
-    
+
+    // Default to Z-up everywhere; overwritten where a real normal is computed.
     for (size_t i = 0; i < num_points; ++i) {
-        // Default to Z-up if we can't compute
-        normals[i*3+0] = 0.0f;
-        normals[i*3+1] = 0.0f;
-        normals[i*3+2] = 1.0f;
+        normals[i * 3 + 0] = 0.0f;
+        normals[i * 3 + 1] = 0.0f;
+        normals[i * 3 + 2] = 1.0f;
     }
-    
-    // For simplicity, return default normals
-    // A full implementation would do PCA on neighborhoods
+
+    if (num_points == 0) {
+        return normals;
+    }
+
+    // Build a spatial hash so k-NN is ~O(1) per point instead of O(n).
+    float min_x = std::numeric_limits<float>::max();
+    float max_x = std::numeric_limits<float>::lowest();
+    float min_y = min_x, max_y = max_x, min_z = min_x, max_z = max_x;
+    for (size_t i = 0; i < num_points; ++i) {
+        min_x = std::min(min_x, positions[i * 3 + 0]);
+        max_x = std::max(max_x, positions[i * 3 + 0]);
+        min_y = std::min(min_y, positions[i * 3 + 1]);
+        max_y = std::max(max_y, positions[i * 3 + 1]);
+        min_z = std::min(min_z, positions[i * 3 + 2]);
+        max_z = std::max(max_z, positions[i * 3 + 2]);
+    }
+    float extent = std::max({max_x - min_x, max_y - min_y, max_z - min_z});
+    if (extent < 1e-9f) {
+        // Degenerate cloud (all points coincident): keep Z-up defaults.
+        return normals;
+    }
+    float cell_size = extent / std::cbrt(static_cast<float>(num_points)) * 2.0f;
+    SpatialHash hash(positions, cell_size);
+
+    int k = std::max(3, k_neighbors);
+
+    for (size_t i = 0; i < num_points; ++i) {
+        float px = positions[i * 3 + 0];
+        float py = positions[i * 3 + 1];
+        float pz = positions[i * 3 + 2];
+
+        // Gather candidate neighbors, expanding the search radius until we have
+        // at least k of them (capped to avoid pathological scans on clusters).
+        auto candidates = hash.queryNeighbors(px, py, pz, 2);
+        int radius = 2;
+        while (static_cast<int>(candidates.size()) < k && radius < 16) {
+            candidates = hash.queryNeighbors(px, py, pz, ++radius);
+        }
+
+        // Compute squared distances and keep the k nearest (excluding self).
+        std::vector<std::pair<float, size_t>> nbrs;
+        nbrs.reserve(candidates.size());
+        for (size_t j : candidates) {
+            if (j == i) continue;
+            float dx = positions[j * 3 + 0] - px;
+            float dy = positions[j * 3 + 1] - py;
+            float dz = positions[j * 3 + 2] - pz;
+            nbrs.emplace_back(dx * dx + dy * dy + dz * dz, j);
+        }
+        if (nbrs.empty()) {
+            continue;  // keep Z-up default for this isolated point
+        }
+        std::partial_sort(nbrs.begin(),
+                          nbrs.begin() + std::min<int>(k, static_cast<int>(nbrs.size())),
+                          nbrs.end());
+
+        int knn = std::min<int>(k, static_cast<int>(nbrs.size()));
+        if (knn < 3) {
+            // Not enough neighbors to define a plane reliably.
+            continue;
+        }
+
+        // Centroid of the neighborhood (including the query point).
+        float cx = px, cy = py, cz = pz;
+        for (int n = 0; n < knn; ++n) {
+            size_t j = nbrs[n].second;
+            cx += positions[j * 3 + 0];
+            cy += positions[j * 3 + 1];
+            cz += positions[j * 3 + 2];
+        }
+        float inv_count = 1.0f / static_cast<float>(knn + 1);
+        cx *= inv_count;
+        cy *= inv_count;
+        cz *= inv_count;
+
+        // Covariance matrix entries (symmetric).
+        float sxx = 0, sxy = 0, sxz = 0, syy = 0, syz = 0, szz = 0;
+        auto accumulate = [&](size_t j) {
+            float dx = positions[j * 3 + 0] - cx;
+            float dy = positions[j * 3 + 1] - cy;
+            float dz = positions[j * 3 + 2] - cz;
+            sxx += dx * dx; sxy += dx * dy; sxz += dx * dz;
+            syy += dy * dy; syz += dy * dz;
+            szz += dz * dz;
+        };
+        accumulate(i);
+        for (int n = 0; n < knn; ++n) {
+            accumulate(nbrs[n].second);
+        }
+        sxx *= inv_count; sxy *= inv_count; sxz *= inv_count;
+        syy *= inv_count; syz *= inv_count; szz *= inv_count;
+
+        // Smallest-eigenvalue eigenvector of the symmetric 3x3 covariance via
+        // the analytical method. The normal is the direction of least variance,
+        // i.e. the eigenvector for the smallest eigenvalue.
+        float nx, ny, nz;
+        smallestEigenvector3x3(sxx, sxy, sxz, syy, syz, szz, nx, ny, nz);
+
+        // Orient the normal consistently: point it toward the "outside" of the
+        // cloud, approximated by the vector from the centroid to the query
+        // point. Without a sensor viewpoint this is the best local heuristic.
+        float ox = px - cx, oy = py - cy, oz = pz - cz;
+        if (nx * ox + ny * oy + nz * oz < 0.0f) {
+            nx = -nx;
+            ny = -ny;
+            nz = -nz;
+        }
+
+        normals[i * 3 + 0] = nx;
+        normals[i * 3 + 1] = ny;
+        normals[i * 3 + 2] = nz;
+    }
+
     return normals;
 }
 

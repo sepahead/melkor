@@ -4,7 +4,6 @@
 #include "melkor/enhanced_converter.hpp"
 #include <cmath>
 #include <chrono>
-#include <random>
 #include <iostream>
 
 // For GLB loading
@@ -261,7 +260,7 @@ DifferentiableRenderer::ForwardResult DifferentiableRenderer::forward(
     
     // Simple CPU rasterization for now
     // TODO: Use Metal pipelines for GPU acceleration
-    const float SH_C0 = 0.28209479177387814f;
+    const float SH_C0 = melkor::utils::SH_C0;
     
     for (size_t g_idx = 0; g_idx < num_gaussians; ++g_idx) {
         const auto& g = gaussians[g_idx];

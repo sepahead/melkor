@@ -204,106 +204,238 @@ PlyReader::ReadResult PlyReader::readFromFile(const std::string& filepath) {
 PlyReader::ReadResult PlyReader::readFromBuffer(const uint8_t* data, size_t size) {
     ReadResult result;
     result.success = true;
-    
-    // Find end of header
+
+    // Find end of header. Accept both "end_header\n" and "end_header\r\n".
     std::string_view view(reinterpret_cast<const char*>(data), size);
     auto header_end = view.find("end_header\n");
     if (header_end == std::string::npos) {
         return {false, "Invalid PLY: no end_header found", {}};
     }
-    header_end += 11;  // length of "end_header\n"
-    
-    std::string header(view.substr(0, header_end));
-    
-    // Parse header
-    bool is_binary = header.find("binary_little_endian") != std::string::npos;
-    
-    // Find vertex count
+    size_t header_bytes = header_end + std::string_view("end_header\n").size();
+
+    // Walk the header line by line to parse the vertex element's property list.
+    // The reader is now header-driven: we map each property name to its index
+    // within the vertex record, so PLYs authored by different tools (e.g. those
+    // using red/green/blue instead of f_dc_*, or omitting normals) are parsed
+    // correctly instead of silently misaligned.
+    struct Property {
+        std::string name;
+        std::string type;  // "float", "double", "uchar", "char", "ushort", "short", "uint", "int"
+    };
+    std::vector<Property> vertex_props;
     size_t vertex_count = 0;
-    auto elem_pos = header.find("element vertex ");
-    if (elem_pos != std::string::npos) {
-        vertex_count = std::stoull(header.substr(elem_pos + 15));
+    bool is_binary = false;
+    bool in_vertex = false;
+
+    {
+        std::string header_str(view.substr(0, header_bytes));
+        std::istringstream hs(header_str);
+        std::string line;
+        while (std::getline(hs, line)) {
+            // Strip trailing CR.
+            if (!line.empty() && line.back() == '\r') line.pop_back();
+            if (line.rfind("format binary", 0) == 0) {
+                is_binary = true;
+            }
+            if (line.rfind("element ", 0) == 0) {
+                in_vertex = (line.find("element vertex ") == 0);
+                if (in_vertex) {
+                    // "element vertex <count>"
+                    auto p = line.find_first_of("0123456789");
+                    if (p != std::string::npos) {
+                        vertex_count = std::stoull(line.substr(p));
+                    }
+                }
+            } else if (line.rfind("property ", 0) == 0 && in_vertex) {
+                // Forms: "property <type> <name>" or "property <count> <type> <name>"
+                // For splat PLYs we only care about scalar properties; list
+                // properties ("property list ...") are skipped.
+                if (line.find("property list") == std::string::npos) {
+                    std::istringstream ls(line);
+                    std::string kw, t, n;
+                    ls >> kw >> t >> n;
+                    if (!n.empty()) {
+                        vertex_props.push_back({n, t});
+                    }
+                }
+            }
+        }
     }
-    
+
     if (vertex_count == 0) {
         return {false, "Invalid PLY: no vertices found", {}};
     }
-    
-    // Count SH rest properties
-    int sh_rest_count = 0;
-    size_t search_pos = 0;
-    while ((search_pos = header.find("property float f_rest_", search_pos)) != std::string::npos) {
-        sh_rest_count++;
-        search_pos++;
+    if (vertex_props.empty()) {
+        return {false, "Invalid PLY: no vertex properties found", {}};
     }
-    
+
+    // Resolve the canonical splat fields by name. Both 3DGS (f_dc_0/...)
+    // and plain RGB (red/green/blue) color conventions are accepted; if both
+    // are present, 3DGS SH-DC takes precedence.
+    auto find_idx = [&](const std::string& name) -> int {
+        for (size_t i = 0; i < vertex_props.size(); ++i) {
+            if (vertex_props[i].name == name) return static_cast<int>(i);
+        }
+        return -1;
+    };
+    int ix = find_idx("x"), iy = find_idx("y"), iz = find_idx("z");
+    int ifdc0 = find_idx("f_dc_0"), ifdc1 = find_idx("f_dc_1"), ifdc2 = find_idx("f_dc_2");
+    int ir = find_idx("red"), ig = find_idx("green"), ib = find_idx("blue");
+    int iopacity = find_idx("opacity");
+    int is0 = find_idx("scale_0"), is1 = find_idx("scale_1"), is2 = find_idx("scale_2");
+    int ir0 = find_idx("rot_0"), ir1 = find_idx("rot_1"), ir2 = find_idx("rot_2"), ir3 = find_idx("rot_3");
+
+    // Gather f_rest_* indices in order.
+    std::vector<int> sh_rest_idx;
+    for (const auto& p : vertex_props) {
+        if (p.name.rfind("f_rest_", 0) == 0) {
+            sh_rest_idx.push_back(find_idx(p.name));
+        }
+    }
+    if (!sh_rest_idx.empty()) {
+        result.cloud.setShDegree([&] {
+            switch (static_cast<int>(sh_rest_idx.size())) {
+                case 9: return 1;
+                case 24: return 2;
+                case 45: return 3;
+                default: return 0;
+            }
+        }());
+    }
+
+    if (ix < 0 || iy < 0 || iz < 0) {
+        return {false, "Invalid PLY: missing x/y/z position properties", {}};
+    }
+
+    // Byte size of one property value by type.
+    auto type_size = [](const std::string& t) -> size_t {
+        if (t == "float" || t == "int" || t == "uint") return 4;
+        if (t == "double") return 8;
+        if (t == "uchar" || t == "char") return 1;
+        if (t == "ushort" || t == "short") return 2;
+        return 4;  // default to float
+    };
+    size_t stride = 0;
+    for (const auto& p : vertex_props) stride += type_size(p.type);
+
     result.cloud.reserve(vertex_count);
-    
-    const uint8_t* vertex_data = data + header_end;
-    
+    const uint8_t* vertex_data = data + header_bytes;
+
+    // Read a single property value (at the given property index) for the
+    // current vertex record starting at `base`, normalized to float.
+    auto read_prop = [&](const uint8_t* base, int prop_idx) -> float {
+        const auto& p = vertex_props[static_cast<size_t>(prop_idx)];
+        size_t off = 0;
+        for (int i = 0; i < prop_idx; ++i) off += type_size(vertex_props[static_cast<size_t>(i)].type);
+        const uint8_t* v = base + off;
+        if (p.type == "float") {
+            float f; std::memcpy(&f, v, 4); return f;
+        } else if (p.type == "double") {
+            double d; std::memcpy(&d, v, 8); return static_cast<float>(d);
+        } else if (p.type == "int") {
+            int32_t i; std::memcpy(&i, v, 4); return static_cast<float>(i);
+        } else if (p.type == "uint") {
+            uint32_t u; std::memcpy(&u, v, 4); return static_cast<float>(u);
+        } else if (p.type == "uchar") {
+            return static_cast<float>(*v);
+        } else if (p.type == "char") {
+            return static_cast<float>(static_cast<signed char>(*v));
+        } else if (p.type == "ushort") {
+            uint16_t u; std::memcpy(&u, v, 2); return static_cast<float>(u);
+        } else if (p.type == "short") {
+            int16_t s; std::memcpy(&s, v, 2); return static_cast<float>(s);
+        }
+        float f; std::memcpy(&f, v, 4); return f;
+    };
+
+    auto color_byte_to_shdc = [](float c) {
+        // 0..255 uint8 stored as float -> [0,1] -> SH DC.
+        return utils::rgbToShDc(c / 255.0f);
+    };
+
     if (is_binary) {
-        // Binary reading
-        size_t stride = (6 + 3 + sh_rest_count + 1 + 3 + 4) * sizeof(float);
-        
         for (size_t i = 0; i < vertex_count; ++i) {
-            const float* f = reinterpret_cast<const float*>(vertex_data + i * stride);
-            
+            const uint8_t* base = vertex_data + i * stride;
             GaussianSplat splat;
-            splat.x = f[0];
-            splat.y = f[1];
-            splat.z = f[2];
-            // Skip normals (f[3], f[4], f[5])
-            splat.f_dc_0 = f[6];
-            splat.f_dc_1 = f[7];
-            splat.f_dc_2 = f[8];
-            
-            int idx = 9;
-            if (sh_rest_count > 0) {
-                splat.sh_rest.resize(sh_rest_count);
-                for (int j = 0; j < sh_rest_count; ++j) {
-                    splat.sh_rest[j] = f[idx++];
+            splat.x = read_prop(base, ix);
+            splat.y = read_prop(base, iy);
+            splat.z = read_prop(base, iz);
+
+            if (ifdc0 >= 0 && ifdc1 >= 0 && ifdc2 >= 0) {
+                splat.f_dc_0 = read_prop(base, ifdc0);
+                splat.f_dc_1 = read_prop(base, ifdc1);
+                splat.f_dc_2 = read_prop(base, ifdc2);
+            } else if (ir >= 0 && ig >= 0 && ib >= 0) {
+                splat.f_dc_0 = color_byte_to_shdc(read_prop(base, ir));
+                splat.f_dc_1 = color_byte_to_shdc(read_prop(base, ig));
+                splat.f_dc_2 = color_byte_to_shdc(read_prop(base, ib));
+            } else {
+                splat.f_dc_0 = splat.f_dc_1 = splat.f_dc_2 = utils::rgbToShDc(0.5f);
+            }
+
+            if (!sh_rest_idx.empty()) {
+                splat.sh_rest.resize(sh_rest_idx.size());
+                for (size_t j = 0; j < sh_rest_idx.size(); ++j) {
+                    splat.sh_rest[j] = read_prop(base, sh_rest_idx[j]);
                 }
             }
-            
-            splat.opacity = f[idx++];
-            splat.scale_0 = f[idx++];
-            splat.scale_1 = f[idx++];
-            splat.scale_2 = f[idx++];
-            splat.rot_0 = f[idx++];
-            splat.rot_1 = f[idx++];
-            splat.rot_2 = f[idx++];
-            splat.rot_3 = f[idx++];
-            
+
+            splat.opacity = (iopacity >= 0) ? read_prop(base, iopacity) : utils::logit(0.9f);
+            splat.scale_0 = (is0 >= 0) ? read_prop(base, is0) : std::log(0.01f);
+            splat.scale_1 = (is1 >= 0) ? read_prop(base, is1) : std::log(0.01f);
+            splat.scale_2 = (is2 >= 0) ? read_prop(base, is2) : std::log(0.01f);
+            splat.rot_0 = (ir0 >= 0) ? read_prop(base, ir0) : 1.0f;
+            splat.rot_1 = (ir1 >= 0) ? read_prop(base, ir1) : 0.0f;
+            splat.rot_2 = (ir2 >= 0) ? read_prop(base, ir2) : 0.0f;
+            splat.rot_3 = (ir3 >= 0) ? read_prop(base, ir3) : 0.0f;
+
             result.cloud.addSplat(std::move(splat));
         }
     } else {
-        // ASCII reading
         std::istringstream stream(std::string(reinterpret_cast<const char*>(vertex_data),
-                                              size - header_end));
-        
+                                              size - header_bytes));
+        std::vector<float> vals(vertex_props.size());
         for (size_t i = 0; i < vertex_count; ++i) {
+            for (size_t j = 0; j < vertex_props.size(); ++j) {
+                stream >> vals[j];
+            }
             GaussianSplat splat;
-            float nx, ny, nz;  // dummy normals
-            
-            stream >> splat.x >> splat.y >> splat.z;
-            stream >> nx >> ny >> nz;
-            stream >> splat.f_dc_0 >> splat.f_dc_1 >> splat.f_dc_2;
-            
-            if (sh_rest_count > 0) {
-                splat.sh_rest.resize(sh_rest_count);
-                for (int j = 0; j < sh_rest_count; ++j) {
-                    stream >> splat.sh_rest[j];
+            splat.x = vals[ix];
+            splat.y = vals[iy];
+            splat.z = vals[iz];
+
+            if (ifdc0 >= 0 && ifdc1 >= 0 && ifdc2 >= 0) {
+                splat.f_dc_0 = vals[ifdc0];
+                splat.f_dc_1 = vals[ifdc1];
+                splat.f_dc_2 = vals[ifdc2];
+            } else if (ir >= 0 && ig >= 0 && ib >= 0) {
+                splat.f_dc_0 = color_byte_to_shdc(vals[ir]);
+                splat.f_dc_1 = color_byte_to_shdc(vals[ig]);
+                splat.f_dc_2 = color_byte_to_shdc(vals[ib]);
+            } else {
+                splat.f_dc_0 = splat.f_dc_1 = splat.f_dc_2 = utils::rgbToShDc(0.5f);
+            }
+
+            if (!sh_rest_idx.empty()) {
+                splat.sh_rest.resize(sh_rest_idx.size());
+                for (size_t j = 0; j < sh_rest_idx.size(); ++j) {
+                    splat.sh_rest[j] = vals[sh_rest_idx[j]];
                 }
             }
-            
-            stream >> splat.opacity;
-            stream >> splat.scale_0 >> splat.scale_1 >> splat.scale_2;
-            stream >> splat.rot_0 >> splat.rot_1 >> splat.rot_2 >> splat.rot_3;
-            
+
+            splat.opacity = (iopacity >= 0) ? vals[iopacity] : utils::logit(0.9f);
+            splat.scale_0 = (is0 >= 0) ? vals[is0] : std::log(0.01f);
+            splat.scale_1 = (is1 >= 0) ? vals[is1] : std::log(0.01f);
+            splat.scale_2 = (is2 >= 0) ? vals[is2] : std::log(0.01f);
+            splat.rot_0 = (ir0 >= 0) ? vals[ir0] : 1.0f;
+            splat.rot_1 = (ir1 >= 0) ? vals[ir1] : 0.0f;
+            splat.rot_2 = (ir2 >= 0) ? vals[ir2] : 0.0f;
+            splat.rot_3 = (ir3 >= 0) ? vals[ir3] : 0.0f;
+
             result.cloud.addSplat(std::move(splat));
         }
     }
-    
+
     return result;
 }
 

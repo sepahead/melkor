@@ -20,7 +20,11 @@ jobs:
           mkdir -p build && cd build
           cmake .. && make -j$(sysctl -n hw.ncpu)
       - name: Test
-        run: ./build/melkor --info
+        run: |
+          # Run the real correctness test suite (SPZ quaternion order, PLY
+          # parsing, PCA normals, SH constant) plus the smoke check.
+          cd build && ctest --output-on-failure
+          ./melkor --info
 
   build-linux:
     runs-on: ubuntu-latest
@@ -35,7 +39,9 @@ jobs:
           mkdir -p build && cd build
           cmake .. && make -j$(nproc)
       - name: Test
-        run: ./build/melkor --info
+        run: |
+          cd build && ctest --output-on-failure
+          ./melkor --info
 
   lint-python:
     runs-on: ubuntu-latest

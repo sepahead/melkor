@@ -408,11 +408,14 @@ public:
         if (!fs::exists(da3_script)) {
             return false;
         }
-        std::string model_flag = "--model " + config_.model_type;
+        // runScript quotes each vector element as a separate argv token, so the
+        // flag and its value MUST be two separate entries. Packing them as a
+        // single "--model foo" string would pass one mangled argv token and the
+        // argparse parser would reject it.
         auto result = python_bridge_.runScript(da3_script, {
             "--input", image_path,
             "--output", output_ply,
-            model_flag
+            "--model", config_.model_type
         });
         return result.success && fs::exists(output_ply);
     }
