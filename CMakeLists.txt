@@ -268,3 +268,14 @@ set_target_properties(test_melkor_core PROPERTIES
     RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}
 )
 add_test(NAME melkor_core_tests COMMAND test_melkor_core)
+
+# Python test for the DA3 model-direct Gaussians extraction path. It stubs
+# torch so it runs anywhere Python3 + numpy are available (no DA3 weights or
+# GPU needed). Validates that the field transforms match ByteDance's exporter
+# and that the DC->rgb->DC round-trip through save_ply does not drift.
+find_package(Python3 COMPONENTS Interpreter QUIET)
+if(Python3_Interpreter_FOUND)
+    add_test(NAME gaussians_from_prediction_tests
+             COMMAND ${Python3_EXECUTABLE}
+                     ${CMAKE_SOURCE_DIR}/tests/test_gaussians_from_prediction.py)
+endif()
