@@ -96,15 +96,23 @@ private:
 
 // Utility functions
 namespace utils {
+    // Spherical-harmonics DC (band-0) constant. The single source of truth for
+    // the 3DGS color convention: rgb = SH_C0 * sh_dc + 0.5, and
+    // sh_dc = (rgb - 0.5) / SH_C0. Defined once here and re-exported by name
+    // from every call site to prevent silent drift across the C++/Metal and
+    // Python layers.
+    //
+    // Value: 1 / (2 * sqrt(pi)) = 0.28209479177387814...
+    constexpr float SH_C0 = 0.28209479177387814f;
+
     // Convert RGB [0,1] to spherical harmonics DC coefficient
     inline float rgbToShDc(float rgb) {
-        // SH DC = (rgb - 0.5) / 0.28209479177387814 (C0 constant)
-        return (rgb - 0.5f) / 0.28209479177387814f;
+        return (rgb - 0.5f) / SH_C0;
     }
-    
+
     // Convert spherical harmonics DC coefficient to RGB [0,1]
     inline float shDcToRgb(float sh_dc) {
-        return sh_dc * 0.28209479177387814f + 0.5f;
+        return sh_dc * SH_C0 + 0.5f;
     }
     
     // Sigmoid function for opacity

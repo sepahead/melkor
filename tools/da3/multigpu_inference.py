@@ -656,9 +656,10 @@ end_header
         print(f"Saved 0 Gaussians to {output_path}")
         return
     
-    # Convert colors to SH DC coefficients
-    C0 = 0.28209479177387814
-    sh_dc = ((colors - 0.5) / C0).astype(np.float32)
+    # Convert colors to SH DC coefficients using the centralized SH_C0 constant
+    # (kept in sync with include/melkor/gaussian_data.hpp).
+    SH_C0 = 0.28209479177387814
+    sh_dc = ((colors - 0.5) / SH_C0).astype(np.float32)
     
     # Convert scales to log space
     scales_log = np.log(np.maximum(scales, 1e-7)).astype(np.float32)
