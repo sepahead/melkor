@@ -104,6 +104,11 @@ class DA3GaussianGenerator:
         self.model_name = self.MODEL_NAME_MAP.get(model_name.lower(), model_name.upper())
         self.model_dir = Path(model_dir)
         self.model = None
+        # Last Prediction returned by inference(); used by
+        # gaussians_from_prediction() to read the model's directly-estimated
+        # Gaussian parameters (means/scales/rotations/SH/opacity) instead of
+        # re-deriving them from depth x ray. Set in predict_depth_rays().
+        self.last_prediction = None
         # When the DA3 model is unavailable, the intensity-based depth fallback
         # is gated behind this explicit opt-in. The fallback output is
         # preview-only and must never flow into a reconstruction pipeline
@@ -199,14 +204,21 @@ class DA3GaussianGenerator:
                         [str(p) for p in image_paths],
                         infer_gs=True,
                     )
+                # Stash the Prediction so callers can use the model's directly
+                # estimated Gaussians (means, scales, rotations, SH, opacity)
+                # instead of re-deriving them from depth x ray. See
+                # gaussians_from_prediction().
+                self.last_prediction = prediction
                 depth_stack = np.asarray(prediction.depth)  # (N, H, W)
                 if depth_stack.ndim == 2:
                     # Single view came back unbatched; reintroduce the view axis.
                     depth_stack = depth_stack[None]
             except Exception as e:
                 print(f"Warning: DA3 multi-view inference failed: {e}")
+                self.last_prediction = None
                 depth_stack = None
         else:
+            self.last_prediction = None
             depth_stack = None
 
         # Per-image fallback only if the model is missing or the batched call
@@ -455,7 +467,63 @@ class DA3GaussianGenerator:
             'rotations': rotations,
             'opacities': opacities
         }
-    
+
+    def gaussians_from_prediction(self) -> Optional[dict]:
+        """Extract the model's directly-estimated Gaussians as a dict.
+
+        When DA3 runs with infer_gs=True, the model emits a full Gaussian
+        Splatting cloud (means, scales, rotations, SH, opacity) in world space.
+        This is strictly higher fidelity than re-deriving geometry from
+        depth x ray (the depth_rays_to_gaussians path), which throws away the
+        model's estimated scales, rotations, SH, and opacity. This method is
+        the preferred source of Gaussians when available.
+
+        Returns None if no Prediction is cached (e.g. the model was unavailable
+        and the depth fallback ran), so callers can fall back to the
+        depth x ray path.
+
+        The field transforms match ByteDance's export_ply() in
+        utils/gsply_helpers.py so the output is byte-compatible with the DA3
+        reference exporter:
+          - means            -> positions (world)
+          - harmonics[...,0] -> DC band; converted to [0,1] rgb here so the
+                                shared save_ply() rgb->SH-DC mapping round-trips
+          - scales           -> scales (already linear; save_ply logs them)
+          - rotations        -> rotations (wxyz, already world space)
+          - opacities        -> opacities (already [0,1]; save_ply logits them)
+        """
+        pred = getattr(self, "last_prediction", None)
+        if pred is None or getattr(pred, "gaussians", None) is None:
+            return None
+        g = pred.gaussians
+        try:
+            means = g.means.detach().cpu().reshape(-1, 3).contiguous().numpy()
+            # harmonics: (b, N, 3, d_sh). DC band is index 0 of the last dim.
+            dc = g.harmonics.detach().cpu()[..., 0].reshape(-1, 3).contiguous().numpy()
+            scales = g.scales.detach().cpu().reshape(-1, 3).contiguous().numpy()
+            # rotations are wxyz per the Gaussians dataclass.
+            rots = g.rotations.detach().cpu().reshape(-1, 4).contiguous().numpy()
+            opac = g.opacities.detach().cpu().reshape(-1).contiguous().numpy()
+        except Exception as e:
+            print(f"Warning: failed to extract prediction.gaussians ({e}); "
+                  "falling back to depth x ray.")
+            return None
+
+        if means.shape[0] == 0:
+            return None
+
+        # DC is already in SH space; invert to [0,1] rgb so save_ply's
+        # rgb->SH-DC conversion round-trips cleanly.
+        rgb = dc * SH_C0 + 0.5
+
+        return {
+            'positions': means.astype(np.float32),
+            'colors': rgb.astype(np.float32),
+            'scales': scales.astype(np.float32),
+            'rotations': rots.astype(np.float32),
+            'opacities': opac.astype(np.float32),
+        }
+
     def fuse_multi_view(
         self,
         gaussians_list: List[dict],
@@ -776,15 +844,28 @@ Examples:
     per_image_time = depth_time / len(images) if len(images) > 0 else 0
     print(f"Depth prediction: {depth_time:.2f}s ({per_image_time:.2f}s per image)")
     
-    # Convert to Gaussians
+    # Convert to Gaussians. Prefer the model's directly-estimated cloud
+    # (means/scales/rotations/SH/opacity in world space) when infer_gs ran
+    # successfully; this is strictly higher fidelity than re-deriving geometry
+    # from depth x ray. Fall back to the depth path only when the direct
+    # Gaussians are unavailable (model absent, or infer_gs didn't populate).
     start_time = time.time()
-    gaussians = generator.depth_rays_to_gaussians(
-        depths, rays, colors,
-        scale_factor=args.scale,
-        min_depth=args.min_depth,
-        max_depth=args.max_depth,
-        subsample=args.subsample
-    )
+    gaussians = generator.gaussians_from_prediction()
+    if gaussians is not None:
+        print("Using model-direct Gaussians (infer_gs branch).")
+        # Honor --subsample on the direct path too, so users can bound point
+        # count for huge scenes. Take a uniform strided sample.
+        if args.subsample > 1 and len(gaussians['positions']) > 0:
+            sel = slice(None, None, args.subsample)
+            gaussians = {k: v[sel] for k, v in gaussians.items()}
+    else:
+        gaussians = generator.depth_rays_to_gaussians(
+            depths, rays, colors,
+            scale_factor=args.scale,
+            min_depth=args.min_depth,
+            max_depth=args.max_depth,
+            subsample=args.subsample
+        )
     convert_time = time.time() - start_time
     print(f"Gaussian conversion: {convert_time:.2f}s")
     print(f"Generated {len(gaussians['positions'])} Gaussians")
