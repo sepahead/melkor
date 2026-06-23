@@ -263,7 +263,13 @@ PlyReader::ReadResult PlyReader::readFromBuffer(const uint8_t* data, size_t size
     }
 
     if (vertex_count == 0) {
-        return {false, "Invalid PLY: no vertices found", {}};
+        // An empty cloud is a valid PLY (the writer emits one for empty input,
+        // and DA3 save_ply can produce one when all samples are filtered out).
+        // Return success with an empty cloud rather than treating it as an
+        // error, so round-trips and downstream consumers don't break on the
+        // degenerate-but-legal case.
+        result.success = true;
+        return result;
     }
     if (vertex_props.empty()) {
         return {false, "Invalid PLY: no vertex properties found", {}};
