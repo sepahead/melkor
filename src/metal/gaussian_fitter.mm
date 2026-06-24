@@ -177,16 +177,374 @@ DifferentiableRenderer::DifferentiableRenderer(metal::MetalContext& ctx)
 DifferentiableRenderer::~DifferentiableRenderer() = default;
 
 // ============================================================================
+// EWA (Elliptical Weighted Average) splatting helpers.
+//
+// These port the gsplat/gsplat-metal EWA projection and its VJPs to plain C++.
+// All 3x3 matrices are row-major: M[r*3+c] = element at (row r, col c).
+// Reference: gsplat mathematical supplement (arXiv:2312.02121) and the
+// gsplat_metal.metal kernels in tools/OpenSplat/rasterizer/gsplat-metal/.
+// ============================================================================
+
+struct Mat3 {
+    float m[9];
+    float& operator()(int r, int c) { return m[r * 3 + c]; }
+    float operator()(int r, int c) const { return m[r * 3 + c]; }
+};
+
+static Mat3 mat3_identity() { return {{1,0,0, 0,1,0, 0,0,1}}; }
+
+static Mat3 mat3_mul(const Mat3& A, const Mat3& B) {
+    Mat3 C;
+    for (int r = 0; r < 3; ++r)
+        for (int c = 0; c < 3; ++c) {
+            float s = 0;
+            for (int k = 0; k < 3; ++k) s += A(r, k) * B(k, c);
+            C(r, c) = s;
+        }
+    return C;
+}
+
+static Mat3 mat3_transpose(const Mat3& A) {
+    Mat3 T;
+    for (int r = 0; r < 3; ++r)
+        for (int c = 0; c < 3; ++c) T(r, c) = A(c, r);
+    return T;
+}
+
+// Quaternion (w, x, y, z) to 3x3 rotation matrix (row-major).
+// PackedGaussian.rotation stores (w, x, y, z) as rotation[0..3].
+static Mat3 quat_to_rotmat(float w, float x, float y, float z) {
+    float len = std::sqrt(w*w + x*x + y*y + z*z);
+    if (len > 0.0f) { float inv = 1.0f / len; w *= inv; x *= inv; y *= inv; z *= inv; }
+    else { w = 1.0f; x = y = z = 0.0f; }
+    Mat3 R;
+    R(0,0) = 1 - 2*(y*y + z*z); R(0,1) = 2*(x*y - w*z);     R(0,2) = 2*(x*z + w*y);
+    R(1,0) = 2*(x*y + w*z);     R(1,1) = 1 - 2*(x*x + z*z); R(1,2) = 2*(y*z - w*x);
+    R(2,0) = 2*(x*z - w*y);     R(2,1) = 2*(y*z + w*x);     R(2,2) = 1 - 2*(x*x + y*y);
+    return R;
+}
+
+// Compute 3D covariance (upper triangular, 6 elements) from scale and quaternion.
+// cov3d = R * S * S^T * R^T = M * M^T where M = R * S.
+// Output: cov3d[0..5] = (xx, xy, xz, yy, yz, zz).
+static void scale_rot_to_cov3d(float sx, float sy, float sz,
+                               float qw, float qx, float qy, float qz,
+                               float cov3d[6]) {
+    Mat3 R = quat_to_rotmat(qw, qx, qy, qz);
+    Mat3 S = mat3_identity();
+    S(0,0) = sx; S(1,1) = sy; S(2,2) = sz;
+    Mat3 M = mat3_mul(R, S);
+    Mat3 cov = mat3_mul(M, mat3_transpose(M));
+    cov3d[0] = cov(0,0); cov3d[1] = cov(0,1); cov3d[2] = cov(0,2);
+    cov3d[3] = cov(1,1); cov3d[4] = cov(1,2); cov3d[5] = cov(2,2);
+}
+
+// Project 3D covariance to 2D via EWA approximation.
+// Returns cov2d upper triangular (xx, xy, yy) and view-space position t[3].
+// view_matrix is row-major 4x4. focal_x, focal_y are pixel-space focal lengths.
+static void project_cov3d_ewa(const float mean3d[3],
+                              const float cov3d[6],
+                              const float* view_matrix, // row-major 4x4
+                              float focal_x, float focal_y,
+                              float tan_fovx, float tan_fovy,
+                              float t_out[3],
+                              float cov2d_out[3]) {
+    // Extract view rotation (upper-left 3x3 of view_matrix, row-major).
+    Mat3 W;
+    for (int r = 0; r < 3; ++r)
+        for (int c = 0; c < 3; ++c)
+            W(r, c) = view_matrix[r * 4 + c];
+    float p[3] = {view_matrix[3], view_matrix[7], view_matrix[11]};
+
+    // View-space position: t = W * mean3d + p
+    float t[3];
+    for (int r = 0; r < 3; ++r) {
+        t[r] = p[r];
+        for (int c = 0; c < 3; ++c) t[r] += W(r, c) * mean3d[c];
+    }
+
+    // Clamp to FOV limits (prevents extreme covariances at edges).
+    float lim_x = 1.3f * tan_fovx;
+    float lim_y = 1.3f * tan_fovy;
+    float txz = t[0] / t[2];
+    float tyz = t[1] / t[2];
+    t[0] = std::min(lim_x, std::max(-lim_x, txz)) * t[2];
+    t[1] = std::min(lim_y, std::max(-lim_y, tyz)) * t[2];
+
+    float rz = 1.0f / t[2];
+    float rz2 = rz * rz;
+
+    // Jacobian of perspective projection (row-major).
+    Mat3 J = mat3_identity();
+    J(0,0) = focal_x * rz;  J(0,1) = 0;            J(0,2) = -focal_x * t[0] * rz2;
+    J(1,0) = 0;             J(1,1) = focal_y * rz; J(1,2) = -focal_y * t[1] * rz2;
+    J(2,0) = 0;             J(2,1) = 0;            J(2,2) = 0;
+
+    // T = J * W
+    Mat3 T = mat3_mul(J, W);
+
+    // Reconstruct full 3x3 cov3d from upper triangular.
+    Mat3 V;
+    V(0,0) = cov3d[0]; V(0,1) = cov3d[1]; V(0,2) = cov3d[2];
+    V(1,0) = cov3d[1]; V(1,1) = cov3d[3]; V(1,2) = cov3d[4];
+    V(2,0) = cov3d[2]; V(1,2) = cov3d[4]; V(2,2) = cov3d[5];
+    V(2,1) = cov3d[4];
+
+    // cov2d = T * V * T^T
+    Mat3 cov = mat3_mul(mat3_mul(T, V), mat3_transpose(T));
+
+    // Add 0.3 blur for anti-aliasing (matches gsplat).
+    cov2d_out[0] = cov(0,0) + 0.3f;
+    cov2d_out[1] = cov(0,1);
+    cov2d_out[2] = cov(1,1) + 0.3f;
+
+    t_out[0] = t[0]; t_out[1] = t[1]; t_out[2] = t[2];
+}
+
+// Compute conic (inverse 2D covariance) and bounding radius from cov2d.
+// Returns false if covariance is degenerate (zero determinant).
+static bool compute_cov2d_bounds(const float cov2d[3],
+                                 float conic[3], float& radius) {
+    float det = cov2d[0] * cov2d[2] - cov2d[1] * cov2d[1];
+    if (det == 0.0f) return false;
+    float inv_det = 1.0f / det;
+    // Inverse of 2x2 symmetric matrix [[a,b],[b,c]] = [[c,-b],[-b,a]]/det.
+    conic[0] = cov2d[2] * inv_det;
+    conic[1] = -cov2d[1] * inv_det;
+    conic[2] = cov2d[0] * inv_det;
+
+    // Radius from eigenvalues: 3-sigma extent.
+    float mid = 0.5f * (cov2d[0] + cov2d[2]);
+    float disc = std::sqrt(std::max(0.1f, mid * mid - det));
+    float lambda1 = mid + disc;
+    float lambda2 = mid - disc;
+    radius = std::ceil(3.0f * std::sqrt(std::max(lambda1, lambda2)));
+    return true;
+}
+
+// ============================================================================
+// VJP (vector-Jacobian product) functions for the backward pass.
+// ============================================================================
+
+// VJP of screen-space projection: dL/dmean3d from dL/dscreen_xy.
+// projmat is row-major 4x4. screen = ndc2pix(projmat * pos / w).
+static void project_pix_vjp(const float* projmat, const float p[3],
+                            int img_w, int img_h,
+                            float v_screen_x, float v_screen_y,
+                            float v_mean3d[3]) {
+    float p_hom[4];
+    for (int i = 0; i < 4; ++i) {
+        p_hom[i] = projmat[i*4+0]*p[0] + projmat[i*4+1]*p[1] + projmat[i*4+2]*p[2] + projmat[i*4+3];
+    }
+    float rw = 1.0f / (p_hom[3] + 1e-6f);
+
+    // Chain: screen → ndc → p_hom → world.
+    // screen = 0.5 * img_size * (ndc + 1), so d(ndc)/d(screen) = 2/img_size,
+    // and v_ndc = v_screen * d(screen)/d(ndc) = v_screen * 0.5 * img_size.
+    float v_ndc_x = 0.5f * img_w * v_screen_x;
+    float v_ndc_y = 0.5f * img_h * v_screen_y;
+    // ndc = p_hom.xy / p_hom.w. The w-gradient must include p_hom.xy factors:
+    // v_proj.w = -(v_ndc.x * p_hom.x + v_ndc.y * p_hom.y) * rw².
+    float v_proj[4] = {
+        v_ndc_x * rw, v_ndc_y * rw, 0.0f,
+        -(v_ndc_x * p_hom[0] + v_ndc_y * p_hom[1]) * rw * rw
+    };
+
+    // d(world)/d(proj) = projmat^T (upper 3 rows, 3 cols).
+    v_mean3d[0] = projmat[0]*v_proj[0] + projmat[4]*v_proj[1] + projmat[8]*v_proj[2] + projmat[12]*v_proj[3];
+    v_mean3d[1] = projmat[1]*v_proj[0] + projmat[5]*v_proj[1] + projmat[9]*v_proj[2] + projmat[13]*v_proj[3];
+    v_mean3d[2] = projmat[2]*v_proj[0] + projmat[6]*v_proj[1] + projmat[10]*v_proj[2] + projmat[14]*v_proj[3];
+}
+
+// VJP of conic = inverse(cov2d): dL/dcov2d from dL/dconic.
+// For conic = inv(Sigma), dL/dSigma = -conic * dL/dconic * conic (2x2).
+static void cov2d_to_conic_vjp(const float conic[3], const float v_conic[3],
+                                float v_cov2d[3]) {
+    // 2x2 symmetric matrices: conic = [[c0, c1], [c1, c2]], v_conic = [[v0, v1], [v1, v2]]
+    // v_Sigma = -X * G * X where X = conic, G = v_conic.
+    float a = -(conic[0]*v_conic[0]*conic[0] + conic[0]*v_conic[1]*conic[1] + conic[1]*v_conic[0]*conic[1] + conic[1]*v_conic[1]*conic[2]);
+    float b = -(conic[0]*v_conic[0]*conic[1] + conic[0]*v_conic[1]*conic[2] + conic[1]*v_conic[0]*conic[2] + conic[1]*v_conic[1]*conic[2]);
+    // Actually let me just do the 2x2 matrix multiply properly.
+    // X = [[conic[0], conic[1]], [conic[1], conic[2]]]
+    // G = [[v_conic[0], v_conic[1]], [v_conic[1], v_conic[2]]]
+    // XG = [[c0*v0+c1*v1, c0*v1+c1*v2], [c1*v0+c2*v1, c1*v1+c2*v2]]
+    // XGX = [[(XG00)*c0+(XG01)*c1, (XG00)*c1+(XG01)*c2], [(XG10)*c0+(XG11)*c1, (XG10)*c1+(XG11)*c2]]
+    float xg00 = conic[0]*v_conic[0] + conic[1]*v_conic[1];
+    float xg01 = conic[0]*v_conic[1] + conic[1]*v_conic[2];
+    float xg10 = conic[1]*v_conic[0] + conic[2]*v_conic[1];
+    float xg11 = conic[1]*v_conic[1] + conic[2]*v_conic[2];
+    v_cov2d[0] = -(xg00 * conic[0] + xg01 * conic[1]);
+    v_cov2d[1] = -(xg00 * conic[1] + xg01 * conic[2] + xg10 * conic[0] + xg11 * conic[1]);
+    v_cov2d[2] = -(xg10 * conic[1] + xg11 * conic[2]);
+}
+
+// VJP of EWA projection: dL/dcov3d and dL/dmean3d from dL/dcov2d.
+// cov2d = T * V * T^T where T = J * W, V = cov3d (symmetric).
+static void project_cov3d_ewa_vjp(const float mean3d[3],
+                                  const float cov3d[6],
+                                  const float* view_matrix,
+                                  float focal_x, float focal_y,
+                                  float tan_fovx, float tan_fovy,
+                                  const float v_cov2d[3],
+                                  float v_mean3d[3],
+                                  float v_cov3d[6]) {
+    // Reconstruct T = J * W (same as forward).
+    Mat3 W;
+    for (int r = 0; r < 3; ++r)
+        for (int c = 0; c < 3; ++c)
+            W(r, c) = view_matrix[r * 4 + c];
+    float p[3] = {view_matrix[3], view_matrix[7], view_matrix[11]};
+    float t[3];
+    for (int r = 0; r < 3; ++r) {
+        t[r] = p[r];
+        for (int c = 0; c < 3; ++c) t[r] += W(r, c) * mean3d[c];
+    }
+    float lim_x = 1.3f * tan_fovx;
+    float lim_y = 1.3f * tan_fovy;
+    t[0] = std::min(lim_x, std::max(-lim_x, t[0] / t[2])) * t[2];
+    t[1] = std::min(lim_y, std::max(-lim_y, t[1] / t[2])) * t[2];
+    float rz = 1.0f / t[2];
+    float rz2 = rz * rz;
+
+    Mat3 J = mat3_identity();
+    J(0,0) = focal_x * rz;  J(0,2) = -focal_x * t[0] * rz2;
+    J(1,1) = focal_y * rz;  J(1,2) = -focal_y * t[1] * rz2;
+    J(2,2) = 0;
+
+    Mat3 T = mat3_mul(J, W);
+    Mat3 Tt = mat3_transpose(T);
+
+    Mat3 V;
+    V(0,0) = cov3d[0]; V(0,1) = cov3d[1]; V(0,2) = cov3d[2];
+    V(1,0) = cov3d[1]; V(1,1) = cov3d[3]; V(1,2) = cov3d[4];
+    V(2,0) = cov3d[2]; V(2,1) = cov3d[4]; V(2,2) = cov3d[5];
+    Mat3 Vt = mat3_transpose(V);
+
+    // v_cov (3x3, symmetric) from v_cov2d (upper triangular).
+    Mat3 v_cov;
+    v_cov(0,0) = v_cov2d[0]; v_cov(0,1) = 0.5f * v_cov2d[1]; v_cov(0,2) = 0;
+    v_cov(1,0) = 0.5f * v_cov2d[1]; v_cov(1,1) = v_cov2d[2]; v_cov(1,2) = 0;
+    v_cov(2,0) = 0; v_cov(2,1) = 0; v_cov(2,2) = 0;
+
+    // d/dV = T^T * v_cov * T
+    Mat3 v_V = mat3_mul(mat3_mul(Tt, v_cov), T);
+
+    // d/dT = v_cov * T * V^T + v_cov^T * T * V
+    Mat3 v_T = mat3_mul(mat3_mul(v_cov, T), Vt);
+    Mat3 v_T2 = mat3_mul(mat3_mul(mat3_transpose(v_cov), T), V);
+    for (int i = 0; i < 9; ++i) v_T.m[i] += v_T2.m[i];
+
+    // v_cov3d from v_V (extract upper triangular, off-diagonals sum).
+    v_cov3d[0] = v_V(0,0);
+    v_cov3d[1] = v_V(0,1) + v_V(1,0);
+    v_cov3d[2] = v_V(0,2) + v_V(2,0);
+    v_cov3d[3] = v_V(1,1);
+    v_cov3d[4] = v_V(1,2) + v_V(2,1);
+    v_cov3d[5] = v_V(2,2);
+
+    // v_mean3d from v_T through J and W.
+    // v_J = v_T * W^T
+    Mat3 Wt = mat3_transpose(W);
+    Mat3 v_J = mat3_mul(v_T, Wt);
+
+    // v_t from v_J (J depends on t).
+    // Metal column-major: v_J[col][row] = our v_J(row, col).
+    // gsplat: v_t[0] = -fx*rz2*v_J[2][0] = -fx*rz2*v_J(0,2) in row-major.
+    float rz3 = rz2 * rz;
+    float v_t[3];
+    v_t[0] = -focal_x * rz2 * v_J(0, 2);
+    v_t[1] = -focal_y * rz2 * v_J(1, 2);
+    v_t[2] = -focal_x * rz2 * v_J(0, 0) + 2.0f * focal_x * t[0] * rz3 * v_J(0, 2)
+            - focal_y * rz2 * v_J(1, 1) + 2.0f * focal_y * t[1] * rz3 * v_J(1, 2);
+
+    // v_mean3d = W^T * v_t
+    for (int c = 0; c < 3; ++c) {
+        v_mean3d[c] = 0;
+        for (int r = 0; r < 3; ++r) v_mean3d[c] += W(r, c) * v_t[r];
+    }
+}
+
+// VJP of quaternion to rotation matrix: dL/dquat from dL/dR.
+// quat = (w, x, y, z). R is row-major 3x3.
+// Ported from gsplat_metal.metal quat_to_rotmat_vjp, converting column-major
+// Metal indexing (v_R[col][row]) to row-major (v_R(row, col)).
+// Includes the normalization chain: the forward normalizes quat before
+// computing R, so the gradient w.r.t. the original (unnormalized) quat
+// requires projecting onto the tangent plane: v_quat -= (q·v_quat) * q / |q|².
+static void quat_to_rotmat_vjp(float qw, float qx, float qy, float qz,
+                               const Mat3& v_R,
+                               float v_quat[4]) {
+    float qlen_sq = qw*qw + qx*qx + qy*qy + qz*qz;
+    float len = std::sqrt(qlen_sq);
+    float nw = qw, nx = qx, ny = qy, nz = qz;
+    if (len > 0.0f) { float inv = 1.0f / len; nw *= inv; nx *= inv; ny *= inv; nz *= inv; }
+    else { nw = 1.0f; nx = ny = nz = 0.0f; }
+
+    // In gsplat-metal, v_R is column-major: v_R[col][row].
+    // In our row-major: v_R(row, col). So gsplat's v_R[c][r] = our v_R(r, c).
+    // The antisymmetric terms (differences) swap sign under transpose.
+    v_quat[0] = 2.0f * (nx*(v_R(2,1) - v_R(1,2)) + ny*(v_R(0,2) - v_R(2,0)) + nz*(v_R(1,0) - v_R(0,1)));
+    v_quat[1] = 2.0f * (-2.0f*nx*(v_R(1,1) + v_R(2,2)) + ny*(v_R(0,1) + v_R(1,0)) + nz*(v_R(0,2) + v_R(2,0)) + nw*(v_R(2,1) - v_R(1,2)));
+    v_quat[2] = 2.0f * (nx*(v_R(0,1) + v_R(1,0)) - 2.0f*ny*(v_R(0,0) + v_R(2,2)) + nz*(v_R(1,2) + v_R(2,1)) + nw*(v_R(0,2) - v_R(2,0)));
+    v_quat[3] = 2.0f * (nx*(v_R(0,2) + v_R(2,0)) + ny*(v_R(1,2) + v_R(2,1)) - 2.0f*nz*(v_R(0,0) + v_R(1,1)) + nw*(v_R(1,0) - v_R(0,1)));
+
+    // Chain through normalization: q_norm = q / |q|.
+    // dL/dq = (I - q*q^T / |q|²) * dL/dq_norm
+    //       = v_quat - (q · v_quat) / |q|² * q
+    float dot = qw*v_quat[0] + qx*v_quat[1] + qy*v_quat[2] + qz*v_quat[3];
+    float scale = dot / qlen_sq;
+    v_quat[0] -= scale * qw;
+    v_quat[1] -= scale * qx;
+    v_quat[2] -= scale * qy;
+    v_quat[3] -= scale * qz;
+}
+
+// VJP of 3D covariance: dL/dscale and dL/dquat from dL/dcov3d.
+// cov3d = M * M^T where M = R * S.
+static void scale_rot_to_cov3d_vjp(float sx, float sy, float sz,
+                                   float qw, float qx, float qy, float qz,
+                                   const float v_cov3d[6],
+                                   float v_scale[3], float v_quat[4]) {
+    // Reconstruct symmetric v_V from upper triangular v_cov3d.
+    Mat3 v_V;
+    v_V(0,0) = v_cov3d[0]; v_V(0,1) = 0.5f*v_cov3d[1]; v_V(0,2) = 0.5f*v_cov3d[2];
+    v_V(1,0) = 0.5f*v_cov3d[1]; v_V(1,1) = v_cov3d[3]; v_V(1,2) = 0.5f*v_cov3d[4];
+    v_V(2,0) = 0.5f*v_cov3d[2]; v_V(2,1) = 0.5f*v_cov3d[4]; v_V(2,2) = v_cov3d[5];
+
+    Mat3 R = quat_to_rotmat(qw, qx, qy, qz);
+    Mat3 S = mat3_identity();
+    S(0,0) = sx; S(1,1) = sy; S(2,2) = sz;
+    Mat3 M = mat3_mul(R, S);
+
+    // v_M = 2 * v_V * M (for Sigma = M * M^T).
+    Mat3 v_M = mat3_mul(v_V, M);
+    for (int i = 0; i < 9; ++i) v_M.m[i] *= 2.0f;
+
+    // v_scale = diag(R^T * v_M)
+    v_scale[0] = R(0,0)*v_M(0,0) + R(1,0)*v_M(1,0) + R(2,0)*v_M(2,0);
+    v_scale[1] = R(0,1)*v_M(0,1) + R(1,1)*v_M(1,1) + R(2,1)*v_M(2,1);
+    v_scale[2] = R(0,2)*v_M(0,2) + R(1,2)*v_M(1,2) + R(2,2)*v_M(2,2);
+
+    // v_R = v_M * S^T = v_M * S (S is diagonal).
+    Mat3 v_R = mat3_mul(v_M, S);
+
+    // v_quat from v_R.
+    quat_to_rotmat_vjp(qw, qx, qy, qz, v_R, v_quat);
+}
+
+// ============================================================================
 // Render state for the differentiable backward pass.
 //
 // Alpha-blended Gaussian splatting composites gaussians front-to-back as:
 //     C  += color * alpha * T
 //     T'  = T * (1 - alpha)          (accumulated transmittance)
-// where alpha = opacity * exp(-0.5 * d^2 / r^2). To backpropagate dL/d(gaussian
+// where alpha = opacity * exp(-sigma) and sigma is the Mahalanobis distance
+// using the conic (inverse 2D covariance). To backpropagate dL/d(gaussian
 // params) we need, for each pixel, the per-gaussian (alpha, T_at_composite,
-// color) used during the forward. We also cache the screen-space center and
-// radius so position/scale gradients can be reconstructed without recomputing
-// the projection. This is the standard 3DGS backward state in compact form.
+// color, opacity, gauss_weight, pixel offset) used during the forward. We also
+// cache per-gaussian projection data (conic, cov3d, view-space position) so
+// position/scale/rotation gradients can be reconstructed without recomputing
+// the EWA projection.
 //
 // NOTE: gaussians are composited in INPUT order (not depth-sorted). For the
 // mesh-fitting use case the source geometry is roughly convex so this is an
@@ -198,10 +556,10 @@ struct PixelContribution {
     float alpha;       // alpha contribution of this gaussian at this pixel
     float T_at_comp;   // accumulated transmittance just before this gaussian
     float color[3];    // rendered color (post-SH, pre-clamp) of this gaussian
-    float opacity;     // sigmoid(logit) of the gaussian (stored to reconstruct
-                       // the opacity-logit gradient without the source gaussian)
-    float gauss_weight;// alpha / opacity: the spatial falloff, needed for the
-                       // d(alpha)/d(logit) = sigmoid' * weight chain rule
+    float opacity;     // sigmoid(logit) of the gaussian
+    float gauss_weight;// exp(-sigma): the spatial falloff
+    float delta_x;     // screen_x - pixel_x (for conic/xy gradients)
+    float delta_y;     // screen_y - pixel_y
 };
 
 struct RenderState {
@@ -213,11 +571,24 @@ struct RenderState {
     struct Proj {
         float screen_x = 0;
         float screen_y = 0;
-        float clip_w = 0;        // clip[3], for position gradient scaling
-        float radius = 0;        // pixel radius (pre-exp scale)
+        float conic[3] = {0, 0, 0};    // inverse 2D covariance (xx, xy, yy)
+        float cov3d[6] = {0, 0, 0, 0, 0, 0}; // 3D covariance upper triangular
+        float t_view[3] = {0, 0, 0};   // view-space position (for EWA backward)
+        float mean3d[3] = {0, 0, 0};   // world-space position (for projection VJP)
+        float scale[3] = {0, 0, 0};    // exp(scale_log) — actual scale values
+        float quat[4] = {0, 0, 0, 0};  // quaternion (w, x, y, z)
+        float radius = 0;
         bool visible = false;
     };
     std::vector<Proj> projections;
+    // Camera data for the backward pass (position/scale/rotation VJPs).
+    bool has_camera = false;
+    float focal_x = 0;
+    float focal_y = 0;
+    float tan_fovx = 0;
+    float tan_fovy = 0;
+    float view_matrix[16] = {0};
+    float view_proj_matrix[16] = {0};
 };
 
 // ForwardResult owns the RenderState via void*. These special members are
@@ -267,30 +638,50 @@ DifferentiableRenderer::ForwardResult DifferentiableRenderer::forward(
     result.image.resize(num_pixels * 3);
     result.alpha.assign(num_pixels, 0.0f);
 
-    // Render state for the backward pass. Allocated unconditionally so backward
-    // can rely on its structure even if the caller didn't composite anything.
     auto* state = new RenderState();
     state->width = camera.width;
     state->height = camera.height;
     state->pixels.resize(num_pixels);
     state->projections.resize(num_gaussians);
+    // Store camera data for the backward pass (position/scale/rotation VJPs).
+    state->has_camera = true;
+    state->focal_x = camera.width / (2.0f * std::tan(
+        (2.0f * std::atan(std::tan(camera.fov_y * 0.5f) * camera.aspect)) * 0.5f));
+    state->focal_y = camera.height / (2.0f * std::tan(camera.fov_y * 0.5f));
+    state->tan_fovx = 0.5f * camera.width / state->focal_x;
+    state->tan_fovy = 0.5f * camera.height / state->focal_y;
+    memcpy(state->view_matrix, camera.view_matrix, sizeof(float) * 16);
+    memcpy(state->view_proj_matrix, camera.view_proj_matrix, sizeof(float) * 16);
 
-    // Initialize image with background.
     for (size_t i = 0; i < num_pixels; ++i) {
         result.image[i * 3 + 0] = background[0];
         result.image[i * 3 + 1] = background[1];
         result.image[i * 3 + 2] = background[2];
     }
 
-    // Focal length depends only on camera params — hoist out of the per-Gaussian loop.
-    float focal_x = camera.width / (2.0f * std::tan(
-        (2.0f * std::atan(std::tan(camera.fov_y * 0.5f) * camera.aspect)) * 0.5f));
+    // Focal lengths and FOV tangents (hoisted out of the per-Gaussian loop).
+    float focal_x = state->focal_x;
+    float focal_y = state->focal_y;
+    float tan_fovx = 0.5f * camera.width / focal_x;
+    float tan_fovy = 0.5f * camera.height / focal_y;
 
     for (size_t g_idx = 0; g_idx < num_gaussians; ++g_idx) {
         const auto& g = gaussians[g_idx];
         auto& proj = state->projections[g_idx];
 
-        // Transform position.
+        // Store world-space position and scale/quat for the backward pass.
+        proj.mean3d[0] = g.position[0];
+        proj.mean3d[1] = g.position[1];
+        proj.mean3d[2] = g.position[2];
+        proj.scale[0] = std::exp(g.scale[0]);
+        proj.scale[1] = std::exp(g.scale[1]);
+        proj.scale[2] = std::exp(g.scale[2]);
+        proj.quat[0] = g.rotation[0]; // w
+        proj.quat[1] = g.rotation[1]; // x
+        proj.quat[2] = g.rotation[2]; // y
+        proj.quat[3] = g.rotation[3]; // z
+
+        // Transform position to clip space.
         float pos[4] = {g.position[0], g.position[1], g.position[2], 1.0f};
         float clip[4] = {0};
         for (int i = 0; i < 4; ++i) {
@@ -303,9 +694,34 @@ DifferentiableRenderer::ForwardResult DifferentiableRenderer::forward(
             proj.visible = false;
             continue;
         }
-        proj.visible = true;
-        proj.clip_w = clip[3];
 
+        // Compute 3D covariance from scale and quaternion.
+        float cov3d[6];
+        scale_rot_to_cov3d(proj.scale[0], proj.scale[1], proj.scale[2],
+                           proj.quat[0], proj.quat[1], proj.quat[2], proj.quat[3],
+                           cov3d);
+        memcpy(proj.cov3d, cov3d, sizeof(float) * 6);
+
+        // Project 3D covariance to 2D via EWA.
+        float t_view[3];
+        float cov2d[3];
+        project_cov3d_ewa(proj.mean3d, cov3d, camera.view_matrix,
+                          focal_x, focal_y, tan_fovx, tan_fovy,
+                          t_view, cov2d);
+        memcpy(proj.t_view, t_view, sizeof(float) * 3);
+
+        // Compute conic (inverse 2D covariance) and bounding radius.
+        float conic[3];
+        float radius;
+        if (!compute_cov2d_bounds(cov2d, conic, radius)) {
+            proj.visible = false;
+            continue;
+        }
+        memcpy(proj.conic, conic, sizeof(float) * 3);
+        proj.radius = radius;
+        proj.visible = true;
+
+        // Project center to screen space.
         float ndc_x = clip[0] / clip[3];
         float ndc_y = clip[1] / clip[3];
         float screen_x = (ndc_x * 0.5f + 0.5f) * camera.width;
@@ -313,14 +729,7 @@ DifferentiableRenderer::ForwardResult DifferentiableRenderer::forward(
         proj.screen_x = screen_x;
         proj.screen_y = screen_y;
 
-        // Isotropic scale from scale[0] (log space).
-        float scale = std::exp(g.scale[0]);
-        float radius = std::max(1.0f, scale * focal_x / clip[3] * 3.0f);
-        proj.radius = radius;
-
-        // Color from SH-DC. NOTE: no clamp here -- clamping has zero gradient
-        // outside [0,1] and would silently kill the backward pass. Colors may
-        // go out of gamut during fitting and self-correct via the L1 loss.
+        // Color from SH-DC (no clamp — clamping kills gradients outside [0,1]).
         float color_r = g.color[0] * SH_C0 + 0.5f;
         float color_g = g.color[1] * SH_C0 + 0.5f;
         float color_b = g.color[2] * SH_C0 + 0.5f;
@@ -333,19 +742,17 @@ DifferentiableRenderer::ForwardResult DifferentiableRenderer::forward(
         int min_y = std::max(0, static_cast<int>(screen_y - radius));
         int max_y = std::min(camera.height - 1, static_cast<int>(screen_y + radius));
 
-        float radius_sq = radius * radius + 1e-6f;
-        float inv_radius_sq = 1.0f / radius_sq;
-
         for (int py = min_y; py <= max_y; ++py) {
             for (int px = min_x; px <= max_x; ++px) {
-                float dx = px + 0.5f - screen_x;
-                float dy = py + 0.5f - screen_y;
-                float dist_sq = dx * dx + dy * dy;
+                // delta = center - pixel (gsplat convention).
+                float dx = screen_x - (px + 0.5f);
+                float dy = screen_y - (py + 0.5f);
 
-                float gaussian_weight = std::exp(-0.5f * dist_sq * inv_radius_sq);
-                // No clamp on alpha either: min(0.99, ...) is non-differentiable
-                // at the boundary. The sigmoid-bounded opacity already keeps
-                // alpha < 1, and very small contributions are pruned below.
+                // Mahalanobis distance: sigma = 0.5 * d^T * conic * d.
+                float sigma = 0.5f * (conic[0] * dx * dx + 2.0f * conic[1] * dx * dy + conic[2] * dy * dy);
+                if (sigma < 0.0f) continue;
+
+                float gaussian_weight = std::exp(-sigma);
                 float alpha = opacity * gaussian_weight;
 
                 if (alpha < 1.0f / 255.0f) continue;
@@ -353,12 +760,10 @@ DifferentiableRenderer::ForwardResult DifferentiableRenderer::forward(
                 size_t pixel_idx = static_cast<size_t>(py) * camera.width + px;
                 float T = 1.0f - result.alpha[pixel_idx];
 
-                // Record contribution for the backward pass BEFORE compositing,
-                // so T_at_comp is the transmittance seen by this gaussian.
                 state->pixels[pixel_idx].push_back({
                     static_cast<uint32_t>(g_idx), alpha, T,
                     {color_r, color_g, color_b},
-                    opacity, gaussian_weight});
+                    opacity, gaussian_weight, dx, dy});
 
                 result.image[pixel_idx * 3 + 0] += color_r * alpha * T;
                 result.image[pixel_idx * 3 + 1] += color_g * alpha * T;
@@ -368,7 +773,6 @@ DifferentiableRenderer::ForwardResult DifferentiableRenderer::forward(
         }
     }
 
-    // Hand ownership of the state to the ForwardResult. backward() will delete it.
     result.internal_state = state;
     return result;
 }
@@ -380,55 +784,36 @@ DifferentiableRenderer::BackwardResult DifferentiableRenderer::backward(
     BackwardResult result;
     auto* state = static_cast<RenderState*>(forward_result.internal_state);
     if (state == nullptr) {
-        // No forward state (e.g. empty cloud) -> no gradients.
         return result;
     }
 
     const int W = state->width;
     const int H = state->height;
     const size_t num_pixels = static_cast<size_t>(W) * H;
-
-    // We need grad wrt each gaussian's rendered color, opacity, screen position,
-    // and scale. Accumulate from every pixel that the gaussian touched.
-    // Because we don't know N here from the state alone, infer it from the
-    // projection cache size.
     const size_t N = state->projections.size();
+
     result.grad_positions.assign(N * 3, 0.0f);
     result.grad_scales.assign(N * 3, 0.0f);
     result.grad_rotations.assign(N * 4, 0.0f);
     result.grad_colors.assign(N * 3, 0.0f);
     result.grad_opacities.assign(N, 0.0f);
 
-    // Per-pixel running gradient that flows back through the transmittance
-    // chain. In the composite C += color * alpha * T with T = prod(1-alpha) of
-    // earlier gaussians, changing a gaussian's alpha affects every LATER
-    // gaussian's T (and hence its color contribution). Iterating the composite
-    // in REVERSE order, `accum` tracks dL/d(T_next) -- the gradient w.r.t. the
-    // transmittance at the composite point of the next-later gaussian (already
-    // processed). For the last-composited gaussian there is no later gaussian,
-    // so accum starts at 0.
-    //
-    // Standard 3DGS alpha-blend backward, per pixel, per gaussian i (T_i =
-    // transmittance when i composited, recorded during forward; g = dL/dC):
-    //   dL/dcolor_i = alpha_i * T_i * g            (direct; no chain needed)
-    //   dL/dalpha_i = T_i * (color_i . g - accum)  (direct + transmittance chain)
-    //   accum       = accum * (1 - alpha_i) + (color_i . g) * alpha_i
-    // Derivation: dL/d(T_{i+1}) = accum, and T_{i+1} = T_i*(1-alpha_i), so
-    // d(T_{i+1})/d(alpha_i) = -T_i, giving the indirect term -accum*T_i; the
-    // accum update follows from dL/d(T_i) = accum*(1-alpha_i) + (color_i.g)*alpha_i.
-    //
-    // alpha_i = opacity * gaussian_weight, where opacity = sigmoid(logit) and
-    // gaussian_weight is the spatial falloff (both recorded during forward).
-    // The full chain rule to the opacity LOGIT (the packed parameter in
-    // position[3]) is:
-    //   dL/d(logit) = dL/d(alpha) * d(alpha)/d(opacity) * d(opacity)/d(logit)
-    //              = dalpha * gaussian_weight * sigmoid'(logit)
-    //              = dalpha * gauss_weight * opacity * (1 - opacity)
-    // Skipping either factor silently inflates the gradient by 5-25x, which
-    // the gradient-check test catches. Position/scale gradients require the
-    // source gaussian's opacity/weight split and are left for a richer backward.
+    // Intermediate gradient accumulators (per-gaussian, accumulated across pixels).
+    std::vector<float> v_conic(N * 3, 0.0f);     // dL/dconic
+    std::vector<float> v_screen_xy(N * 2, 0.0f); // dL/d(screen_x, screen_y)
+
+    const float SH_C0 = melkor::utils::SH_C0;
     std::vector<float> accum(num_pixels, 0.0f);
 
+    // Pass 1: per-pixel backward through the alpha-blend composite.
+    // Computes dL/dcolor, dL/dopacity_logit, and accumulates dL/dconic and
+    // dL/dscreen_xy from the Mahalanobis distance gradient.
+    //
+    // Standard 3DGS alpha-blend backward (see gsplat mathematical supplement):
+    //   dL/dcolor_i  = alpha_i * T_i * dL/dC
+    //   dL/dalpha_i  = T_i * (color_i . dL/dC - accum)
+    //   accum        = accum * (1 - alpha_i) + (color_i . dL/dC) * alpha_i
+    // alpha = opacity * exp(-sigma), sigma = 0.5 * d^T * conic * d.
     for (size_t pixel_idx = 0; pixel_idx < num_pixels; ++pixel_idx) {
         const auto& contribs = state->pixels[pixel_idx];
         if (contribs.empty()) continue;
@@ -437,45 +822,97 @@ DifferentiableRenderer::BackwardResult DifferentiableRenderer::backward(
         float gy = grad_image[pixel_idx * 3 + 1];
         float gz = grad_image[pixel_idx * 3 + 2];
 
-        // Replay in reverse composite order (last-composited first).
         for (auto it = contribs.rbegin(); it != contribs.rend(); ++it) {
             const auto& c = *it;
             uint32_t gid = c.gaussian_id;
             float alpha = c.alpha;
             float T = c.T_at_comp;
 
-            // Color gradient. The forward maps the packed SH-DC field to a
-            // rendered color as rendered = sh_dc * SH_C0 + 0.5, so the gradient
-            // w.r.t. the SH-DC parameter is SH_C0 times the gradient w.r.t. the
-            // rendered color: dL/d(sh_dc) = SH_C0 * alpha * T * dL/dC.
-            const float SH_C0 = melkor::utils::SH_C0;
+            // Color gradient: dL/d(sh_dc) = SH_C0 * alpha * T * dL/dC.
             float dcolor_scale = alpha * T * SH_C0;
             result.grad_colors[gid * 3 + 0] += dcolor_scale * gx;
             result.grad_colors[gid * 3 + 1] += dcolor_scale * gy;
             result.grad_colors[gid * 3 + 2] += dcolor_scale * gz;
 
-            // Alpha gradient: direct term + transmittance-chain term.
+            // Alpha gradient: direct + transmittance chain.
             float color_dot_grad = c.color[0] * gx + c.color[1] * gy + c.color[2] * gz;
             float dalpha = T * (color_dot_grad - accum[pixel_idx]);
-
-            // Update accum to dL/d(T_i) for the next-earlier gaussian.
             accum[pixel_idx] = accum[pixel_idx] * (1.0f - alpha) + color_dot_grad * alpha;
 
-            // Route the alpha gradient into the opacity LOGIT via the full
-            // chain rule (see derivation above). c.gauss_weight is the spatial
-            // falloff and c.opacity is sigmoid(logit), so sigmoid'(logit) =
-            // opacity * (1 - opacity).
+            // Opacity logit gradient: dalpha * gauss_weight * sigmoid'(logit).
             float sig_prime = c.opacity * (1.0f - c.opacity);
             result.grad_opacities[gid] += dalpha * c.gauss_weight * sig_prime;
+
+            // Spatial gradient: dL/dsigma = -opacity * exp(-sigma) * dalpha = -alpha * dalpha.
+            float v_sigma = -alpha * dalpha;
+
+            // dL/dconic from sigma = 0.5 * (conic.x*dx² + 2*conic.y*dx*dy + conic.z*dy²).
+            // Note: all three terms get 0.5 factor (matching gsplat-metal), so that
+            // v_conic[1] = 0.5 * v_sigma * dx * dy. This makes the G matrix in
+            // cov2d_to_conic_vjp equal to the true full-matrix gradient G_full.
+            v_conic[gid * 3 + 0] += v_sigma * 0.5f * c.delta_x * c.delta_x;
+            v_conic[gid * 3 + 1] += v_sigma * 0.5f * c.delta_x * c.delta_y;
+            v_conic[gid * 3 + 2] += v_sigma * 0.5f * c.delta_y * c.delta_y;
+
+            // dL/d(screen_xy) from sigma. delta = center - pixel, d/d(center) = +1.
+            const auto& proj = state->projections[gid];
+            v_screen_xy[gid * 2 + 0] += v_sigma * (proj.conic[0] * c.delta_x + proj.conic[1] * c.delta_y);
+            v_screen_xy[gid * 2 + 1] += v_sigma * (proj.conic[1] * c.delta_x + proj.conic[2] * c.delta_y);
         }
     }
 
-    // The forward pass allocated the render state with `new` and transferred
-    // ownership via internal_state. backward is the sole consumer, so it frees
-    // it here and nulls the pointer so a repeat backward call is a safe no-op.
+    // Pass 2: convert intermediate gradients to position, scale, rotation.
+    // Requires camera matrices and focal lengths stored in RenderState.
+    if (state->has_camera) {
+        float focal_x = state->focal_x;
+        float focal_y = state->focal_y;
+
+        for (size_t g = 0; g < N; ++g) {
+            const auto& proj = state->projections[g];
+            if (!proj.visible) continue;
+
+            // dL/dmean3d from dL/dscreen_xy (projection VJP).
+            float v_mean3d_proj[3] = {0, 0, 0};
+            project_pix_vjp(state->view_proj_matrix, proj.mean3d,
+                            state->width, state->height,
+                            v_screen_xy[g * 2 + 0], v_screen_xy[g * 2 + 1],
+                            v_mean3d_proj);
+
+            // dL/dcov2d from dL/dconic (conic = inv(cov2d)).
+            float v_cov2d[3];
+            cov2d_to_conic_vjp(proj.conic, &v_conic[g * 3], v_cov2d);
+
+            // dL/dcov3d and dL/dmean3d (EWA) from dL/dcov2d.
+            float v_mean3d_ewa[3] = {0, 0, 0};
+            float v_cov3d[6];
+            project_cov3d_ewa_vjp(proj.mean3d, proj.cov3d, state->view_matrix,
+                                  focal_x, focal_y, state->tan_fovx, state->tan_fovy,
+                                  v_cov2d,
+                                  v_mean3d_ewa, v_cov3d);
+
+            // Combine position gradients from projection and EWA.
+            result.grad_positions[g * 3 + 0] = v_mean3d_proj[0] + v_mean3d_ewa[0];
+            result.grad_positions[g * 3 + 1] = v_mean3d_proj[1] + v_mean3d_ewa[1];
+            result.grad_positions[g * 3 + 2] = v_mean3d_proj[2] + v_mean3d_ewa[2];
+
+            // dL/dscale and dL/dquat from dL/dcov3d.
+            // Scale gradients are w.r.t. exp(scale_log), so chain: dL/d(log) = dL/d(scale) * scale.
+            float v_scale[3], v_quat[4];
+            scale_rot_to_cov3d_vjp(proj.scale[0], proj.scale[1], proj.scale[2],
+                                   proj.quat[0], proj.quat[1], proj.quat[2], proj.quat[3],
+                                   v_cov3d, v_scale, v_quat);
+            result.grad_scales[g * 3 + 0] = v_scale[0] * proj.scale[0];
+            result.grad_scales[g * 3 + 1] = v_scale[1] * proj.scale[1];
+            result.grad_scales[g * 3 + 2] = v_scale[2] * proj.scale[2];
+            result.grad_rotations[g * 4 + 0] = v_quat[0];
+            result.grad_rotations[g * 4 + 1] = v_quat[1];
+            result.grad_rotations[g * 4 + 2] = v_quat[2];
+            result.grad_rotations[g * 4 + 3] = v_quat[3];
+        }
+    }
+
     delete state;
     forward_result.internal_state = nullptr;
-
     return result;
 }
 
@@ -718,15 +1155,11 @@ GaussianFitResult GaussianFitter::fitFromGlb(
     std::cout << "Initialized " << cloud.size() << " Gaussians" << std::endl;
 
     // NOTE on optimization: DifferentiableRenderer::backward now implements a
-    // real alpha-blend backward pass (verified by test_gradient_check), but it
-    // only computes color and opacity gradients — position and scale gradients
-    // are not yet wired. The previous loop perturbed Gaussian colors with random
-    // noise for `num_iterations` rounds and reported the minimum *observed* loss
-    // as "final_loss", which made the output strictly worse over time while
-    // advertising improvement. Rather than run a partial optimizer that ignores
-    // position/scale, we measure the L1 reprojection error of the surface-aligned
-    // initialization once and return it honestly. Full gradient-based fitting
-    // should wire all four gradient channels through the backward pipeline.
+    // full EWA backward pass computing gradients for all 5 Gaussian parameters
+    // (position, scale, rotation, color, opacity), verified by test_gradient_check.
+    // The fitting pipeline below measures L1 reprojection error of the
+    // surface-aligned initialization. Full gradient-based optimization would
+    // use backward() to drive an Adam optimizer over all parameters.
     auto packed = cloud.toPackedFormat();
     float best_loss = 0.0f;
     for (size_t cam_idx = 0; cam_idx < cameras.size(); ++cam_idx) {
