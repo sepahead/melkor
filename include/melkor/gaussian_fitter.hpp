@@ -122,8 +122,17 @@ public:
     struct ForwardResult {
         std::vector<float> image;      // RGB float image (H*W*3)
         std::vector<float> alpha;      // Alpha channel (H*W)
-        // Internal state for backward pass
+        // Internal state for backward pass (owned by ForwardResult, freed on
+        // destruction or when backward() consumes it). Move-only to prevent
+        // double-free of the heap-allocated RenderState.
         void* internal_state = nullptr;
+
+        ForwardResult() = default;
+        ~ForwardResult();  // defined in the .mm TU where RenderState is visible
+        ForwardResult(const ForwardResult&) = delete;
+        ForwardResult& operator=(const ForwardResult&) = delete;
+        ForwardResult(ForwardResult&&) noexcept;
+        ForwardResult& operator=(ForwardResult&&) noexcept;
     };
     
     ForwardResult forward(
@@ -141,7 +150,7 @@ public:
     };
     
     BackwardResult backward(
-        const ForwardResult& forward_result,
+        ForwardResult& forward_result,
         const std::vector<float>& grad_image);  // dL/d(image)
     
 private:

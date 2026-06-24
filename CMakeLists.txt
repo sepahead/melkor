@@ -292,6 +292,19 @@ set_target_properties(test_ply_roundtrip_fuzz PROPERTIES
 )
 add_test(NAME ply_roundtrip_fuzz COMMAND test_ply_roundtrip_fuzz)
 
+# Gradient-check test for the differentiable rasterizer (macOS/Metal only).
+# Compares the analytic backward gradients against central finite differences
+# for color and opacity -- the correctness bar for any backward pass. Gated
+# on MELKOR_HAS_METAL because the DifferentiableRenderer lives in the Metal TU.
+if(APPLE AND MELKOR_USE_METAL)
+    add_executable(test_gradient_check tests/test_gradient_check.mm)
+    target_link_libraries(test_gradient_check PRIVATE melkor_metal)
+    set_target_properties(test_gradient_check PROPERTIES
+        RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}
+    )
+    add_test(NAME gradient_check COMMAND test_gradient_check)
+endif()
+
 # Python test for the DA3 model-direct Gaussians extraction path. It stubs
 # torch so it runs anywhere Python3 + numpy are available (no DA3 weights or
 # GPU needed). Validates that the field transforms match ByteDance's exporter
