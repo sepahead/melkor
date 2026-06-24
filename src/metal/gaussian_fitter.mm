@@ -18,63 +18,70 @@ namespace melkor {
 // ============================================================================
 
 void Camera::computeMatrices() {
-    // Compute view matrix (look-at)
+    // All three matrices are stored ROW-MAJOR: element at (row r, col c) is
+    // matrix[r*4 + c]. This matches the consumer in DifferentiableRenderer
+    // (clip[i] = sum_j view_proj[i*4+j] * pos[j]). The previous version stored
+    // view/proj column-major but multiplied/consumed them as row-major, which
+    // transposed the camera basis and produced clip[3]=0 for the look-at target.
+
+    // Compute view matrix (look-at).
     float fx = target[0] - position[0];
     float fy = target[1] - position[1];
     float fz = target[2] - position[2];
     float f_len = std::sqrt(fx*fx + fy*fy + fz*fz);
     fx /= f_len; fy /= f_len; fz /= f_len;
-    
+
     // right = cross(forward, up)
     float rx = fy * up[2] - fz * up[1];
     float ry = fz * up[0] - fx * up[2];
     float rz = fx * up[1] - fy * up[0];
     float r_len = std::sqrt(rx*rx + ry*ry + rz*rz);
     rx /= r_len; ry /= r_len; rz /= r_len;
-    
+
     // true_up = cross(right, forward)
     float ux = ry * fz - rz * fy;
     float uy = rz * fx - rx * fz;
     float uz = rx * fy - ry * fx;
-    
-    // View matrix (column-major)
-    view_matrix[0] = rx;  view_matrix[4] = ry;  view_matrix[8]  = rz;  view_matrix[12] = -(rx*position[0] + ry*position[1] + rz*position[2]);
-    view_matrix[1] = ux;  view_matrix[5] = uy;  view_matrix[9]  = uz;  view_matrix[13] = -(ux*position[0] + uy*position[1] + uz*position[2]);
-    view_matrix[2] = -fx; view_matrix[6] = -fy; view_matrix[10] = -fz; view_matrix[14] = (fx*position[0] + fy*position[1] + fz*position[2]);
-    view_matrix[3] = 0;   view_matrix[7] = 0;   view_matrix[11] = 0;   view_matrix[15] = 1;
-    
-    // Projection matrix (OpenGL-style perspective)
+
+    // View matrix, row-major. Rows: right, up, -forward, translation-negatives.
+    view_matrix[0] = rx;  view_matrix[1] = ry;  view_matrix[2]  = rz;  view_matrix[3]  = -(rx*position[0] + ry*position[1] + rz*position[2]);
+    view_matrix[4] = ux;  view_matrix[5] = uy;  view_matrix[6]  = uz;  view_matrix[7]  = -(ux*position[0] + uy*position[1] + uz*position[2]);
+    view_matrix[8] = -fx; view_matrix[9] = -fy; view_matrix[10] = -fz; view_matrix[11] = (fx*position[0] + fy*position[1] + fz*position[2]);
+    view_matrix[12] = 0;  view_matrix[13] = 0;  view_matrix[14] = 0;   view_matrix[15] = 1;
+
+    // Projection matrix (OpenGL-style perspective), row-major.
     float tan_half_fov = std::tan(fov_y * 0.5f);
     float top = near_plane * tan_half_fov;
     float right_plane = top * aspect;
-    
+
     proj_matrix[0] = near_plane / right_plane;
     proj_matrix[1] = 0;
     proj_matrix[2] = 0;
     proj_matrix[3] = 0;
-    
+
     proj_matrix[4] = 0;
     proj_matrix[5] = near_plane / top;
     proj_matrix[6] = 0;
     proj_matrix[7] = 0;
-    
+
     proj_matrix[8] = 0;
     proj_matrix[9] = 0;
     proj_matrix[10] = -(far_plane + near_plane) / (far_plane - near_plane);
-    proj_matrix[11] = -1;
-    
+    proj_matrix[11] = -2.0f * far_plane * near_plane / (far_plane - near_plane);
+
     proj_matrix[12] = 0;
     proj_matrix[13] = 0;
-    proj_matrix[14] = -2.0f * far_plane * near_plane / (far_plane - near_plane);
+    proj_matrix[14] = -1;
     proj_matrix[15] = 0;
-    
-    // View-projection matrix
-    for (int i = 0; i < 4; ++i) {
-        for (int j = 0; j < 4; ++j) {
-            view_proj_matrix[i * 4 + j] = 0;
+
+    // view_proj = proj * view, row-major: C[r*4+c] = sum_k A[r*4+k]*B[k*4+c].
+    for (int r = 0; r < 4; ++r) {
+        for (int c = 0; c < 4; ++c) {
+            float acc = 0.0f;
             for (int k = 0; k < 4; ++k) {
-                view_proj_matrix[i * 4 + j] += proj_matrix[i * 4 + k] * view_matrix[k * 4 + j];
+                acc += proj_matrix[r * 4 + k] * view_matrix[k * 4 + c];
             }
+            view_proj_matrix[r * 4 + c] = acc;
         }
     }
 }
@@ -169,103 +176,121 @@ DifferentiableRenderer::DifferentiableRenderer(metal::MetalContext& ctx)
 
 DifferentiableRenderer::~DifferentiableRenderer() = default;
 
+// ============================================================================
+// Render state for the differentiable backward pass.
+//
+// Alpha-blended Gaussian splatting composites gaussians front-to-back as:
+//     C  += color * alpha * T
+//     T'  = T * (1 - alpha)          (accumulated transmittance)
+// where alpha = opacity * exp(-0.5 * d^2 / r^2). To backpropagate dL/d(gaussian
+// params) we need, for each pixel, the per-gaussian (alpha, T_at_composite,
+// color) used during the forward. We also cache the screen-space center and
+// radius so position/scale gradients can be reconstructed without recomputing
+// the projection. This is the standard 3DGS backward state in compact form.
+//
+// NOTE: gaussians are composited in INPUT order (not depth-sorted). For the
+// mesh-fitting use case the source geometry is roughly convex so this is an
+// acceptable approximation; a production renderer would sort per-tile.
+// ============================================================================
+
+struct PixelContribution {
+    uint32_t gaussian_id;
+    float alpha;       // alpha contribution of this gaussian at this pixel
+    float T_at_comp;   // accumulated transmittance just before this gaussian
+    float color[3];    // rendered color (post-SH, pre-clamp) of this gaussian
+    float opacity;     // sigmoid(logit) of the gaussian (stored to reconstruct
+                       // the opacity-logit gradient without the source gaussian)
+    float gauss_weight;// alpha / opacity: the spatial falloff, needed for the
+                       // d(alpha)/d(logit) = sigmoid' * weight chain rule
+};
+
+struct RenderState {
+    int width = 0;
+    int height = 0;
+    // Per-pixel ordered list of contributions (front-to-back as composited).
+    std::vector<std::vector<PixelContribution>> pixels;
+    // Per-gaussian projection cache (indexed by gaussian id).
+    struct Proj {
+        float screen_x = 0;
+        float screen_y = 0;
+        float clip_w = 0;        // clip[3], for position gradient scaling
+        float radius = 0;        // pixel radius (pre-exp scale)
+        bool visible = false;
+    };
+    std::vector<Proj> projections;
+};
+
+// ForwardResult owns the RenderState via void*. These special members are
+// defined here (not in the header) because RenderState is private to this TU.
+// The destructor frees the state if backward() never consumed it; the move
+// operations transfer ownership and null the source to prevent double-free.
+DifferentiableRenderer::ForwardResult::~ForwardResult() {
+    delete static_cast<RenderState*>(internal_state);
+}
+DifferentiableRenderer::ForwardResult::ForwardResult(ForwardResult&& o) noexcept
+    : image(std::move(o.image)), alpha(std::move(o.alpha)), internal_state(o.internal_state) {
+    o.internal_state = nullptr;
+}
+DifferentiableRenderer::ForwardResult& DifferentiableRenderer::ForwardResult::operator=(ForwardResult&& o) noexcept {
+    if (this != &o) {
+        delete static_cast<RenderState*>(internal_state);
+        image = std::move(o.image);
+        alpha = std::move(o.alpha);
+        internal_state = o.internal_state;
+        o.internal_state = nullptr;
+    }
+    return *this;
+}
+
 DifferentiableRenderer::ForwardResult DifferentiableRenderer::forward(
     const std::vector<PackedGaussian>& gaussians,
     const Camera& camera,
     const float background[3]) {
-    
+
     ForwardResult result;
-    
+
+    size_t num_pixels = static_cast<size_t>(camera.width) * camera.height;
     if (gaussians.empty()) {
-        result.image.resize(camera.width * camera.height * 3, background[0]);
+        result.image.resize(num_pixels * 3);
+        result.alpha.resize(num_pixels, 0.0f);
+        for (size_t i = 0; i < num_pixels; ++i) {
+            result.image[i * 3 + 0] = background[0];
+            result.image[i * 3 + 1] = background[1];
+            result.image[i * 3 + 2] = background[2];
+        }
         return result;
     }
-    
-    id<MTLDevice> device = (__bridge id<MTLDevice>)impl_->ctx.getDevice();
-    id<MTLCommandQueue> queue = (__bridge id<MTLCommandQueue>)impl_->ctx.getCommandQueue();
-    
-    // Create buffers
+
     size_t num_gaussians = gaussians.size();
-    id<MTLBuffer> gaussianBuffer = [device newBufferWithBytes:gaussians.data()
-                                                       length:num_gaussians * sizeof(PackedGaussian)
-                                                      options:MTLResourceStorageModeShared];
-    
-    // Projected Gaussians buffer (simplified structure)
-    struct ProjectedGaussianGPU {
-        float xy[2];
-        float depth;
-        float conic[3];
-        float color[3];
-        float opacity;
-        int radius;
-        uint32_t gaussian_id;
-    };
-    
-    id<MTLBuffer> projectedBuffer = [device newBufferWithLength:num_gaussians * sizeof(ProjectedGaussianGPU)
-                                                        options:MTLResourceStorageModeShared];
-    
-    // Output image buffer (RGBA float)
-    size_t num_pixels = camera.width * camera.height;
-    id<MTLBuffer> outputBuffer = [device newBufferWithLength:num_pixels * sizeof(float) * 4
-                                                     options:MTLResourceStorageModeShared];
-    
-    // Camera params buffer
-    struct CameraParamsGPU {
-        float view_matrix[16];
-        float proj_matrix[16];
-        float view_proj_matrix[16];
-        float position[3];
-        float fov_x;
-        float fov_y;
-        float focal_x;
-        float focal_y;
-        float cx;
-        float cy;
-        int width;
-        int height;
-    };
-    
-    CameraParamsGPU cam_params;
-    memcpy(cam_params.view_matrix, camera.view_matrix, sizeof(float) * 16);
-    memcpy(cam_params.proj_matrix, camera.proj_matrix, sizeof(float) * 16);
-    memcpy(cam_params.view_proj_matrix, camera.view_proj_matrix, sizeof(float) * 16);
-    memcpy(cam_params.position, camera.position, sizeof(float) * 3);
-    cam_params.fov_x = 2.0f * std::atan(std::tan(camera.fov_y * 0.5f) * camera.aspect);
-    cam_params.fov_y = camera.fov_y;
-    cam_params.focal_x = camera.width / (2.0f * std::tan(cam_params.fov_x * 0.5f));
-    cam_params.focal_y = camera.height / (2.0f * std::tan(camera.fov_y * 0.5f));
-    cam_params.cx = camera.width * 0.5f;
-    cam_params.cy = camera.height * 0.5f;
-    cam_params.width = camera.width;
-    cam_params.height = camera.height;
-    
-    id<MTLBuffer> cameraBuffer = [device newBufferWithBytes:&cam_params
-                                                     length:sizeof(cam_params)
-                                                    options:MTLResourceStorageModeShared];
-    
-    // For CPU fallback rendering (simplified)
-    // In a full implementation, we'd use the Metal pipelines
-    
-    // CPU-based forward pass for simplicity
+    const float SH_C0 = melkor::utils::SH_C0;
+
     result.image.resize(num_pixels * 3);
-    result.alpha.resize(num_pixels);
-    
-    // Initialize with background
+    result.alpha.assign(num_pixels, 0.0f);
+
+    // Render state for the backward pass. Allocated unconditionally so backward
+    // can rely on its structure even if the caller didn't composite anything.
+    auto* state = new RenderState();
+    state->width = camera.width;
+    state->height = camera.height;
+    state->pixels.resize(num_pixels);
+    state->projections.resize(num_gaussians);
+
+    // Initialize image with background.
     for (size_t i = 0; i < num_pixels; ++i) {
         result.image[i * 3 + 0] = background[0];
         result.image[i * 3 + 1] = background[1];
         result.image[i * 3 + 2] = background[2];
-        result.alpha[i] = 0.0f;
     }
-    
-    // Simple CPU rasterization for now
-    // TODO: Use Metal pipelines for GPU acceleration
-    const float SH_C0 = melkor::utils::SH_C0;
-    
+
+    // Focal length depends only on camera params — hoist out of the per-Gaussian loop.
+    float focal_x = camera.width / (2.0f * std::tan(
+        (2.0f * std::atan(std::tan(camera.fov_y * 0.5f) * camera.aspect)) * 0.5f));
+
     for (size_t g_idx = 0; g_idx < num_gaussians; ++g_idx) {
         const auto& g = gaussians[g_idx];
-        
-        // Transform position
+        auto& proj = state->projections[g_idx];
+
+        // Transform position.
         float pos[4] = {g.position[0], g.position[1], g.position[2], 1.0f};
         float clip[4] = {0};
         for (int i = 0; i < 4; ++i) {
@@ -273,70 +298,184 @@ DifferentiableRenderer::ForwardResult DifferentiableRenderer::forward(
                 clip[i] += camera.view_proj_matrix[i * 4 + j] * pos[j];
             }
         }
-        
-        if (clip[3] <= 0.0f) continue;
-        
-        // NDC to screen
+
+        if (clip[3] <= 0.0f) {
+            proj.visible = false;
+            continue;
+        }
+        proj.visible = true;
+        proj.clip_w = clip[3];
+
         float ndc_x = clip[0] / clip[3];
         float ndc_y = clip[1] / clip[3];
         float screen_x = (ndc_x * 0.5f + 0.5f) * camera.width;
         float screen_y = (ndc_y * 0.5f + 0.5f) * camera.height;
-        
-        // Simple isotropic scale for now
+        proj.screen_x = screen_x;
+        proj.screen_y = screen_y;
+
+        // Isotropic scale from scale[0] (log space).
         float scale = std::exp(g.scale[0]);
-        float radius = std::max(1, static_cast<int>(scale * cam_params.focal_x / clip[3] * 3.0f));
-        
-        // Color
+        float radius = std::max(1.0f, scale * focal_x / clip[3] * 3.0f);
+        proj.radius = radius;
+
+        // Color from SH-DC. NOTE: no clamp here -- clamping has zero gradient
+        // outside [0,1] and would silently kill the backward pass. Colors may
+        // go out of gamut during fitting and self-correct via the L1 loss.
         float color_r = g.color[0] * SH_C0 + 0.5f;
         float color_g = g.color[1] * SH_C0 + 0.5f;
         float color_b = g.color[2] * SH_C0 + 0.5f;
-        color_r = std::clamp(color_r, 0.0f, 1.0f);
-        color_g = std::clamp(color_g, 0.0f, 1.0f);
-        color_b = std::clamp(color_b, 0.0f, 1.0f);
-        
-        // Opacity
+
+        // Opacity from position[3] (logit space).
         float opacity = 1.0f / (1.0f + std::exp(-g.position[3]));
-        
-        // Rasterize
+
         int min_x = std::max(0, static_cast<int>(screen_x - radius));
         int max_x = std::min(camera.width - 1, static_cast<int>(screen_x + radius));
         int min_y = std::max(0, static_cast<int>(screen_y - radius));
         int max_y = std::min(camera.height - 1, static_cast<int>(screen_y + radius));
-        
-        float inv_radius_sq = 1.0f / (radius * radius + 1e-6f);
-        
+
+        float radius_sq = radius * radius + 1e-6f;
+        float inv_radius_sq = 1.0f / radius_sq;
+
         for (int py = min_y; py <= max_y; ++py) {
             for (int px = min_x; px <= max_x; ++px) {
                 float dx = px + 0.5f - screen_x;
                 float dy = py + 0.5f - screen_y;
                 float dist_sq = dx * dx + dy * dy;
-                
+
                 float gaussian_weight = std::exp(-0.5f * dist_sq * inv_radius_sq);
-                float alpha = std::min(0.99f, opacity * gaussian_weight);
-                
+                // No clamp on alpha either: min(0.99, ...) is non-differentiable
+                // at the boundary. The sigmoid-bounded opacity already keeps
+                // alpha < 1, and very small contributions are pruned below.
+                float alpha = opacity * gaussian_weight;
+
                 if (alpha < 1.0f / 255.0f) continue;
-                
-                size_t pixel_idx = py * camera.width + px;
+
+                size_t pixel_idx = static_cast<size_t>(py) * camera.width + px;
                 float T = 1.0f - result.alpha[pixel_idx];
-                
-                result.image[pixel_idx * 3 + 0] = result.image[pixel_idx * 3 + 0] * (1.0f - alpha * T) + color_r * alpha * T;
-                result.image[pixel_idx * 3 + 1] = result.image[pixel_idx * 3 + 1] * (1.0f - alpha * T) + color_g * alpha * T;
-                result.image[pixel_idx * 3 + 2] = result.image[pixel_idx * 3 + 2] * (1.0f - alpha * T) + color_b * alpha * T;
+
+                // Record contribution for the backward pass BEFORE compositing,
+                // so T_at_comp is the transmittance seen by this gaussian.
+                state->pixels[pixel_idx].push_back({
+                    static_cast<uint32_t>(g_idx), alpha, T,
+                    {color_r, color_g, color_b},
+                    opacity, gaussian_weight});
+
+                result.image[pixel_idx * 3 + 0] += color_r * alpha * T;
+                result.image[pixel_idx * 3 + 1] += color_g * alpha * T;
+                result.image[pixel_idx * 3 + 2] += color_b * alpha * T;
                 result.alpha[pixel_idx] += alpha * T;
             }
         }
     }
-    
+
+    // Hand ownership of the state to the ForwardResult. backward() will delete it.
+    result.internal_state = state;
     return result;
 }
 
 DifferentiableRenderer::BackwardResult DifferentiableRenderer::backward(
-    const ForwardResult& forward_result,
+    ForwardResult& forward_result,
     const std::vector<float>& grad_image) {
-    
-    // Simplified backward pass - would need full implementation for production
+
     BackwardResult result;
-    // TODO: Implement proper backward pass
+    auto* state = static_cast<RenderState*>(forward_result.internal_state);
+    if (state == nullptr) {
+        // No forward state (e.g. empty cloud) -> no gradients.
+        return result;
+    }
+
+    const int W = state->width;
+    const int H = state->height;
+    const size_t num_pixels = static_cast<size_t>(W) * H;
+
+    // We need grad wrt each gaussian's rendered color, opacity, screen position,
+    // and scale. Accumulate from every pixel that the gaussian touched.
+    // Because we don't know N here from the state alone, infer it from the
+    // projection cache size.
+    const size_t N = state->projections.size();
+    result.grad_positions.assign(N * 3, 0.0f);
+    result.grad_scales.assign(N * 3, 0.0f);
+    result.grad_rotations.assign(N * 4, 0.0f);
+    result.grad_colors.assign(N * 3, 0.0f);
+    result.grad_opacities.assign(N, 0.0f);
+
+    // Per-pixel running gradient that flows back through the transmittance
+    // chain. In the composite C += color * alpha * T with T = prod(1-alpha) of
+    // earlier gaussians, changing a gaussian's alpha affects every LATER
+    // gaussian's T (and hence its color contribution). Iterating the composite
+    // in REVERSE order, `accum` tracks dL/d(T_next) -- the gradient w.r.t. the
+    // transmittance at the composite point of the next-later gaussian (already
+    // processed). For the last-composited gaussian there is no later gaussian,
+    // so accum starts at 0.
+    //
+    // Standard 3DGS alpha-blend backward, per pixel, per gaussian i (T_i =
+    // transmittance when i composited, recorded during forward; g = dL/dC):
+    //   dL/dcolor_i = alpha_i * T_i * g            (direct; no chain needed)
+    //   dL/dalpha_i = T_i * (color_i . g - accum)  (direct + transmittance chain)
+    //   accum       = accum * (1 - alpha_i) + (color_i . g) * alpha_i
+    // Derivation: dL/d(T_{i+1}) = accum, and T_{i+1} = T_i*(1-alpha_i), so
+    // d(T_{i+1})/d(alpha_i) = -T_i, giving the indirect term -accum*T_i; the
+    // accum update follows from dL/d(T_i) = accum*(1-alpha_i) + (color_i.g)*alpha_i.
+    //
+    // alpha_i = opacity * gaussian_weight, where opacity = sigmoid(logit) and
+    // gaussian_weight is the spatial falloff (both recorded during forward).
+    // The full chain rule to the opacity LOGIT (the packed parameter in
+    // position[3]) is:
+    //   dL/d(logit) = dL/d(alpha) * d(alpha)/d(opacity) * d(opacity)/d(logit)
+    //              = dalpha * gaussian_weight * sigmoid'(logit)
+    //              = dalpha * gauss_weight * opacity * (1 - opacity)
+    // Skipping either factor silently inflates the gradient by 5-25x, which
+    // the gradient-check test catches. Position/scale gradients require the
+    // source gaussian's opacity/weight split and are left for a richer backward.
+    std::vector<float> accum(num_pixels, 0.0f);
+
+    for (size_t pixel_idx = 0; pixel_idx < num_pixels; ++pixel_idx) {
+        const auto& contribs = state->pixels[pixel_idx];
+        if (contribs.empty()) continue;
+
+        float gx = grad_image[pixel_idx * 3 + 0];
+        float gy = grad_image[pixel_idx * 3 + 1];
+        float gz = grad_image[pixel_idx * 3 + 2];
+
+        // Replay in reverse composite order (last-composited first).
+        for (auto it = contribs.rbegin(); it != contribs.rend(); ++it) {
+            const auto& c = *it;
+            uint32_t gid = c.gaussian_id;
+            float alpha = c.alpha;
+            float T = c.T_at_comp;
+
+            // Color gradient. The forward maps the packed SH-DC field to a
+            // rendered color as rendered = sh_dc * SH_C0 + 0.5, so the gradient
+            // w.r.t. the SH-DC parameter is SH_C0 times the gradient w.r.t. the
+            // rendered color: dL/d(sh_dc) = SH_C0 * alpha * T * dL/dC.
+            const float SH_C0 = melkor::utils::SH_C0;
+            float dcolor_scale = alpha * T * SH_C0;
+            result.grad_colors[gid * 3 + 0] += dcolor_scale * gx;
+            result.grad_colors[gid * 3 + 1] += dcolor_scale * gy;
+            result.grad_colors[gid * 3 + 2] += dcolor_scale * gz;
+
+            // Alpha gradient: direct term + transmittance-chain term.
+            float color_dot_grad = c.color[0] * gx + c.color[1] * gy + c.color[2] * gz;
+            float dalpha = T * (color_dot_grad - accum[pixel_idx]);
+
+            // Update accum to dL/d(T_i) for the next-earlier gaussian.
+            accum[pixel_idx] = accum[pixel_idx] * (1.0f - alpha) + color_dot_grad * alpha;
+
+            // Route the alpha gradient into the opacity LOGIT via the full
+            // chain rule (see derivation above). c.gauss_weight is the spatial
+            // falloff and c.opacity is sigmoid(logit), so sigmoid'(logit) =
+            // opacity * (1 - opacity).
+            float sig_prime = c.opacity * (1.0f - c.opacity);
+            result.grad_opacities[gid] += dalpha * c.gauss_weight * sig_prime;
+        }
+    }
+
+    // The forward pass allocated the render state with `new` and transferred
+    // ownership via internal_state. backward is the sole consumer, so it frees
+    // it here and nulls the pointer so a repeat backward call is a safe no-op.
+    delete state;
+    forward_result.internal_state = nullptr;
+
     return result;
 }
 
@@ -578,15 +717,16 @@ GaussianFitResult GaussianFitter::fitFromGlb(
 
     std::cout << "Initialized " << cloud.size() << " Gaussians" << std::endl;
 
-    // NOTE on optimization: this fitter has no working backward pass (see
-    // DifferentiableRenderer::backward, which is a stub). The previous loop
-    // perturbed Gaussian colors with random noise for `num_iterations` rounds
-    // and reported the minimum *observed* loss as "final_loss", which made the
-    // output strictly worse over time while advertising improvement. Rather
-    // than fake gradient descent, we measure the L1 reprojection error of the
-    // surface-aligned initialization once and return it honestly. Real
-    // differentiable fitting on Metal should be wired through the backward
-    // pipeline (see the 3DGS reference) before this mode claims to "fit".
+    // NOTE on optimization: DifferentiableRenderer::backward now implements a
+    // real alpha-blend backward pass (verified by test_gradient_check), but it
+    // only computes color and opacity gradients — position and scale gradients
+    // are not yet wired. The previous loop perturbed Gaussian colors with random
+    // noise for `num_iterations` rounds and reported the minimum *observed* loss
+    // as "final_loss", which made the output strictly worse over time while
+    // advertising improvement. Rather than run a partial optimizer that ignores
+    // position/scale, we measure the L1 reprojection error of the surface-aligned
+    // initialization once and return it honestly. Full gradient-based fitting
+    // should wire all four gradient channels through the backward pipeline.
     auto packed = cloud.toPackedFormat();
     float best_loss = 0.0f;
     for (size_t cam_idx = 0; cam_idx < cameras.size(); ++cam_idx) {
