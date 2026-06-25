@@ -10,6 +10,9 @@
 #include <cmath>
 #include <limits>
 #include <cstdio>
+#ifdef __unix__
+#include <sys/wait.h>
+#endif
 
 namespace fs = std::filesystem;
 
@@ -386,8 +389,13 @@ ModelWeightManager::DownloadResult ModelWeightManager::downloadWeights(
     }
     
     int ret = std::system(cmd.c_str());
+    bool cmd_ok = (ret != -1) && (ret == 0
+#ifdef __unix__
+                   || (WIFEXITED(ret) && WEXITSTATUS(ret) == 0)
+#endif
+                  );
     
-    if (ret == 0 && fs::exists(output_path)) {
+    if (cmd_ok && fs::exists(output_path)) {
         result.success = true;
         result.local_path = output_path;
         result.bytes_downloaded = fs::file_size(output_path);
@@ -602,6 +610,7 @@ FeedforwardResult FeedforwardModel::predictMultiView(
         std::ofstream img(path, std::ios::binary);
         if (!img.is_open()) {
             result.error_message = "Failed to open temp view for write: " + path;
+            fs::remove_all(temp_dir);
             return result;
         }
         const int w = widths[i];
@@ -700,6 +709,7 @@ FeedforwardResult FeedforwardModel::predictFromGlb(
         float viewDirY = centerY - camY;
         float viewDirZ = centerZ - camZ;
         float viewLen = std::sqrt(viewDirX*viewDirX + viewDirY*viewDirY + viewDirZ*viewDirZ);
+        if (viewLen < 1e-9f) viewLen = 1.0f;  // Guard against degenerate camera position
         viewDirX /= viewLen;
         viewDirY /= viewLen;
         viewDirZ /= viewLen;

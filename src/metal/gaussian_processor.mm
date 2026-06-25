@@ -338,10 +338,10 @@ bool GaussianProcessor::processCloud(GaussianCloud& cloud, const ProcessConfig& 
         // [0  1  0  0]
         // [0  0  0  1]
         float matrix[16] = {
-            1, 0, 0, 0,
-            0, 0, 1, 0,
+            1, 0, 0,  0,
+            0, 0, 1,  0,
             0, -1, 0, 0,
-            0, 0, 0, 1
+            0, 0, 0,  1
         };
         
         struct TransformParams { float matrix[16]; } params;

@@ -255,13 +255,52 @@ bool test_logit_sigmoid() {
     check(sig_ok, "sigmoid is stable for extreme values");
     return ok && edge_ok && sig_ok;
 }
+// ---- Test 6: empty cloud bounding box safety -----------------------------
+bool test_empty_bounding_box() {
+    printf("[test] empty cloud bounding box safety\n");
+    using namespace melkor;
+    GaussianCloud empty;
+    float minX = -999, minY = -999, minZ = -999;
+    float maxX = -999, maxY = -999, maxZ = -999;
+    empty.computeBoundingBox(minX, minY, minZ, maxX, maxY, maxZ);
+    check(minX == 0.0f && minY == 0.0f && minZ == 0.0f, "empty bbox min is zero");
+    check(maxX == 0.0f && maxY == 0.0f && maxZ == 0.0f, "empty bbox max is zero");
+    return g_failures == 0;
+}
+
+// ---- Test 7: truncated binary PLY rejection -------------------------------
+bool test_truncated_ply() {
+    printf("[test] truncated binary PLY rejection\n");
+    using namespace melkor;
+    std::string header =
+        "ply\nformat binary_little_endian 1.0\n"
+        "element vertex 100\n"
+        "property float x\nproperty float y\nproperty float z\n"
+        "property float nx\nproperty float ny\nproperty float nz\n"
+        "property float f_dc_0\nproperty float f_dc_1\nproperty float f_dc_2\n"
+        "property float opacity\n"
+        "property float scale_0\nproperty float scale_1\nproperty float scale_2\n"
+        "property float rot_0\nproperty float rot_1\nproperty float rot_2\nproperty float rot_3\n"
+        "end_header\n";
+    std::vector<uint8_t> buf(header.begin(), header.end());
+    std::vector<float> one_vertex(17, 1.0f);
+    const auto* raw = reinterpret_cast<const uint8_t*>(one_vertex.data());
+    buf.insert(buf.end(), raw, raw + one_vertex.size() * sizeof(float));
+
+    PlyReader r;
+    auto res = r.readFromBuffer(buf.data(), buf.size());
+    check(!res.success, "truncated binary PLY is rejected");
+    return g_failures == 0;
+}
 
 }  // namespace
 
 int main() {
-    printf("=== Melkor core tests ===\n");
     test_sh_constant();
     test_logit_sigmoid();
+    test_empty_bounding_box();
+    test_truncated_ply();
+    test_ply_reader();
     test_pca_normals();
 #ifdef MELKOR_HAS_SPZ
     test_spz_quaternion_order();

@@ -87,7 +87,24 @@ static GaussianCloud fromSpzCloud(const spz::GaussianCloud& spz_cloud) {
     cloud.setShDegree(spz_cloud.shDegree);
     cloud.reserve(spz_cloud.numPoints);
     
-    for (int32_t i = 0; i < spz_cloud.numPoints; ++i) {
+    // Validate array sizes against numPoints to prevent OOB reads on
+    // malformed SPZ files.
+    size_t np = static_cast<size_t>(spz_cloud.numPoints);
+    if (spz_cloud.positions.size() < np * 3 ||
+        spz_cloud.scales.size() < np * 3 ||
+        spz_cloud.rotations.size() < np * 4 ||
+        spz_cloud.alphas.size() < np ||
+        spz_cloud.colors.size() < np * 3) {
+        // Truncated SPZ: only iterate over the points we actually have data for.
+        np = std::min({np,
+                       spz_cloud.positions.size() / 3,
+                       spz_cloud.scales.size() / 3,
+                       spz_cloud.rotations.size() / 4,
+                       spz_cloud.alphas.size(),
+                       spz_cloud.colors.size() / 3});
+    }
+    
+    for (size_t i = 0; i < np; ++i) {
         GaussianSplat splat;
         
         // Position
