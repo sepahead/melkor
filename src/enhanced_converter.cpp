@@ -116,7 +116,7 @@ void smallestEigenvector3x3(
 class SpatialHash {
 public:
     SpatialHash(const std::vector<float>& positions, float cell_size)
-        : cell_size_(cell_size), inv_cell_size_(1.0f / cell_size) {
+        : inv_cell_size_(1.0f / cell_size) {
         size_t num_points = positions.size() / 3;
         for (size_t i = 0; i < num_points; ++i) {
             int cx = static_cast<int>(std::floor(positions[i*3+0] * inv_cell_size_));
@@ -155,7 +155,6 @@ private:
                (static_cast<uint64_t>(z & 0x1FFFFF));
     }
     
-    float cell_size_;
     float inv_cell_size_;
     std::unordered_map<uint64_t, std::vector<size_t>> cells_;
 };
@@ -172,7 +171,7 @@ public:
         const std::vector<float>& positions,
         const std::vector<float>& normals,
         const std::vector<float>& colors,
-        const std::vector<uint32_t>& indices,
+        const std::vector<uint32_t>& indices [[maybe_unused]],
         const EnhancedConversionConfig& config) {
         
         EnhancedConversionResult result;

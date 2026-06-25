@@ -73,8 +73,12 @@ public:
     bool sortByDistance(GaussianCloud& cloud,
                        float camera_x, float camera_y, float camera_z);
     
-    // Compute covariance matrices from scale and rotation
-    // Returns flattened upper triangular covariance matrices (6 floats per splat)
+    // Compute covariance matrices from scale and rotation.
+    // Returns flattened upper triangular covariance matrices (6 floats per splat:
+    // xx, xy, xz, yy, yz, zz).
+    // NOTE: The kernel expects scale in LINEAR space. GaussianCloud stores scale
+    // in log space (as written by the GLB reader). Callers must convert
+    // (exp) before calling, or use processCloud with scale_to_log first.
     std::vector<float> computeCovariances(const GaussianCloud& cloud);
     
     // Process entire cloud with all transformations

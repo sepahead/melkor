@@ -63,27 +63,27 @@ public:
     void clear();
     
     // Accessors
-    size_t size() const { return splats_.size(); }
-    bool empty() const { return splats_.empty(); }
+    [[nodiscard]] size_t size() const { return splats_.size(); }
+    [[nodiscard]] bool empty() const { return splats_.empty(); }
     
-    const GaussianSplat& operator[](size_t idx) const { return splats_[idx]; }
+    [[nodiscard]] const GaussianSplat& operator[](size_t idx) const { return splats_[idx]; }
     GaussianSplat& operator[](size_t idx) { return splats_[idx]; }
     
-    const std::vector<GaussianSplat>& splats() const { return splats_; }
+    [[nodiscard]] const std::vector<GaussianSplat>& splats() const { return splats_; }
     std::vector<GaussianSplat>& splats() { return splats_; }
     
     // Direct access to underlying storage (use with care)
-    const GaussianSplat* data() const { return splats_.data(); }
+    [[nodiscard]] const GaussianSplat* data() const { return splats_.data(); }
     GaussianSplat* data() { return splats_.data(); }
     
     // Convert to GPU-friendly packed format
-    std::vector<PackedGaussian> toPackedFormat() const;
+    [[nodiscard]] std::vector<PackedGaussian> toPackedFormat() const;
     
     // Create from packed format
-    static GaussianCloud fromPackedFormat(const std::vector<PackedGaussian>& packed);
+    [[nodiscard]] static GaussianCloud fromPackedFormat(const std::vector<PackedGaussian>& packed);
     
     // Spherical harmonics degree (0-3)
-    int shDegree() const { return sh_degree_; }
+    [[nodiscard]] int shDegree() const { return sh_degree_; }
     void setShDegree(int degree) { sh_degree_ = degree; }
     
     // Compute bounding box

@@ -26,6 +26,26 @@ jobs:
           cd build && ctest --output-on-failure
           ./melkor --info
 
+  sanitize-macos:
+    runs-on: macos-14
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install dependencies
+        run: |
+          brew install cmake
+          ./scripts/setup_deps.sh
+      - name: Build with ASan+UBSan
+        run: |
+          mkdir -p build && cd build
+          cmake .. \
+            -DCMAKE_CXX_FLAGS="-fsanitize=address,undefined -fno-omit-frame-pointer -g" \
+            -DCMAKE_EXE_LINKER_FLAGS="-fsanitize=address,undefined" \
+            -DCMAKE_OSX_DEPLOYMENT_TARGET="13.0"
+          make -j$(sysctl -n hw.ncpu)
+      - name: Test under sanitizers
+        run: |
+          cd build && ctest --output-on-failure
+
   build-linux:
     runs-on: ubuntu-latest
     steps:
