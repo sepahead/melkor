@@ -253,6 +253,7 @@ bool test_logit_sigmoid() {
     if (s_big < 0.99f || s_big > 1.0f) { sig_ok = false; printf("    sigmoid(100) = %f (expected ~1)\n", s_big); }
     if (s_neg < 0.0f || s_neg > 0.01f) { sig_ok = false; printf("    sigmoid(-100) = %f (expected ~0)\n", s_neg); }
     check(sig_ok, "sigmoid is stable for extreme values");
+    return ok && edge_ok && sig_ok;
 }
 
 }  // namespace
