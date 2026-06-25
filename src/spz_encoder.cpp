@@ -14,10 +14,14 @@ namespace melkor {
 // Helper functions to convert between melkor and spz types
 // ============================================================================
 
-static spz::GaussianCloud toSpzCloud(const GaussianCloud& cloud) {
+static spz::GaussianCloud toSpzCloud(const GaussianCloud& cloud, int sh_degree) {
     spz::GaussianCloud spz_cloud;
     spz_cloud.numPoints = static_cast<int32_t>(cloud.size());
-    spz_cloud.shDegree = cloud.shDegree();
+    // Clamp the encoded SH degree to both the config and what the cloud actually
+    // carries, so requesting a lower degree truncates SH rest (smaller file)
+    // and requesting a higher degree than present doesn't pad with garbage.
+    int effective_degree = std::min(sh_degree, cloud.shDegree());
+    spz_cloud.shDegree = effective_degree;
     spz_cloud.antialiased = false;
     
     // Reserve space
@@ -26,6 +30,15 @@ static spz::GaussianCloud toSpzCloud(const GaussianCloud& cloud) {
     spz_cloud.rotations.reserve(cloud.size() * 4);
     spz_cloud.alphas.reserve(cloud.size());
     spz_cloud.colors.reserve(cloud.size() * 3);
+    
+    // Number of SH-rest coefficients per splat for the effective degree.
+    int sh_rest_count = 0;
+    switch (effective_degree) {
+        case 1: sh_rest_count = 9; break;
+        case 2: sh_rest_count = 24; break;
+        case 3: sh_rest_count = 45; break;
+        default: sh_rest_count = 0; break;
+    }
     
     // Convert each splat
     for (size_t i = 0; i < cloud.size(); ++i) {
@@ -58,15 +71,11 @@ static spz::GaussianCloud toSpzCloud(const GaussianCloud& cloud) {
         spz_cloud.colors.push_back(splat.f_dc_0);
         spz_cloud.colors.push_back(splat.f_dc_1);
         spz_cloud.colors.push_back(splat.f_dc_2);
-    }
-    
-    // Handle higher order SH if present
-    if (cloud.shDegree() > 0) {
-        for (size_t i = 0; i < cloud.size(); ++i) {
-            const auto& splat = cloud[i];
-            for (const auto& sh : splat.sh_rest) {
-                spz_cloud.sh.push_back(sh);
-            }
+        
+        // SH rest: only emit up to sh_rest_count coefficients
+        for (int j = 0; j < sh_rest_count; ++j) {
+            spz_cloud.sh.push_back(
+                (j < static_cast<int>(splat.sh_rest.size())) ? splat.sh_rest[j] : 0.0f);
         }
     }
     
@@ -144,7 +153,7 @@ SpzEncodeResult SpzEncoder::encodeToFile(const std::string& filepath,
     }
     
     // Convert to SPZ cloud
-    spz::GaussianCloud spz_cloud = toSpzCloud(cloud);
+    spz::GaussianCloud spz_cloud = toSpzCloud(cloud, config.sh_degree);
     
     // Set up pack options
     spz::PackOptions options;
@@ -177,7 +186,7 @@ SpzEncodeResult SpzEncoder::encodeToBuffer(std::vector<uint8_t>& buffer,
     }
     
     // Convert to SPZ cloud
-    spz::GaussianCloud spz_cloud = toSpzCloud(cloud);
+    spz::GaussianCloud spz_cloud = toSpzCloud(cloud, config.sh_degree);
     
     // Set up pack options
     spz::PackOptions options;
