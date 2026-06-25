@@ -543,6 +543,7 @@ FeedforwardResult FeedforwardModel::predict(
     
     if (!impl_->runDA3Inference(image_path, output_ply)) {
         result.error_message = "DA3 inference failed. Run setup_da3.sh first.";
+        fs::remove_all(temp_dir);
         return result;
     }
     
@@ -550,10 +551,14 @@ FeedforwardResult FeedforwardModel::predict(
     auto read_result = ply_reader.readFromFile(output_ply);
     if (!read_result.success) {
         result.error_message = "Failed to parse DA3 output: " + read_result.error_message;
+        fs::remove_all(temp_dir);
         return result;
     }
     result.cloud = std::move(read_result.cloud);
     result.num_gaussians = result.cloud.size();
+    
+    // Clean up temp files after successful read
+    fs::remove_all(temp_dir);
     
     auto end_time = std::chrono::high_resolution_clock::now();
     auto duration = std::chrono::duration_cast<std::chrono::milliseconds>(end_time - start_time);
@@ -612,6 +617,7 @@ FeedforwardResult FeedforwardModel::predictMultiView(
     std::string output_ply = temp_dir + "/output.ply";
     if (!impl_->runDA3Inference(temp_dir, output_ply)) {
         result.error_message = "DA3 multi-view inference failed. Run setup_da3.sh first.";
+        fs::remove_all(temp_dir);
         return result;
     }
 
@@ -619,10 +625,12 @@ FeedforwardResult FeedforwardModel::predictMultiView(
     auto read_result = ply_reader.readFromFile(output_ply);
     if (!read_result.success) {
         result.error_message = "Failed to parse DA3 output: " + read_result.error_message;
+        fs::remove_all(temp_dir);
         return result;
     }
     result.cloud = std::move(read_result.cloud);
     result.num_gaussians = result.cloud.size();
+    fs::remove_all(temp_dir);
     result.success = true;
     return result;
 }

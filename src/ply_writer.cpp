@@ -410,7 +410,10 @@ PlyReader::ReadResult PlyReader::readFromBuffer(const uint8_t* data, size_t size
         std::vector<float> vals(vertex_props.size());
         for (size_t i = 0; i < vertex_count; ++i) {
             for (size_t j = 0; j < vertex_props.size(); ++j) {
-                stream >> vals[j];
+                if (!(stream >> vals[j])) {
+                    return {false, "Invalid PLY: unexpected end of data at vertex " +
+                        std::to_string(i), {}};
+                }
             }
             GaussianSplat splat;
             splat.x = vals[ix];
