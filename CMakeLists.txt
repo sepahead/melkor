@@ -95,6 +95,10 @@ if(SPZ_AVAILABLE)
     # Add SPZ include directories
     target_include_directories(melkor_core PUBLIC ${THIRD_PARTY_DIR}/spz/src/cc)
 endif()
+# Enable strict warnings on Melkor's own code (not third-party).
+target_compile_options(melkor_core PRIVATE
+    $<$<CXX_COMPILER_ID:GNU,Clang,AppleClang>:-Wall -Wextra -Wpedantic>
+)
 
 # Platform-specific GPU acceleration
 if(APPLE AND MELKOR_USE_METAL)
@@ -225,6 +229,9 @@ add_executable(melkor
 target_link_libraries(melkor PRIVATE
     melkor_core
     ${MELKOR_GPU_LIBRARY}
+)
+target_compile_options(melkor PRIVATE
+    $<$<CXX_COMPILER_ID:GNU,Clang,AppleClang>:-Wall -Wextra -Wpedantic>
 )
 
 # Copy metallib to executable directory (macOS only)

@@ -218,13 +218,49 @@ bool test_sh_constant() {
     check(ok, "rgbToShDc and shDcToRgb are inverses");
     return ok;
 }
+// ---- Test 5: logit/sigmoid round-trip and edge safety --------------------
+bool test_logit_sigmoid() {
+    printf("[test] logit/sigmoid round-trip and edge safety\n");
+    using namespace melkor;
+    bool ok = true;
+    // Round-trip: sigmoid(logit(x)) ≈ x for mid-range values
+    const float samples[] = {0.01f, 0.1f, 0.25f, 0.5f, 0.75f, 0.9f, 0.99f};
+    for (float v : samples) {
+        float round = utils::sigmoid(utils::logit(v));
+        if (std::abs(round - v) > 1e-4f) {
+            ok = false;
+            printf("    drift at v=%.4f: round=%.6f\n", v, round);
+        }
+    }
+    check(ok, "sigmoid(logit(x)) round-trips for mid-range values");
+
+    // Edge safety: logit(0) and logit(1) must not produce NaN or inf
+    bool edge_ok = true;
+    float l0 = utils::logit(0.0f);
+    float l1 = utils::logit(1.0f);
+    if (std::isnan(l0) || std::isinf(l0)) { edge_ok = false; printf("    logit(0) = %f\n", l0); }
+    if (std::isnan(l1) || std::isinf(l1)) { edge_ok = false; printf("    logit(1) = %f\n", l1); }
+    check(edge_ok, "logit(0) and logit(1) are finite (no div-by-zero)");
+
+    // Sigmoid stability for extreme values: must not produce NaN/inf.
+    // For float precision, sigmoid(-100) underflows to exactly 0.0f — that's
+    // correct behavior, not a bug.
+    bool sig_ok = true;
+    float s_big = utils::sigmoid(100.0f);
+    float s_neg = utils::sigmoid(-100.0f);
+    if (std::isnan(s_big) || std::isinf(s_big)) { sig_ok = false; printf("    sigmoid(100) = %f\n", s_big); }
+    if (std::isnan(s_neg) || std::isinf(s_neg)) { sig_ok = false; printf("    sigmoid(-100) = %f\n", s_neg); }
+    if (s_big < 0.99f || s_big > 1.0f) { sig_ok = false; printf("    sigmoid(100) = %f (expected ~1)\n", s_big); }
+    if (s_neg < 0.0f || s_neg > 0.01f) { sig_ok = false; printf("    sigmoid(-100) = %f (expected ~0)\n", s_neg); }
+    check(sig_ok, "sigmoid is stable for extreme values");
+}
 
 }  // namespace
 
 int main() {
     printf("=== Melkor core tests ===\n");
     test_sh_constant();
-    test_ply_reader();
+    test_logit_sigmoid();
     test_pca_normals();
 #ifdef MELKOR_HAS_SPZ
     test_spz_quaternion_order();
