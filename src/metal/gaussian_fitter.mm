@@ -141,14 +141,17 @@ public:
         id<MTLDevice> device = (__bridge id<MTLDevice>)ctx.getDevice();
         NSError* error = nil;
         
-        // Load shader library
+        // Load shader library using the modern newLibraryWithURL:error: API
+        // (newLibraryWithFile: is deprecated since macOS 13.0).
         NSString* shaderPath = [[NSBundle mainBundle] pathForResource:@"default" ofType:@"metallib"];
         if (!shaderPath) {
             // Try current directory
             shaderPath = @"default.metallib";
         }
         
-        id<MTLLibrary> library = [device newLibraryWithFile:shaderPath error:&error];
+        id<MTLLibrary> library = nil;
+        NSURL* libraryURL = [NSURL fileURLWithPath:shaderPath];
+        library = [device newLibraryWithURL:libraryURL error:&error];
         if (!library) {
             NSLog(@"Failed to load shader library: %@", error);
             return;

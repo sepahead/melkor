@@ -5,6 +5,7 @@
 #include <cstdint>
 #include <string>
 #include <cmath>
+#include <algorithm>
 
 namespace melkor {
 
@@ -115,13 +116,21 @@ namespace utils {
         return sh_dc * SH_C0 + 0.5f;
     }
     
-    // Sigmoid function for opacity
+    // Sigmoid function for opacity. Numerically stable: avoids exp overflow
+    // for large negative x by branching on the sign.
     inline float sigmoid(float x) {
-        return 1.0f / (1.0f + std::exp(-x));
+        if (x >= 0.0f) {
+            return 1.0f / (1.0f + std::exp(-x));
+        } else {
+            float ex = std::exp(x);
+            return ex / (1.0f + ex);
+        }
     }
     
-    // Inverse sigmoid (logit)
+    // Inverse sigmoid (logit). Clamps input to (eps, 1-eps) to prevent
+    // division by zero when x is exactly 0 or 1, which would produce -inf/+inf.
     inline float logit(float x) {
+        x = std::clamp(x, 1e-6f, 1.0f - 1e-6f);
         return std::log(x / (1.0f - x));
     }
 

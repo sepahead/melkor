@@ -87,7 +87,13 @@ bool MetalContext::initialize() {
         return false;
     }
     
-    impl_->loadLibrary();
+    if (!impl_->loadLibrary()) {
+        // Device and queue are valid, but without shaders no GPU operations
+        // can run. Report failure so callers fall back to CPU.
+        impl_->commandQueue = nil;
+        impl_->device = nil;
+        return false;
+    }
     impl_->initialized = true;
     return true;
 }
@@ -118,7 +124,11 @@ bool MetalContext::initialize(const std::string& device_name) {
         return false;
     }
     
-    impl_->loadLibrary();
+    if (!impl_->loadLibrary()) {
+        impl_->commandQueue = nil;
+        impl_->device = nil;
+        return false;
+    }
     impl_->initialized = true;
     return true;
 }

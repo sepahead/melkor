@@ -325,20 +325,17 @@ public:
             float py = positions[i*3+1];
             float pz = positions[i*3+2];
             
-            // Query neighbors
+            // Query neighbors, expanding the search radius until we have at
+            // least k+1 candidates (matching the pattern in estimateNormals).
             auto candidates = hash.queryNeighbors(px, py, pz, 2);
+            int radius = 2;
+            while (static_cast<int>(candidates.size()) < k + 1 && radius < 16) {
+                candidates = hash.queryNeighbors(px, py, pz, ++radius);
+            }
             
             // Compute distances to all candidates
             std::vector<float> distances;
             distances.reserve(candidates.size());
-            
-            for (size_t j : candidates) {
-                if (j == i) continue;
-                float dx = positions[j*3+0] - px;
-                float dy = positions[j*3+1] - py;
-                float dz = positions[j*3+2] - pz;
-                distances.push_back(std::sqrt(dx*dx + dy*dy + dz*dz));
-            }
             
             if (distances.empty()) {
                 scales[i] = config.min_scale;
