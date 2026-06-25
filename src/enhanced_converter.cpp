@@ -452,16 +452,19 @@ EnhancedConversionResult EnhancedConverter::convertFromFile(
             const auto& pos_buffer_view = model.bufferViews[pos_accessor.bufferView];
             const auto& pos_buffer = model.buffers[pos_buffer_view.buffer];
             
-            const float* pos_data = reinterpret_cast<const float*>(
-                pos_buffer.data.data() + pos_buffer_view.byteOffset + pos_accessor.byteOffset);
+            const uint8_t* pos_data = pos_buffer.data.data() + 
+                pos_buffer_view.byteOffset + pos_accessor.byteOffset;
+            size_t pos_stride = pos_accessor.ByteStride(pos_buffer_view);
+            if (pos_stride == 0) pos_stride = sizeof(float) * 3;
             
             size_t base_idx = positions.size() / 3;
             size_t count = pos_accessor.count;
             
             for (size_t i = 0; i < count; ++i) {
-                positions.push_back(pos_data[i*3+0]);
-                positions.push_back(pos_data[i*3+1]);
-                positions.push_back(pos_data[i*3+2]);
+                const float* pos = reinterpret_cast<const float*>(pos_data + i * pos_stride);
+                positions.push_back(pos[0]);
+                positions.push_back(pos[1]);
+                positions.push_back(pos[2]);
             }
             
             // Get normals
@@ -471,13 +474,16 @@ EnhancedConversionResult EnhancedConverter::convertFromFile(
                 const auto& norm_buffer_view = model.bufferViews[norm_accessor.bufferView];
                 const auto& norm_buffer = model.buffers[norm_buffer_view.buffer];
                 
-                const float* norm_data = reinterpret_cast<const float*>(
-                    norm_buffer.data.data() + norm_buffer_view.byteOffset + norm_accessor.byteOffset);
+                const uint8_t* norm_data = norm_buffer.data.data() + 
+                    norm_buffer_view.byteOffset + norm_accessor.byteOffset;
+                size_t norm_stride = norm_accessor.ByteStride(norm_buffer_view);
+                if (norm_stride == 0) norm_stride = sizeof(float) * 3;
                 
                 for (size_t i = 0; i < count; ++i) {
-                    normals.push_back(norm_data[i*3+0]);
-                    normals.push_back(norm_data[i*3+1]);
-                    normals.push_back(norm_data[i*3+2]);
+                    const float* n = reinterpret_cast<const float*>(norm_data + i * norm_stride);
+                    normals.push_back(n[0]);
+                    normals.push_back(n[1]);
+                    normals.push_back(n[2]);
                 }
             }
             
@@ -491,17 +497,41 @@ EnhancedConversionResult EnhancedConverter::convertFromFile(
                 const uint8_t* color_ptr = color_buffer.data.data() + 
                     color_buffer_view.byteOffset + color_accessor.byteOffset;
                 
-                for (size_t i = 0; i < count; ++i) {
+                // Determine stride and component count
+                int num_components = (color_accessor.type == TINYGLTF_TYPE_VEC4) ? 4 : 3;
+                size_t color_stride = color_accessor.ByteStride(color_buffer_view);
+                if (color_stride == 0) {
                     if (color_accessor.componentType == TINYGLTF_COMPONENT_TYPE_UNSIGNED_BYTE) {
-                        colors.push_back(color_ptr[i*3+0] / 255.0f);
-                        colors.push_back(color_ptr[i*3+1] / 255.0f);
-                        colors.push_back(color_ptr[i*3+2] / 255.0f);
-                    } else if (color_accessor.componentType == TINYGLTF_COMPONENT_TYPE_FLOAT) {
-                        const float* cf = reinterpret_cast<const float*>(color_ptr);
-                        colors.push_back(cf[i*3+0]);
-                        colors.push_back(cf[i*3+1]);
-                        colors.push_back(cf[i*3+2]);
+                        color_stride = num_components;
+                    } else if (color_accessor.componentType == TINYGLTF_COMPONENT_TYPE_UNSIGNED_SHORT) {
+                        color_stride = num_components * 2;
+                    } else {
+                        color_stride = num_components * sizeof(float);
                     }
+                }
+                
+                for (size_t i = 0; i < count; ++i) {
+                    const uint8_t* cp = color_ptr + i * color_stride;
+                    float r, g, b;
+                    if (color_accessor.componentType == TINYGLTF_COMPONENT_TYPE_UNSIGNED_BYTE) {
+                        r = cp[0] / 255.0f;
+                        g = cp[1] / 255.0f;
+                        b = cp[2] / 255.0f;
+                    } else if (color_accessor.componentType == TINYGLTF_COMPONENT_TYPE_UNSIGNED_SHORT) {
+                        const uint16_t* c16 = reinterpret_cast<const uint16_t*>(cp);
+                        r = c16[0] / 65535.0f;
+                        g = c16[1] / 65535.0f;
+                        b = c16[2] / 65535.0f;
+                    } else {
+                        const float* cf = reinterpret_cast<const float*>(cp);
+                        r = cf[0];
+                        g = cf[1];
+                        b = cf[2];
+                    }
+                    colors.push_back(r);
+                    colors.push_back(g);
+                    colors.push_back(b);
+                    // VEC4: ignore alpha — splat opacity is controlled separately
                 }
             }
             
@@ -546,14 +576,13 @@ namespace enhanced {
 std::vector<float> computeKnnDistances(
     const std::vector<float>& positions,
     int k,
-    metal::MetalContext* metal_ctx) {
-    // CPU implementation for now
-    // TODO: Metal implementation for large point clouds
-    
+    metal::MetalContext* /*metal_ctx*/) {
+
     size_t num_points = positions.size() / 3;
     std::vector<float> distances(num_points, 0.0f);
-    
-    // Simple O(n²) for small clouds, use spatial hash for larger
+    if (num_points == 0) return distances;
+
+    // O(n²) brute force for small clouds; spatial hash for larger ones.
     if (num_points < 10000) {
         for (size_t i = 0; i < num_points; ++i) {
             std::vector<float> dists;
@@ -567,6 +596,53 @@ std::vector<float> computeKnnDistances(
                 dists.push_back(std::sqrt(dx*dx + dy*dy + dz*dz));
             }
             
+            std::sort(dists.begin(), dists.end());
+            int actual_k = std::min(k, static_cast<int>(dists.size()));
+            for (int j = 0; j < actual_k; ++j) {
+                distances[i] += dists[j];
+            }
+            distances[i] /= static_cast<float>(actual_k);
+        }
+    } else {
+        // Spatial hash k-NN for large clouds (same pattern as estimateNormals).
+        float min_x = std::numeric_limits<float>::max();
+        float max_x = std::numeric_limits<float>::lowest();
+        float min_y = min_x, max_y = max_x, min_z = min_x, max_z = max_x;
+        for (size_t i = 0; i < num_points; ++i) {
+            min_x = std::min(min_x, positions[i*3+0]);
+            max_x = std::max(max_x, positions[i*3+0]);
+            min_y = std::min(min_y, positions[i*3+1]);
+            max_y = std::max(max_y, positions[i*3+1]);
+            min_z = std::min(min_z, positions[i*3+2]);
+            max_z = std::max(max_z, positions[i*3+2]);
+        }
+        float extent = std::max({max_x - min_x, max_y - min_y, max_z - min_z});
+        if (extent < 1e-9f) return distances;
+        float cell_size = extent / std::cbrt(static_cast<float>(num_points)) * 2.0f;
+        SpatialHash hash(positions, cell_size);
+
+        for (size_t i = 0; i < num_points; ++i) {
+            float px = positions[i*3+0];
+            float py = positions[i*3+1];
+            float pz = positions[i*3+2];
+
+            auto candidates = hash.queryNeighbors(px, py, pz, 2);
+            int radius = 2;
+            while (static_cast<int>(candidates.size()) < k + 1 && radius < 16) {
+                candidates = hash.queryNeighbors(px, py, pz, ++radius);
+            }
+
+            std::vector<float> dists;
+            dists.reserve(candidates.size());
+            for (size_t j : candidates) {
+                if (j == i) continue;
+                float dx = positions[j*3+0] - px;
+                float dy = positions[j*3+1] - py;
+                float dz = positions[j*3+2] - pz;
+                dists.push_back(std::sqrt(dx*dx + dy*dy + dz*dz));
+            }
+            if (dists.empty()) continue;
+
             std::sort(dists.begin(), dists.end());
             int actual_k = std::min(k, static_cast<int>(dists.size()));
             for (int j = 0; j < actual_k; ++j) {
