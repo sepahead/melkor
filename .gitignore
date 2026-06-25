@@ -91,3 +91,6 @@ DA3coreml/coreml/Models/
 
 # ml-sharp data outputs
 ml-sharp/data/
+
+# Downloaded test datasets
+test_data/

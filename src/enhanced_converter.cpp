@@ -182,9 +182,25 @@ public:
             return result;
         }
         
-        // Step 1: Compute adaptive scales using k-NN
-        std::vector<float> adaptive_scales = computeAdaptiveScales(
-            positions, config.knn_neighbors, config);
+        // Step 1: Compute adaptive scales using k-NN.
+        // Use Metal brute-force k-NN for small clouds (faster on GPU),
+        // CPU spatial hash for large clouds.
+        std::vector<float> adaptive_scales;
+        size_t num_points = positions.size() / 3;
+        bool use_metal_knn = metal_ctx_ && num_points > 0 && num_points < 10000;
+        if (use_metal_knn) {
+            metal::GaussianProcessor processor(*metal_ctx_);
+            auto knn_dists = processor.computeKnnDistancesMetal(
+                positions, config.knn_neighbors);
+            // Scale: half the average k-NN distance (matching CPU path)
+            adaptive_scales.resize(num_points);
+            for (size_t i = 0; i < num_points; ++i) {
+                adaptive_scales[i] = knn_dists[i] * 0.5f;
+            }
+        } else {
+            adaptive_scales = computeAdaptiveScales(
+                positions, config.knn_neighbors, config);
+        }
         
         // Step 2: Compute or use provided normals
         std::vector<float> final_normals = normals;
@@ -192,12 +208,58 @@ public:
             final_normals = enhanced::estimateNormals(positions, config.knn_neighbors);
         }
         
-        // Step 3: Convert each point to a Gaussian splat
-        size_t num_points = positions.size() / 3;
-        result.cloud.reserve(num_points * 2);  // Reserve extra for potential subdivision
-        
+        // Step 3: Convert each point to a Gaussian splat.
+        // Use Metal GPU acceleration when available for the per-point loop.
+        result.cloud.reserve(num_points * 2);
+
+        if (metal_ctx_ && num_points > 0) {
+            // Metal-accelerated per-point conversion
+            metal::GaussianProcessor processor(*metal_ctx_);
+            metal::GaussianProcessor::EnhancedConvertConfig mtl_cfg;
+            mtl_cfg.scale_factor = config.scale_factor;
+            mtl_cfg.min_scale = config.min_scale;
+            mtl_cfg.max_scale = config.max_scale;
+            mtl_cfg.normal_scale_ratio = config.normal_scale_ratio;
+            mtl_cfg.default_opacity = config.default_opacity;
+            mtl_cfg.position_scale = config.position_scale;
+            mtl_cfg.convert_coordinate_system = config.convert_coordinate_system;
+            mtl_cfg.use_surface_alignment = config.use_surface_alignment;
+
+            auto packed = processor.enhancedConvert(
+                positions, final_normals, colors, adaptive_scales, mtl_cfg);
+
+            if (!packed.empty()) {
+                // Convert PackedGaussian back to GaussianSplat
+                float total_scale = 0.0f;
+                for (size_t i = 0; i < num_points; ++i) {
+                    GaussianSplat splat;
+                    splat.x = packed[i].position[0];
+                    splat.y = packed[i].position[1];
+                    splat.z = packed[i].position[2];
+                    splat.opacity = packed[i].position[3];
+                    splat.f_dc_0 = packed[i].color[0];
+                    splat.f_dc_1 = packed[i].color[1];
+                    splat.f_dc_2 = packed[i].color[2];
+                    splat.scale_0 = packed[i].scale[0];
+                    splat.scale_1 = packed[i].scale[1];
+                    splat.scale_2 = packed[i].scale[2];
+                    splat.rot_0 = packed[i].rotation[0];
+                    splat.rot_1 = packed[i].rotation[1];
+                    splat.rot_2 = packed[i].rotation[2];
+                    splat.rot_3 = packed[i].rotation[3];
+                    total_scale += std::exp(packed[i].scale[0]);
+                    result.cloud.addSplat(std::move(splat));
+                }
+                result.output_splats = result.cloud.size();
+                result.avg_scale = total_scale / static_cast<float>(num_points);
+                result.success = true;
+                return result;
+            }
+            // Fall through to CPU path if Metal failed
+        }
+
+        // CPU per-point conversion (fallback)
         float total_scale = 0.0f;
-        
         for (size_t i = 0; i < num_points; ++i) {
             GaussianSplat splat;
             
@@ -583,13 +645,19 @@ namespace enhanced {
 std::vector<float> computeKnnDistances(
     const std::vector<float>& positions,
     int k,
-    metal::MetalContext* /*metal_ctx*/) {
+    metal::MetalContext* metal_ctx) {
 
     size_t num_points = positions.size() / 3;
     std::vector<float> distances(num_points, 0.0f);
     if (num_points == 0) return distances;
 
-    // O(n²) brute force for small clouds; spatial hash for larger ones.
+    // Use Metal brute-force k-NN for small clouds when GPU is available.
+    if (metal_ctx && num_points < 10000) {
+        metal::GaussianProcessor processor(*metal_ctx);
+        return processor.computeKnnDistancesMetal(positions, k);
+    }
+
+    // CPU: O(n^2) brute force for small clouds; spatial hash for larger ones.
     if (num_points < 10000) {
         for (size_t i = 0; i < num_points; ++i) {
             std::vector<float> dists;

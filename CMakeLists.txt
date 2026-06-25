@@ -128,6 +128,10 @@ if(APPLE AND MELKOR_USE_METAL)
     )
     
     target_compile_definitions(melkor_metal PUBLIC MELKOR_HAS_METAL)
+    # melkor_core calls into melkor_metal for GPU-accelerated enhanced
+    # conversion and k-NN. CMake resolves the circular static-library
+    # dependency by re-scanning archives at link time.
+    target_link_libraries(melkor_core PUBLIC melkor_metal)
     
     # Compile Metal shaders
     set(METAL_SHADER_COMPUTE ${CMAKE_SOURCE_DIR}/src/metal/shaders/gaussian_compute.metal)
