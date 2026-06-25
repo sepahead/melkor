@@ -324,6 +324,13 @@ PlyReader::ReadResult PlyReader::readFromBuffer(const uint8_t* data, size_t size
     size_t stride = 0;
     for (const auto& p : vertex_props) stride += type_size(p.type);
 
+    // Binary-only: validate the data section is large enough for all declared
+    // vertices. A truncated or malformed PLY must not cause an out-of-bounds
+    // read. (ASCII PLY data size is not stride-predictable, so skip here.)
+    if (is_binary && stride > 0 && vertex_count > (size - header_bytes) / stride) {
+        return {false, "Invalid PLY: data section too small for declared vertex count", {}};
+    }
+
     result.cloud.reserve(vertex_count);
     const uint8_t* vertex_data = data + header_bytes;
 

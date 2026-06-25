@@ -19,6 +19,28 @@ namespace melkor {
 // PythonBridge Implementation
 // ============================================================================
 
+namespace {
+
+// Shell-safe a single argument: wrap in single quotes, escape any embedded
+// single quote as '\''. This prevents command injection via popen when the
+// argument contains metacharacters ($, `, ", ;, |, etc.).
+std::string shellEscape(const std::string& arg) {
+    std::string out;
+    out.reserve(arg.size() + 2);
+    out += '\'';
+    for (char c : arg) {
+        if (c == '\'') {
+            out += "'\\''";
+        } else {
+            out += c;
+        }
+    }
+    out += '\'';
+    return out;
+}
+
+}  // namespace
+
 class PythonBridge::Impl {
 public:
     std::string python_path_;
@@ -35,7 +57,7 @@ public:
         };
         
         for (const auto& path : candidates) {
-            std::string cmd = path + " --version 2>&1";
+            std::string cmd = shellEscape(path) + " --version 2>&1";
             FILE* pipe = popen(cmd.c_str(), "r");
             if (pipe) {
                 char buffer[128];
@@ -84,7 +106,6 @@ public:
         return result;
     }
 };
-
 PythonBridge::PythonBridge() : impl_(std::make_unique<Impl>()) {}
 PythonBridge::~PythonBridge() = default;
 
@@ -131,9 +152,9 @@ PythonBridge::ScriptResult PythonBridge::runScript(
         return result;
     }
     
-    std::string cmd = impl_->python_path_ + " \"" + script_path + "\"";
+    std::string cmd = shellEscape(impl_->python_path_) + " " + shellEscape(script_path);
     for (const auto& arg : args) {
-        cmd += " \"" + arg + "\"";
+        cmd += " " + shellEscape(arg);
     }
     
     return impl_->execute(cmd);
@@ -146,8 +167,27 @@ PythonBridge::ScriptResult PythonBridge::runCode(const std::string& code) {
         return result;
     }
     
-    std::string cmd = impl_->python_path_ + " -c \"" + code + "\"";
-    return impl_->execute(cmd);
+    // Write inline code to a temp file and execute it, rather than passing
+    // via `python -c "..."` which is vulnerable to shell-quote injection when
+    // the code string contains double quotes or metacharacters.
+    std::string temp_script = "/tmp/melkor_inline_" +
+        std::to_string(std::chrono::duration_cast<std::chrono::nanoseconds>(
+            std::chrono::high_resolution_clock::now().time_since_epoch()).count()) +
+        ".py";
+    {
+        std::ofstream f(temp_script);
+        if (!f.is_open()) {
+            ScriptResult result;
+            result.stderr_output = "Failed to write temp script: " + temp_script;
+            return result;
+        }
+        f << code;
+    }
+    
+    std::string cmd = shellEscape(impl_->python_path_) + " " + shellEscape(temp_script);
+    auto result = impl_->execute(cmd);
+    fs::remove(temp_script);
+    return result;
 }
 
 // ============================================================================
@@ -336,9 +376,10 @@ ModelWeightManager::DownloadResult ModelWeightManager::downloadWeights(
     std::string dir = impl_->weights_dir_ + "/" + model_type;
     fs::create_directories(dir);
     
-    // Download using curl
+    // Download using curl. Shell-escape both the output path and URL to
+    // prevent command injection via metacharacters in either string.
     std::string output_path = getWeightsPath(model_type);
-    std::string cmd = "curl -L -o \"" + output_path + "\" \"" + url + "\"";
+    std::string cmd = "curl -L -o " + shellEscape(output_path) + " " + shellEscape(url);
     
     if (progress_callback) {
         progress_callback(0.0f);
