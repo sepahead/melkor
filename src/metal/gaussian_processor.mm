@@ -18,6 +18,8 @@ public:
     id<MTLComputePipelineState> opacityToLogitPipeline = nil;
     id<MTLComputePipelineState> computeCovPipeline = nil;
     id<MTLComputePipelineState> processAllPipeline = nil;
+    id<MTLComputePipelineState> enhancedConvertPipeline = nil;
+    id<MTLComputePipelineState> knnDistancesPipeline = nil;
     
     Impl(MetalContext& ctx) : context(ctx) {
         createPipelines();
@@ -47,9 +49,10 @@ public:
         normalizeQuatPipeline = createPipeline(@"normalize_quaternions");
         scalePosPipeline = createPipeline(@"scale_positions");
         rgbToShPipeline = createPipeline(@"rgb_to_sh_dc");
-        opacityToLogitPipeline = createPipeline(@"opacity_to_logit");
-        computeCovPipeline = createPipeline(@"compute_covariances");
         processAllPipeline = createPipeline(@"process_all");
+        enhancedConvertPipeline = createPipeline(@"enhanced_convert_points");
+        knnDistancesPipeline = createPipeline(@"compute_knn_distances");
+        computeCovPipeline = createPipeline(@"compute_covariances");
     }
     
     bool runKernel(id<MTLComputePipelineState> pipeline,
@@ -359,6 +362,165 @@ bool GaussianProcessor::processCloud(GaussianCloud& cloud, const ProcessConfig& 
     }
     
     return success;
+}
+// ============================================================================
+// Metal-accelerated enhanced conversion and k-NN
+// ============================================================================
+
+std::vector<PackedGaussian> GaussianProcessor::enhancedConvert(
+    const std::vector<float>& positions,
+    const std::vector<float>& normals,
+    const std::vector<float>& colors,
+    const std::vector<float>& adaptive_scales,
+    const EnhancedConvertConfig& config) {
+
+    size_t num_points = positions.size() / 3;
+    std::vector<PackedGaussian> output(num_points);
+    if (num_points == 0) return output;
+
+    if (!impl_->enhancedConvertPipeline) return {};
+
+    id<MTLDevice> device = (__bridge id<MTLDevice>)impl_->context.getDevice();
+    id<MTLCommandQueue> queue = (__bridge id<MTLCommandQueue>)impl_->context.getCommandQueue();
+
+    // Create buffers
+    size_t pos_bytes = positions.size() * sizeof(float);
+    id<MTLBuffer> posBuffer = [device newBufferWithBytes:positions.data()
+                                                  length:pos_bytes
+                                                 options:MTLResourceStorageModeShared];
+
+    id<MTLBuffer> normBuffer = nil;
+    if (!normals.empty()) {
+        normBuffer = [device newBufferWithBytes:normals.data()
+                                         length:normals.size() * sizeof(float)
+                                        options:MTLResourceStorageModeShared];
+    }
+
+    id<MTLBuffer> colorBuffer = nil;
+    if (!colors.empty()) {
+        colorBuffer = [device newBufferWithBytes:colors.data()
+                                           length:colors.size() * sizeof(float)
+                                          options:MTLResourceStorageModeShared];
+    }
+
+    id<MTLBuffer> scaleBuffer = [device newBufferWithBytes:adaptive_scales.data()
+                                                    length:adaptive_scales.size() * sizeof(float)
+                                                   options:MTLResourceStorageModeShared];
+
+    id<MTLBuffer> outBuffer = [device newBufferWithLength:num_points * sizeof(PackedGaussian)
+                                                  options:MTLResourceStorageModeShared];
+
+    // Config struct matching the Metal shader
+    struct MTLEnhancedConfig {
+        float scale_factor;
+        float min_scale;
+        float max_scale;
+        float normal_scale_ratio;
+        float default_opacity;
+        float position_scale;
+        int   convert_coordinate_system;
+        int   use_surface_alignment;
+    } cfg = {
+        config.scale_factor,
+        config.min_scale,
+        config.max_scale,
+        config.normal_scale_ratio,
+        std::clamp(config.default_opacity, 0.001f, 0.999f),
+        config.position_scale,
+        config.convert_coordinate_system ? 1 : 0,
+        config.use_surface_alignment ? 1 : 0
+    };
+
+    id<MTLBuffer> cfgBuffer = [device newBufferWithBytes:&cfg
+                                                  length:sizeof(cfg)
+                                                 options:MTLResourceStorageModeShared];
+
+    uint32_t np = static_cast<uint32_t>(num_points);
+    id<MTLBuffer> npBuffer = [device newBufferWithBytes:&np
+                                                 length:sizeof(np)
+                                                options:MTLResourceStorageModeShared];
+
+    id<MTLCommandBuffer> cmdBuffer = [queue commandBuffer];
+    id<MTLComputeCommandEncoder> encoder = [cmdBuffer computeCommandEncoder];
+
+    [encoder setComputePipelineState:impl_->enhancedConvertPipeline];
+    [encoder setBuffer:posBuffer offset:0 atIndex:0];
+    [encoder setBuffer:normBuffer offset:0 atIndex:1];
+    [encoder setBuffer:colorBuffer offset:0 atIndex:2];
+    [encoder setBuffer:scaleBuffer offset:0 atIndex:3];
+    [encoder setBuffer:outBuffer offset:0 atIndex:4];
+    [encoder setBuffer:cfgBuffer offset:0 atIndex:5];
+    [encoder setBuffer:npBuffer offset:0 atIndex:6];
+
+    NSUInteger threadsPerGroup = MIN([impl_->enhancedConvertPipeline maxTotalThreadsPerThreadgroup], 256);
+    MTLSize gridSize = MTLSizeMake(num_points, 1, 1);
+    MTLSize threadgroupSize = MTLSizeMake(threadsPerGroup, 1, 1);
+    [encoder dispatchThreads:gridSize threadsPerThreadgroup:threadgroupSize];
+    [encoder endEncoding];
+
+    [cmdBuffer commit];
+    [cmdBuffer waitUntilCompleted];
+
+    if ([cmdBuffer status] == MTLCommandBufferStatusCompleted) {
+        memcpy(output.data(), [outBuffer contents], num_points * sizeof(PackedGaussian));
+    }
+
+    return output;
+}
+
+std::vector<float> GaussianProcessor::computeKnnDistancesMetal(
+    const std::vector<float>& positions,
+    int k_neighbors) {
+
+    size_t num_points = positions.size() / 3;
+    std::vector<float> distances(num_points, 0.0f);
+    if (num_points == 0) return distances;
+
+    if (!impl_->knnDistancesPipeline) return distances;
+
+    id<MTLDevice> device = (__bridge id<MTLDevice>)impl_->context.getDevice();
+    id<MTLCommandQueue> queue = (__bridge id<MTLCommandQueue>)impl_->context.getCommandQueue();
+
+    id<MTLBuffer> posBuffer = [device newBufferWithBytes:positions.data()
+                                                  length:positions.size() * sizeof(float)
+                                                 options:MTLResourceStorageModeShared];
+
+    id<MTLBuffer> outBuffer = [device newBufferWithLength:num_points * sizeof(float)
+                                                  options:MTLResourceStorageModeShared];
+
+    uint32_t np = static_cast<uint32_t>(num_points);
+    int32_t k = static_cast<int32_t>(std::min(k_neighbors, 32));
+
+    id<MTLBuffer> npBuffer = [device newBufferWithBytes:&np
+                                                 length:sizeof(np)
+                                                options:MTLResourceStorageModeShared];
+    id<MTLBuffer> kBuffer = [device newBufferWithBytes:&k
+                                                length:sizeof(k)
+                                               options:MTLResourceStorageModeShared];
+
+    id<MTLCommandBuffer> cmdBuffer = [queue commandBuffer];
+    id<MTLComputeCommandEncoder> encoder = [cmdBuffer computeCommandEncoder];
+
+    [encoder setComputePipelineState:impl_->knnDistancesPipeline];
+    [encoder setBuffer:posBuffer offset:0 atIndex:0];
+    [encoder setBuffer:outBuffer offset:0 atIndex:1];
+    [encoder setBuffer:npBuffer offset:0 atIndex:2];
+    [encoder setBuffer:kBuffer offset:0 atIndex:3];
+
+    NSUInteger threadsPerGroup = MIN([impl_->knnDistancesPipeline maxTotalThreadsPerThreadgroup], 64);
+    MTLSize gridSize = MTLSizeMake(num_points, 1, 1);
+    MTLSize threadgroupSize = MTLSizeMake(threadsPerGroup, 1, 1);
+    [encoder dispatchThreads:gridSize threadsPerThreadgroup:threadgroupSize];
+    [encoder endEncoding];
+
+    [cmdBuffer commit];
+    [cmdBuffer waitUntilCompleted];
+
+    if ([cmdBuffer status] == MTLCommandBufferStatusCompleted) {
+        memcpy(distances.data(), [outBuffer contents], num_points * sizeof(float));
+    }
+
+    return distances;
 }
 
 } // namespace metal

@@ -91,6 +91,36 @@ public:
     };
     
     bool processCloud(GaussianCloud& cloud, const ProcessConfig& config);
+
+    // Metal-accelerated enhanced conversion: converts mesh vertices to
+    // Gaussian splats in parallel on GPU. Each thread handles one vertex:
+    // position transform, color to SH DC, opacity logit, adaptive scale to
+    // log, quaternion from normal. Returns packed gaussians or empty on
+    // failure.
+    struct EnhancedConvertConfig {
+        float scale_factor = 0.5f;
+        float min_scale = 0.001f;
+        float max_scale = 0.1f;
+        float normal_scale_ratio = 0.3f;
+        float default_opacity = 0.95f;
+        float position_scale = 1.0f;
+        bool convert_coordinate_system = true;
+        bool use_surface_alignment = true;
+    };
+
+    std::vector<PackedGaussian> enhancedConvert(
+        const std::vector<float>& positions,
+        const std::vector<float>& normals,
+        const std::vector<float>& colors,
+        const std::vector<float>& adaptive_scales,
+        const EnhancedConvertConfig& config);
+
+    // Metal-accelerated brute-force k-NN average distance for small clouds
+    // (n < ~10K). O(n^2) but embarrassingly parallel. Returns per-point
+    // average distance to k nearest neighbors.
+    std::vector<float> computeKnnDistancesMetal(
+        const std::vector<float>& positions,
+        int k_neighbors);
     
 private:
     class Impl;
