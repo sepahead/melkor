@@ -1,9 +1,9 @@
 #include <metal_stdlib>
 using namespace metal;
 
-// Constants for tile-based rasterization
-constant int BLOCK_X = 16;
-constant int BLOCK_Y = 16;
+// Constants for tile-based rasterization (reserved for future tile-based path)
+constant int BLOCK_X [[maybe_unused]] = 16;
+constant int BLOCK_Y [[maybe_unused]] = 16;
 constant float SH_C0 = 0.28209479177387814f;
 
 // Packed Gaussian structure matching C++ PackedGaussian

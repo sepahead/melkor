@@ -69,13 +69,13 @@ void printDeviceInfo() {
         std::cout << "Metal is not available on this system.\n";
         return;
     }
-    
+
     melkor::metal::MetalContext ctx;
     if (!ctx.initialize()) {
         std::cout << "Failed to initialize Metal.\n";
         return;
     }
-    
+
     auto info = ctx.getDeviceInfo();
     std::cout << "GPU Information:\n";
     std::cout << "  Backend: Metal\n";
@@ -89,7 +89,7 @@ void printDeviceInfo() {
         std::cout << "Failed to initialize CUDA.\n";
         return;
     }
-    
+
     auto info = ctx.getDeviceInfo();
     std::cout << "GPU Information:\n";
     std::cout << "  Backend: CUDA\n";
@@ -124,7 +124,7 @@ int main(int argc, char* argv[]) {
         printUsage(argv[0]);
         return 1;
     }
-    
+
     // Parse arguments
     std::string input_path;
     std::string output_path;
@@ -137,22 +137,22 @@ int main(int argc, char* argv[]) {
     bool show_info = false;
     bool list_models = false;
     bool download_model = false;
-    
+
     // Mode selection
     ConversionMode mode = ConversionMode::Basic;
-    
+
     // Enhanced mode options
     int knn_neighbors = 8;
     bool surface_align = true;
-    
+
     // Fit mode options
     int fit_iterations = 3000;
     int fit_views = 8;
     int fit_resolution = 512;
-    
+
     // Feedforward mode options
     std::string model_type = "splatter-image";
-    
+
     // Helper: parse a numeric argument safely, returning false on failure.
     auto parseFloat = [&](const char* flag, const char* val, float& out) -> bool {
         try {
@@ -175,7 +175,7 @@ int main(int argc, char* argv[]) {
 
     for (int i = 1; i < argc; ++i) {
         std::string arg = argv[i];
-        
+
         if (arg == "-h" || arg == "--help") {
             printUsage(argv[0]);
             return 0;
@@ -229,12 +229,12 @@ int main(int argc, char* argv[]) {
             std::cerr << "Warning: Unknown option: " << arg << "\n";
         }
     }
-    
+
     if (show_info) {
         printDeviceInfo();
         return 0;
     }
-    
+
     if (list_models) {
         std::cout << "Available feedforward models:\n";
         melkor::ModelWeightManager manager;
@@ -249,7 +249,7 @@ int main(int argc, char* argv[]) {
         }
         return 0;
     }
-    
+
     if (download_model) {
         std::cout << "Downloading model weights for: " << model_type << "\n";
         melkor::ModelWeightManager manager;
@@ -266,28 +266,28 @@ int main(int argc, char* argv[]) {
         }
         return 0;
     }
-    
+
     if (input_path.empty() || output_path.empty()) {
         std::cerr << "Error: Input and output paths required.\n";
         printUsage(argv[0]);
         return 1;
     }
-    
+
     // Check input exists
     if (!fs::exists(input_path)) {
         std::cerr << "Error: Input file not found: " << input_path << "\n";
         return 1;
     }
-    
+
     std::string input_ext = getExtension(input_path);
     std::string output_ext = getExtension(output_path);
-    
+
     auto start_time = std::chrono::high_resolution_clock::now();
-    
+
     // Initialize Metal if requested
     std::unique_ptr<melkor::metal::MetalContext> metal_ctx;
     std::unique_ptr<melkor::metal::GaussianProcessor> processor;
-    
+
     if (use_metal && melkor::metal::MetalContext::isAvailable()) {
         metal_ctx = std::make_unique<melkor::metal::MetalContext>();
         if (metal_ctx->initialize()) {
@@ -301,17 +301,17 @@ int main(int argc, char* argv[]) {
     } else if (use_metal) {
         std::cout << "Metal not available, using CPU\n";
     }
-    
+
     melkor::GaussianCloud cloud;
-    
+
     // Load input
     if (input_ext == ".glb" || input_ext == ".gltf") {
         std::cout << "Loading GLB: " << input_path << "\n";
-        
+
         // Handle different conversion modes for GLB input
         if (mode == ConversionMode::Enhanced) {
             std::cout << "Using enhanced conversion mode\n";
-            
+
             melkor::EnhancedConverter converter(metal_ctx.get());
             melkor::EnhancedConversionConfig config;
             config.knn_neighbors = knn_neighbors;
@@ -320,28 +320,28 @@ int main(int argc, char* argv[]) {
             config.default_opacity = opacity;
             config.position_scale = pos_scale;
             config.convert_coordinate_system = convert_coords;
-            
+
             auto result = converter.convertFromFile(input_path, config);
             if (!result.success) {
                 std::cerr << "Error: " << result.error_message << "\n";
                 return 1;
             }
-            
+
             cloud = std::move(result.cloud);
             std::cout << "Enhanced conversion: " << result.original_vertices << " vertices -> "
                       << result.output_splats << " splats\n";
             std::cout << "Average scale: " << result.avg_scale << "\n";
-            
+
         } else if (mode == ConversionMode::Fit) {
             std::cout << "Using render-based Gaussian fitting mode\n";
             std::cout << "This may take several minutes...\n";
-            
+
             if (!metal_ctx) {
                 std::cerr << "Error: Fit mode requires GPU acceleration (Metal on macOS)\n";
                 std::cerr << "Use OpenSplat with --backend cuda/metal for GPU-accelerated training\n";
                 return 1;
             }
-            
+
             melkor::GaussianFitter fitter(*metal_ctx);
             melkor::GaussianFitConfig config;
             config.num_iterations = fit_iterations;
@@ -350,48 +350,48 @@ int main(int argc, char* argv[]) {
             config.render_height = fit_resolution;
             config.progress_callback = [](int iter, float loss, size_t num_gaussians) {
                 if (iter % 500 == 0) {
-                    std::cout << "Iteration " << iter << ": loss=" << loss 
+                    std::cout << "Iteration " << iter << ": loss=" << loss
                               << ", gaussians=" << num_gaussians << "\n";
                 }
             };
-            
+
             auto result = fitter.fitFromGlb(input_path, config);
             if (!result.success) {
                 std::cerr << "Error: " << result.error_message << "\n";
                 return 1;
             }
-            
+
             cloud = std::move(result.cloud);
             std::cout << "Fitting complete: " << cloud.size() << " Gaussians\n";
             std::cout << "Final loss: " << result.final_loss << "\n";
             std::cout << "Time: " << result.fitting_time_seconds << "s\n";
-            
+
         } else if (mode == ConversionMode::Feedforward) {
             std::cout << "Using feedforward neural network mode\n";
-            
+
             melkor::FeedforwardModel model;
             melkor::FeedforwardConfig config;
             config.model_type = model_type;
             config.log_callback = [](const std::string& msg) {
                 std::cout << msg << "\n";
             };
-            
+
             if (!model.initialize(config)) {
                 std::cerr << "Error: Failed to initialize feedforward model\n";
                 std::cerr << "Run with --download-model to download weights first\n";
                 return 1;
             }
-            
+
             auto result = model.predictFromGlb(input_path);
             if (!result.success) {
                 std::cerr << "Error: " << result.error_message << "\n";
                 return 1;
             }
-            
+
             cloud = std::move(result.cloud);
             std::cout << "Inference complete: " << cloud.size() << " Gaussians\n";
             std::cout << "Inference time: " << result.inference_time_ms << "ms\n";
-            
+
         } else {
             // Basic mode (original implementation)
             melkor::GlbReader reader;
@@ -400,42 +400,42 @@ int main(int argc, char* argv[]) {
             config.default_opacity = opacity;
             config.position_scale = pos_scale;
             config.convert_coordinate_system = convert_coords;
-            
+
             auto result = reader.loadFromFile(input_path, config);
             if (!result.success) {
                 std::cerr << "Error loading GLB: " << result.error_message << "\n";
                 return 1;
             }
-            
+
             cloud = std::move(result.cloud);
             std::cout << "Loaded " << cloud.size() << " vertices from "
                       << result.total_meshes << " meshes\n";
         }
-                  
+
     } else if (input_ext == ".ply") {
         std::cout << "Loading PLY: " << input_path << "\n";
-        
+
         melkor::PlyReader reader;
         auto result = reader.readFromFile(input_path);
         if (!result.success) {
             std::cerr << "Error loading PLY: " << result.error_message << "\n";
             return 1;
         }
-        
+
         cloud = std::move(result.cloud);
         std::cout << "Loaded " << cloud.size() << " splats\n";
-        
+
     } else if (input_ext == ".spz") {
 #ifdef MELKOR_HAS_SPZ
         std::cout << "Loading SPZ: " << input_path << "\n";
-        
+
         melkor::SpzDecoder decoder;
         auto result = decoder.decodeFromFile(input_path);
         if (!result.success) {
             std::cerr << "Error loading SPZ: " << result.error_message << "\n";
             return 1;
         }
-        
+
         cloud = std::move(result.cloud);
         std::cout << "Loaded " << cloud.size() << " splats\n";
 #else
@@ -446,51 +446,51 @@ int main(int argc, char* argv[]) {
         std::cerr << "Error: Unsupported input format: " << input_ext << "\n";
         return 1;
     }
-    
+
     // Process with Metal if available (for additional optimizations)
     if (processor && !cloud.empty()) {
         std::cout << "Processing with Metal...\n";
-        
+
         melkor::metal::GaussianProcessor::ProcessConfig proc_config;
         proc_config.normalize_quaternions = true;
         proc_config.convert_colors_to_sh = false;  // Already converted in loader
         proc_config.convert_opacity_to_logit = false;  // Already converted
         proc_config.position_scale = 1.0f;  // Already scaled
         proc_config.transform_y_up_to_z_up = false;  // Already transformed
-        
+
         processor->normalizeQuaternions(cloud);
     }
-    
+
     // Write output
     if (output_ext == ".ply") {
         std::cout << "Writing PLY: " << output_path << "\n";
-        
+
         melkor::PlyWriter writer;
         melkor::PlyWriteConfig config;
         config.format = use_binary ? melkor::PlyFormat::Binary : melkor::PlyFormat::Ascii;
-        
+
         auto result = writer.writeToFile(output_path, cloud, config);
         if (!result.success) {
             std::cerr << "Error writing PLY: " << result.error_message << "\n";
             return 1;
         }
-        
+
         std::cout << "Written " << result.bytes_written << " bytes\n";
-        
+
     } else if (output_ext == ".spz") {
 #ifdef MELKOR_HAS_SPZ
         std::cout << "Writing SPZ: " << output_path << "\n";
-        
+
         melkor::SpzEncoder encoder;
         melkor::SpzEncodeConfig config;
         config.sh_degree = cloud.shDegree();
-        
+
         auto result = encoder.encodeToFile(output_path, cloud, config);
         if (!result.success) {
             std::cerr << "Error writing SPZ: " << result.error_message << "\n";
             return 1;
         }
-        
+
         std::cout << "Written " << result.bytes_written << " bytes\n";
 #else
         std::cerr << "Error: SPZ support not compiled. Rebuild with SPZ library.\n";
@@ -500,18 +500,18 @@ int main(int argc, char* argv[]) {
         std::cerr << "Error: Unsupported output format: " << output_ext << "\n";
         return 1;
     }
-    
+
     auto end_time = std::chrono::high_resolution_clock::now();
     auto duration = std::chrono::duration_cast<std::chrono::milliseconds>(end_time - start_time);
-    
+
     std::cout << "Done in " << duration.count() << " ms\n";
-    
+
     // Print bounding box
     float minX, minY, minZ, maxX, maxY, maxZ;
     cloud.computeBoundingBox(minX, minY, minZ, maxX, maxY, maxZ);
     std::cout << "Bounding box: ("
               << minX << ", " << minY << ", " << minZ << ") - ("
               << maxX << ", " << maxY << ", " << maxZ << ")\n";
-    
+
     return 0;
 }
