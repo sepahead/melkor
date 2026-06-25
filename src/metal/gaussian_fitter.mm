@@ -6,9 +6,13 @@
 #include <chrono>
 #include <iostream>
 
-// For GLB loading
+// For GLB loading — guard against definitions from the CMake target
+#ifndef TINYGLTF_NO_STB_IMAGE_WRITE
 #define TINYGLTF_NO_STB_IMAGE_WRITE
+#endif
+#ifndef TINYGLTF_NO_EXTERNAL_IMAGE
 #define TINYGLTF_NO_EXTERNAL_IMAGE
+#endif
 #include "tiny_gltf.h"
 
 namespace melkor {
