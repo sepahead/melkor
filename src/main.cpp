@@ -153,6 +153,26 @@ int main(int argc, char* argv[]) {
     // Feedforward mode options
     std::string model_type = "splatter-image";
     
+    // Helper: parse a numeric argument safely, returning false on failure.
+    auto parseFloat = [&](const char* flag, const char* val, float& out) -> bool {
+        try {
+            out = std::stof(val);
+            return true;
+        } catch (const std::exception&) {
+            std::cerr << "Error: Invalid number for " << flag << ": \"" << val << "\"\n";
+            return false;
+        }
+    };
+    auto parseInt = [&](const char* flag, const char* val, int& out) -> bool {
+        try {
+            out = std::stoi(val);
+            return true;
+        } catch (const std::exception&) {
+            std::cerr << "Error: Invalid integer for " << flag << ": \"" << val << "\"\n";
+            return false;
+        }
+    };
+
     for (int i = 1; i < argc; ++i) {
         std::string arg = argv[i];
         
@@ -174,23 +194,23 @@ int main(int argc, char* argv[]) {
         } else if (arg == "--feedforward") {
             mode = ConversionMode::Feedforward;
         } else if (arg == "--scale" && i + 1 < argc) {
-            splat_scale = std::stof(argv[++i]);
+            if (!parseFloat("--scale", argv[++i], splat_scale)) return 1;
         } else if (arg == "--opacity" && i + 1 < argc) {
-            opacity = std::stof(argv[++i]);
+            if (!parseFloat("--opacity", argv[++i], opacity)) return 1;
         } else if (arg == "--pos-scale" && i + 1 < argc) {
-            pos_scale = std::stof(argv[++i]);
+            if (!parseFloat("--pos-scale", argv[++i], pos_scale)) return 1;
         } else if (arg == "--no-coord-convert") {
             convert_coords = false;
         } else if (arg == "--knn" && i + 1 < argc) {
-            knn_neighbors = std::stoi(argv[++i]);
+            if (!parseInt("--knn", argv[++i], knn_neighbors)) return 1;
         } else if (arg == "--no-surface-align") {
             surface_align = false;
         } else if (arg == "--iterations" && i + 1 < argc) {
-            fit_iterations = std::stoi(argv[++i]);
+            if (!parseInt("--iterations", argv[++i], fit_iterations)) return 1;
         } else if (arg == "--views" && i + 1 < argc) {
-            fit_views = std::stoi(argv[++i]);
+            if (!parseInt("--views", argv[++i], fit_views)) return 1;
         } else if (arg == "--resolution" && i + 1 < argc) {
-            fit_resolution = std::stoi(argv[++i]);
+            if (!parseInt("--resolution", argv[++i], fit_resolution)) return 1;
         } else if (arg == "--model" && i + 1 < argc) {
             model_type = argv[++i];
         } else if (arg == "--ascii") {
@@ -202,7 +222,11 @@ int main(int argc, char* argv[]) {
                 input_path = arg;
             } else if (output_path.empty()) {
                 output_path = arg;
+            } else {
+                std::cerr << "Warning: Ignoring extra positional argument: " << arg << "\n";
             }
+        } else {
+            std::cerr << "Warning: Unknown option: " << arg << "\n";
         }
     }
     

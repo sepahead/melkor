@@ -3,6 +3,7 @@
 #include <iostream>
 #include <vector>
 #include <cstring>
+#include <algorithm>
 
 namespace melkor {
 namespace cuda {
@@ -367,7 +368,34 @@ bool GaussianProcessor::processCloud(GaussianCloud& cloud, const ProcessConfig& 
         return false;
     }
     
-    return impl_->downloadFromDevice(cloud);
+    if (!impl_->downloadFromDevice(cloud)) {
+        return false;
+    }
+
+    // Apply operations without dedicated CUDA kernels on the CPU side, so
+    // they are not silently skipped when requested via ProcessConfig.
+    if (config.transform_y_up_to_z_up) {
+        for (auto& s : cloud.splats()) {
+            float tmp = s.y;
+            s.y = -s.z;
+            s.z = tmp;
+        }
+    }
+    if (config.convert_colors_to_sh) {
+        for (auto& s : cloud.splats()) {
+            s.f_dc_0 = utils::rgbToShDc(utils::shDcToRgb(s.f_dc_0));
+            s.f_dc_1 = utils::rgbToShDc(utils::shDcToRgb(s.f_dc_1));
+            s.f_dc_2 = utils::rgbToShDc(utils::shDcToRgb(s.f_dc_2));
+        }
+    }
+    if (config.convert_opacity_to_logit) {
+        for (auto& s : cloud.splats()) {
+            float op = utils::sigmoid(s.opacity);
+            s.opacity = utils::logit(std::clamp(op, 0.001f, 0.999f));
+        }
+    }
+
+    return true;
 }
 
 } // namespace cuda
