@@ -139,8 +139,9 @@ PlyWriteResult PlyWriter::writeToStream(std::ostream& stream,
             result.bytes_written += (6 + 3 + sh_rest_count + 1 + 3 + 4) * sizeof(float);
         }
     } else {
-        // ASCII format
+        // ASCII format — track bytes written via stream position
         stream << std::setprecision(8);
+        auto pos_before = stream.tellp();
         for (const auto& splat : splats) {
             stream << splat.x << " " << splat.y << " " << splat.z << " ";
             stream << "0 0 1 ";  // dummy normals
@@ -154,6 +155,10 @@ PlyWriteResult PlyWriter::writeToStream(std::ostream& stream,
             stream << splat.opacity << " ";
             stream << splat.scale_0 << " " << splat.scale_1 << " " << splat.scale_2 << " ";
             stream << splat.rot_0 << " " << splat.rot_1 << " " << splat.rot_2 << " " << splat.rot_3 << "\n";
+        }
+        auto pos_after = stream.tellp();
+        if (pos_after != decltype(pos_after)(-1) && pos_before != decltype(pos_before)(-1)) {
+            result.bytes_written += static_cast<size_t>(pos_after - pos_before);
         }
     }
     
