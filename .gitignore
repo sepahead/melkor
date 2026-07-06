@@ -94,3 +94,19 @@ ml-sharp/data/
 
 # Downloaded test datasets
 test_data/
+
+# Node (web viewer + JS tooling)
+node_modules/
+
+# SparkJS web viewer: downloaded libs/splats + generated test output
+# (source — index.html, tests/, *.config.js, fetch-assets.sh — stays tracked)
+viewer/vendor/
+viewer/public/splats/
+viewer/screenshots/
+viewer/test-results/
+viewer/playwright-report/
+viewer/dist/
+
+# Tauri desktop shell: Rust build output + generated bindings (src-tauri source stays tracked)
+viewer/src-tauri/target/
+viewer/src-tauri/gen/

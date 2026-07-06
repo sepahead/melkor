@@ -1,0 +1,17 @@
+{
+  "name": "melkor-spark-viewer",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "SparkJS Gaussian-splat viewer for melkor: city/area scenes, camera controls, Playwright render tests.",
+  "scripts": {
+    "serve": "bun serve.js",
+    "app": "cargo tauri dev",
+    "app:build": "cargo tauri build",
+    "test": "playwright test",
+    "test:headed": "playwright test --headed"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.61.0"
+  }
+}

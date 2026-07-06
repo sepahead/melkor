@@ -1,0 +1,444 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no" />
+<title>Melkor · SparkJS Gaussian Splat Viewer</title>
+<style>
+  :root { color-scheme: dark; }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; height: 100%; overflow: hidden; background: #0b0c10; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; color: #e6e6e6; }
+  #app { position: fixed; inset: 0; }
+  canvas { display: block; width: 100%; height: 100%; }
+
+  /* ---- HUD ---- */
+  #hud { position: fixed; top: 12px; left: 12px; z-index: 10; background: rgba(12,14,18,.72);
+         border: 1px solid rgba(255,255,255,.10); border-radius: 10px; padding: 10px 12px;
+         font-size: 12px; line-height: 1.55; backdrop-filter: blur(8px); max-width: 320px; pointer-events: none; }
+  #hud b { color: #7fd1ff; font-weight: 600; }
+  #hud .row { white-space: pre; }
+  #hud .dim { color: #8a93a3; }
+
+  /* ---- Scene switcher ---- */
+  #scenes { position: fixed; top: 12px; right: 12px; z-index: 10; display: flex; flex-direction: column; gap: 6px; }
+  #scenes button { font: inherit; font-size: 12px; text-align: left; cursor: pointer;
+        background: rgba(18,22,28,.78); color: #cfd6e0; border: 1px solid rgba(255,255,255,.10);
+        border-radius: 8px; padding: 7px 10px; min-width: 188px; transition: background .12s, border-color .12s; }
+  #scenes button:hover { background: rgba(36,44,56,.9); }
+  #scenes button.active { border-color: #7fd1ff; color: #fff; background: rgba(20,40,56,.9); }
+  #scenes button .meta { display: block; font-size: 10px; color: #8a93a3; margin-top: 2px; }
+
+  /* ---- Controls bar ---- */
+  #bar { position: fixed; bottom: 12px; left: 50%; transform: translateX(-50%); z-index: 10;
+         display: flex; gap: 6px; align-items: center; background: rgba(12,14,18,.72);
+         border: 1px solid rgba(255,255,255,.10); border-radius: 10px; padding: 7px 9px; backdrop-filter: blur(8px); }
+  #bar button { font: inherit; font-size: 12px; cursor: pointer; background: rgba(28,34,44,.9); color: #cfd6e0;
+         border: 1px solid rgba(255,255,255,.12); border-radius: 7px; padding: 6px 10px; }
+  #bar button:hover { background: rgba(44,54,68,.95); }
+  #bar .sep { width: 1px; height: 18px; background: rgba(255,255,255,.14); margin: 0 3px; }
+  #bar .hint { font-size: 11px; color: #8a93a3; padding: 0 4px; }
+
+  /* ---- Loading / error overlay ---- */
+  #overlay { position: fixed; inset: 0; z-index: 20; display: none; align-items: center; justify-content: center;
+        background: rgba(8,9,12,.55); backdrop-filter: blur(2px); }
+  #overlay.show { display: flex; }
+  #overlay .card { background: rgba(16,19,25,.95); border: 1px solid rgba(255,255,255,.12); border-radius: 12px;
+        padding: 18px 22px; min-width: 260px; text-align: center; }
+  #overlay .title { font-size: 13px; margin-bottom: 10px; color: #e6e6e6; }
+  #overlay .err { color: #ff8585; }
+  #track { height: 6px; width: 220px; background: rgba(255,255,255,.10); border-radius: 4px; overflow: hidden; margin: 0 auto; }
+  #fill { height: 100%; width: 0%; background: linear-gradient(90deg,#3da9fc,#7fd1ff); transition: width .15s; }
+  #pct { font-size: 11px; color: #8a93a3; margin-top: 7px; }
+</style>
+</head>
+<body>
+<div id="app"></div>
+
+<div id="hud">
+  <div class="row"><b>Melkor · SparkJS viewer</b></div>
+  <div class="row" id="h-scene">scene: <span class="dim">—</span></div>
+  <div class="row" id="h-fmt">format: <span class="dim">—</span></div>
+  <div class="row" id="h-splats">splats: <span class="dim">—</span></div>
+  <div class="row" id="h-fps">fps: <span class="dim">—</span></div>
+  <div class="row" id="h-cam">cam: <span class="dim">—</span></div>
+  <div class="row" id="h-mode">mode: <span class="dim">—</span></div>
+</div>
+
+<div id="scenes"></div>
+
+<div id="bar">
+  <button data-cam="front">Front</button>
+  <button data-cam="side">Side</button>
+  <button data-cam="top">Top</button>
+  <button data-cam="iso">3/4</button>
+  <div class="sep"></div>
+  <button id="orbitBtn">Orbit: on</button>
+  <button id="resetBtn">Reframe</button>
+  <div class="sep"></div>
+  <span class="hint">WASD/arrows move · drag rotate · scroll zoom</span>
+</div>
+
+<div id="overlay"><div class="card">
+  <div class="title" id="ov-title">Loading…</div>
+  <div id="track"><div id="fill"></div></div>
+  <div id="pct">0%</div>
+</div></div>
+
+<script type="importmap">
+{
+  "imports": {
+    "three": "./vendor/three.module.js",
+    "three/addons/": "./vendor/addons/",
+    "@sparkjsdev/spark": "./vendor/spark.module.js"
+  }
+}
+</script>
+
+<script type="module">
+import * as THREE from "three";
+import { SparkRenderer, SplatMesh, SparkControls } from "@sparkjsdev/spark";
+
+// ---------------------------------------------------------------------------
+// Scene catalogue: city / area gaussian splats downloaded into public/splats/
+// ---------------------------------------------------------------------------
+const SCENES = [
+  { id: "snow-street",   label: "Snowy Street",   file: "snow-street.spz",   fmt: "SPZ",  note: "urban street · ~982K" },
+  { id: "valley",        label: "Valley",         file: "valley.spz",        fmt: "SPZ",  note: "landscape · 500K" },
+  { id: "sutro",         label: "Sutro Tower (SF)",file: "sutro.zip",        fmt: "SOG",  note: "cityscape · ~2.0M" },
+  { id: "train",         label: "Rail Yard",      file: "train.splat",       fmt: "SPLAT",note: "outdoor area · ~1.0M" },
+  { id: "distant-igloo", label: "Distant Igloo",  file: "distant-igloo.spz", fmt: "SPZ",  note: "outdoor area · 347K" },
+  { id: "igloo-ply",     label: "Igloo · PLY (melkor)", file: "distant-igloo.ply", fmt: "PLY", note: "melkor SPZ→PLY · 347K" },
+];
+const SPLAT_DIR = "./public/splats/";
+
+// ---------------------------------------------------------------------------
+// Three.js + Spark setup
+// ---------------------------------------------------------------------------
+const appEl = document.getElementById("app");
+const scene = new THREE.Scene();
+scene.background = new THREE.Color(0x0b0c10);
+
+const camera = new THREE.PerspectiveCamera(60, window.innerWidth / window.innerHeight, 0.05, 2000);
+camera.position.set(0, 0, 5);
+
+const renderer = new THREE.WebGLRenderer({ antialias: false, preserveDrawingBuffer: true });
+renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+renderer.setSize(window.innerWidth, window.innerHeight);
+appEl.appendChild(renderer.domElement);
+
+const spark = new SparkRenderer({ renderer });
+scene.add(spark);
+
+const controls = new SparkControls({ canvas: renderer.domElement });
+
+// Camera rig: we orbit / frame around `target`.
+const target = new THREE.Vector3(0, 0, 0);
+let orbitRadius = 5;
+let orbitEnabled = true;
+let orbitAzimuth = Math.PI * 0.25;   // radians
+let orbitElevation = Math.PI * 0.09; // radians (~16deg, low 3/4 aerial)
+const ORBIT_SPEED = 0.18;            // rad/sec
+let manualControl = false;           // user grabbed the camera via SparkControls
+
+let currentMesh = null;
+let currentScene = null;
+let frameCountSinceLoad = 0;
+let loadGen = 0;                     // monotonic token: only the latest load mutates state
+
+// ---------------------------------------------------------------------------
+// Framing: position camera so the splat bounding sphere fills the view
+// ---------------------------------------------------------------------------
+// Spark's getBoundingBox() returns NaN for packed/compressed scenes, so we derive
+// robust framing bounds directly from splat centers. Many captures are dominated by
+// faint atmospheric "haze" splats and a few extreme floaters, so we (1) keep only the
+// more opaque half of a sampled subset to lock onto solid geometry, then (2) use a
+// median center + 90th-percentile distance radius. Works for object-centric scenes
+// and immersive 360 captures alike.
+function computeBounds(mesh) {
+  let n = 0;
+  mesh.forEachSplat((_i, c) => { if (Number.isFinite(c.x) && Number.isFinite(c.y) && Number.isFinite(c.z)) n++; });
+  if (n === 0) return null;
+  const stride = Math.max(1, Math.floor(n / 150000));
+  const samp = []; // [x, y, z, opacity]
+  let seen = 0;
+  mesh.forEachSplat((_i, c, _s, _q, opacity) => {
+    if (!Number.isFinite(c.x) || !Number.isFinite(c.y) || !Number.isFinite(c.z)) return;
+    if ((seen++ % stride) !== 0) return;
+    samp.push([c.x, c.y, c.z, Number.isFinite(opacity) ? opacity : 1]);
+  });
+  if (!samp.length) return null;
+  // Drop the faint haze: keep splats whose opacity is >= the median opacity.
+  const oThresh = samp.map((p) => p[3]).sort((a, b) => a - b)[samp.length >> 1] ?? 0;
+  let solid = samp.filter((p) => p[3] >= oThresh);
+  if (solid.length < 64) solid = samp;
+  const med = (vals) => { const a = vals.slice().sort((p, q) => p - q); return a[a.length >> 1]; };
+  const center = new THREE.Vector3(med(solid.map((p) => p[0])), med(solid.map((p) => p[1])), med(solid.map((p) => p[2])));
+  const dists = solid.map((p) => Math.hypot(p[0] - center.x, p[1] - center.y, p[2] - center.z)).sort((a, b) => a - b);
+  const pct = (p) => dists[Math.min(dists.length - 1, Math.max(0, Math.floor(p * dists.length)))];
+  return { center, radius: Math.max(pct(0.9), 1e-3), count: n, solid: solid.length };
+}
+
+function frameMesh(mesh) {
+  const b = computeBounds(mesh);
+  if (!b) { target.set(0, 0, 0); orbitRadius = 5; applyOrbit(); return; }
+  // Bounds are in mesh-local space; apply the mesh world transform to the center.
+  const center = b.center.clone().applyQuaternion(mesh.quaternion).multiply(mesh.scale).add(mesh.position);
+  target.copy(center);
+  const s = Math.max(mesh.scale.x, mesh.scale.y, mesh.scale.z);
+  const r = Math.max(b.radius * s, 1e-3);
+  const fov = THREE.MathUtils.degToRad(camera.fov);
+  orbitRadius = (r / Math.sin(fov / 2)) * 1.35;
+  camera.near = Math.max(orbitRadius / 1000, 0.01);
+  camera.far = orbitRadius * 50;
+  camera.updateProjectionMatrix();
+  applyOrbit();
+}
+
+function applyOrbit() {
+  const ce = Math.cos(orbitElevation), se = Math.sin(orbitElevation);
+  const ca = Math.cos(orbitAzimuth), sa = Math.sin(orbitAzimuth);
+  camera.position.set(
+    target.x + orbitRadius * ce * ca,
+    target.y + orbitRadius * se,
+    target.z + orbitRadius * ce * sa,
+  );
+  camera.lookAt(target);
+}
+
+// Named viewpoints ("camera feeds") used by the UI + tests.
+const VIEWS = {
+  front: [Math.PI * 0.5,  Math.PI * 0.06],
+  side:  [0.0,            Math.PI * 0.06],
+  top:   [Math.PI * 0.5,  Math.PI * 0.48],
+  iso:   [Math.PI * 0.22, Math.PI * 0.10],
+};
+function setView(name) {
+  const v = VIEWS[name];
+  if (!v) return;
+  orbitEnabled = false; manualControl = false; syncOrbitBtn();
+  orbitAzimuth = v[0]; orbitElevation = v[1];
+  applyOrbit();
+}
+
+// ---------------------------------------------------------------------------
+// Scene loading
+// ---------------------------------------------------------------------------
+const overlay = document.getElementById("overlay");
+const ovTitle = document.getElementById("ov-title");
+const fill = document.getElementById("fill");
+const pct = document.getElementById("pct");
+
+function showOverlay(title) { ovTitle.textContent = title; ovTitle.className = "title"; fill.style.width = "0%"; pct.textContent = "0%"; overlay.classList.add("show"); }
+function showError(msg) { ovTitle.textContent = msg; ovTitle.className = "title err"; overlay.classList.add("show"); }
+function hideOverlay() { overlay.classList.remove("show"); }
+
+function splatCountOf(mesh) {
+  try {
+    return mesh?.splats?.getNumSplats?.()
+        ?? mesh?.packedSplats?.numSplats
+        ?? mesh?.context?.numSplats?.value
+        ?? 0;
+  } catch { return 0; }
+}
+
+async function loadScene(id) {
+  const def = SCENES.find((s) => s.id === id);
+  if (!def) throw new Error("unknown scene: " + id);
+  const gen = ++loadGen;             // supersede any in-flight load (e.g. the boot auto-load)
+  state.loading = true; state.error = null; state.rendered = false;
+  frameCountSinceLoad = 0;
+  showOverlay(`Loading ${def.label}…`);
+
+  const mesh = new SplatMesh({
+    url: SPLAT_DIR + def.file,
+    onProgress: (e) => {
+      if (gen !== loadGen) return;    // ignore progress from a superseded load
+      if (e && e.lengthComputable && e.total) {
+        const p = Math.min(100, (e.loaded / e.total) * 100);
+        fill.style.width = p.toFixed(1) + "%"; pct.textContent = p.toFixed(0) + "%";
+      } else if (e && e.loaded) {
+        pct.textContent = (e.loaded / 1e6).toFixed(1) + " MB";
+      }
+    },
+  });
+  // gsplat scenes are trained Y-down/Z-forward -> 180° about X to bring up-axis into THREE space.
+  mesh.quaternion.set(1, 0, 0, 0);
+
+  try {
+    await mesh.initialized;
+  } catch (err) {
+    try { mesh.dispose(); } catch {}
+    if (gen !== loadGen) return null;
+    state.loading = false; state.error = String(err);
+    showError("Failed to load " + def.label + "\n" + err);
+    throw err;
+  }
+
+  // A newer load started while this one was downloading: discard it silently.
+  if (gen !== loadGen) { try { mesh.dispose(); } catch {} return null; }
+
+  // Swap the freshly-loaded mesh in for the previous one (no blank gap mid-load).
+  if (currentMesh) { scene.remove(currentMesh); try { currentMesh.dispose(); } catch {} }
+  currentMesh = mesh; currentScene = def;
+  scene.add(mesh);
+  frameCountSinceLoad = 0;           // count frames rendered AFTER the swap, not during download
+  frameMesh(mesh);
+  orbitEnabled = true; manualControl = false; syncOrbitBtn();
+
+  state.loading = false;
+  state.scene = def.id;
+  state.format = def.fmt;
+  state.splatCount = splatCountOf(mesh);
+  updateHud();
+  updateSceneButtons();
+  hideOverlay();
+  return mesh;
+}
+
+// ---------------------------------------------------------------------------
+// HUD + UI
+// ---------------------------------------------------------------------------
+const hScene = document.getElementById("h-scene");
+const hFmt = document.getElementById("h-fmt");
+const hSplats = document.getElementById("h-splats");
+const hFps = document.getElementById("h-fps");
+const hCam = document.getElementById("h-cam");
+const hMode = document.getElementById("h-mode");
+
+function updateHud() {
+  hScene.innerHTML = "scene: <b>" + (currentScene ? currentScene.label : "—") + "</b>";
+  hFmt.innerHTML = "format: <b>" + (currentScene ? currentScene.fmt : "—") + "</b>";
+  hSplats.innerHTML = "splats: <b>" + (state.splatCount ? state.splatCount.toLocaleString() : "—") + "</b>";
+}
+function updateCamHud() {
+  hFps.innerHTML = "fps: <b>" + state.fps.toFixed(0) + "</b>";
+  hCam.innerHTML = "cam: <span class='dim'>" +
+    camera.position.x.toFixed(2) + ", " + camera.position.y.toFixed(2) + ", " + camera.position.z.toFixed(2) + "</span>";
+  hMode.innerHTML = "mode: <b>" + (manualControl ? "manual" : orbitEnabled ? "orbit" : "static") + "</b>";
+}
+
+const scenesEl = document.getElementById("scenes");
+function buildSceneButtons() {
+  scenesEl.innerHTML = "";
+  for (const s of SCENES) {
+    const b = document.createElement("button");
+    b.dataset.scene = s.id;
+    b.innerHTML = s.label + "<span class='meta'>" + s.fmt + " · " + s.note + "</span>";
+    b.addEventListener("click", () => loadScene(s.id).catch((e) => console.error(e)));
+    scenesEl.appendChild(b);
+  }
+}
+function updateSceneButtons() {
+  for (const b of scenesEl.children) b.classList.toggle("active", b.dataset.scene === (currentScene && currentScene.id));
+}
+
+function syncOrbitBtn() { document.getElementById("orbitBtn").textContent = "Orbit: " + (orbitEnabled ? "on" : "off"); }
+
+document.querySelectorAll("#bar [data-cam]").forEach((b) => b.addEventListener("click", () => setView(b.dataset.cam)));
+document.getElementById("orbitBtn").addEventListener("click", () => { orbitEnabled = !orbitEnabled; manualControl = false; syncOrbitBtn(); });
+document.getElementById("resetBtn").addEventListener("click", () => { if (currentMesh) { orbitEnabled = true; manualControl = false; syncOrbitBtn(); frameMesh(currentMesh); } });
+
+// Any direct interaction on the canvas switches to manual (SparkControls) navigation.
+renderer.domElement.addEventListener("pointerdown", () => { manualControl = true; orbitEnabled = false; syncOrbitBtn(); });
+renderer.domElement.addEventListener("wheel", () => { manualControl = true; orbitEnabled = false; syncOrbitBtn(); }, { passive: true });
+
+// ---------------------------------------------------------------------------
+// Render loop
+// ---------------------------------------------------------------------------
+const state = {
+  ready: false, loading: false, rendered: false, error: null,
+  scene: null, format: null, splatCount: 0, fps: 0,
+};
+
+let lastT = performance.now();
+let fpsAccum = 0, fpsFrames = 0;
+const clock = new THREE.Clock();
+
+renderer.setAnimationLoop(() => {
+  const now = performance.now();
+  const dt = clock.getDelta();
+
+  if (manualControl) {
+    controls.update(camera);
+    target.copy(camera.position).add(camera.getWorldDirection(new THREE.Vector3()).multiplyScalar(orbitRadius));
+  } else if (orbitEnabled) {
+    orbitAzimuth += ORBIT_SPEED * dt;
+    applyOrbit();
+  }
+
+  renderer.render(scene, camera);
+
+  if (currentMesh && !state.loading && !state.rendered) {
+    frameCountSinceLoad++;
+    if (frameCountSinceLoad >= 4) state.rendered = true; // a few frames -> splat sort has run
+  }
+
+  // fps (smoothed over ~0.25s)
+  const frameMs = now - lastT; lastT = now;
+  fpsAccum += frameMs; fpsFrames++;
+  if (fpsAccum >= 250) { state.fps = 1000 / (fpsAccum / fpsFrames); fpsAccum = 0; fpsFrames = 0; updateCamHud(); }
+});
+
+window.addEventListener("resize", () => {
+  camera.aspect = window.innerWidth / window.innerHeight;
+  camera.updateProjectionMatrix();
+  renderer.setSize(window.innerWidth, window.innerHeight);
+});
+
+// ---------------------------------------------------------------------------
+// Boot + Playwright/automation hooks
+// ---------------------------------------------------------------------------
+updateHud();
+syncOrbitBtn();
+
+window.__viewer = {
+  THREE, scene, camera, renderer, spark,
+  state,
+  get scenes() { return SCENES.map((s) => ({ id: s.id, label: s.label, file: s.file, fmt: s.fmt })); },
+  async load(id) { return loadScene(id); },
+  setView,
+  setOrbit(on) { orbitEnabled = !!on; manualControl = false; syncOrbitBtn(); },
+  setAngles(azDeg, elDeg, distFactor) {
+    orbitEnabled = false; manualControl = false; syncOrbitBtn();
+    orbitAzimuth = THREE.MathUtils.degToRad(azDeg);
+    orbitElevation = THREE.MathUtils.degToRad(elDeg);
+    if (distFactor) orbitRadius *= distFactor;
+    applyOrbit();
+  },
+  getStats() {
+    return {
+      ready: state.ready, loading: state.loading, rendered: state.rendered, error: state.error,
+      scene: state.scene, format: state.format, splatCount: state.splatCount, fps: state.fps,
+      camera: camera.position.toArray().map((n) => +n.toFixed(3)),
+      target: target.toArray().map((n) => +n.toFixed(3)),
+    };
+  },
+  // Resolves once the requested scene is loaded AND a few frames have rendered.
+  async waitRendered(timeoutMs = 60000) {
+    const t0 = performance.now();
+    while (performance.now() - t0 < timeoutMs) {
+      if (state.error) throw new Error(state.error);
+      if (!state.loading && currentMesh && state.rendered) return this.getStats();
+      await new Promise((r) => setTimeout(r, 50));
+    }
+    throw new Error("waitRendered timeout");
+  },
+};
+
+// Probe which scene files are actually present — the .ply is optional (produced by
+// `melkor <scene>.spz <scene>.ply`) — and show only those, then auto-load the first.
+(async () => {
+  try {
+    const ok = await Promise.all(SCENES.map(async (s) => {
+      try { return (await fetch(SPLAT_DIR + s.file, { method: "HEAD" })).ok; } catch { return false; }
+    }));
+    const avail = SCENES.filter((_, i) => ok[i]);
+    if (avail.length) { SCENES.length = 0; SCENES.push(...avail); }
+  } catch { /* keep full list on probe failure */ }
+  buildSceneButtons();
+  state.ready = true;
+  if (SCENES[0]) loadScene(SCENES[0].id).catch((e) => console.error(e));
+})();
+</script>
+</body>
+</html>

@@ -1,0 +1,12 @@
+# Downloaded at setup time by ./fetch-assets.sh — never commit (large / third-party)
+vendor/
+public/splats/
+
+# Node + Playwright
+node_modules/
+test-results/
+playwright-report/
+.last-run.json
+
+# Test render output
+screenshots/
