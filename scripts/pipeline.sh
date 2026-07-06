@@ -41,11 +41,13 @@ BLUE='\033[0;34m'
 CYAN='\033[0;36m'
 NC='\033[0m' # No Color
 
-log_info()  { echo -e "${BLUE}[INFO]${NC} $1"; }
-log_success() { echo -e "${GREEN}[✓]${NC} $1"; }
-log_warn()  { echo -e "${YELLOW}[WARN]${NC} $1"; }
+# All logging goes to stderr so functions whose stdout is captured via $( )
+# (e.g. validate_input, train_gaussians) only emit their result on stdout.
+log_info()  { echo -e "${BLUE}[INFO]${NC} $1" >&2; }
+log_success() { echo -e "${GREEN}[✓]${NC} $1" >&2; }
+log_warn()  { echo -e "${YELLOW}[WARN]${NC} $1" >&2; }
 log_error() { echo -e "${RED}[ERROR]${NC} $1" >&2; }
-log_step()  { echo -e "\n${CYAN}=== $1 ===${NC}"; }
+log_step()  { echo -e "\n${CYAN}=== $1 ===${NC}" >&2; }
 
 # ============================================================================
 # Help
@@ -510,7 +512,10 @@ run_colmap() {
     # Run COLMAP automatic reconstructor
     # Note: COLMAP CLI works headlessly without X display
     log_info "This may take several minutes depending on image count..."
-    
+
+    local -a verbose_args=()
+    [[ "$VERBOSE" == true ]] && verbose_args+=(--verbose 1)
+
     colmap automatic_reconstructor \
         --workspace_path "$workspace_dir" \
         --image_path "$workspace_dir/images" \
@@ -518,7 +523,7 @@ run_colmap() {
         --single_camera 1 \
         --SiftExtraction.use_gpu "$use_gpu" \
         --SiftMatching.use_gpu "$use_gpu" \
-        ${VERBOSE:+--verbose 1}
+        "${verbose_args[@]}"
     
     # Verify reconstruction
     if [[ ! -f "$workspace_dir/sparse/0/cameras.bin" ]]; then
@@ -613,13 +618,16 @@ run_glomap() {
         use_gpu=1
     fi
     
+    local -a verbose_args=()
+    [[ "$VERBOSE" == true ]] && verbose_args+=(--verbose 1)
+
     # Step 1: Feature extraction (COLMAP)
     log_info "Step 1/3: Feature extraction (COLMAP)..."
     colmap feature_extractor \
         --image_path "$workspace_dir/images" \
         --database_path "$workspace_dir/database.db" \
         --SiftExtraction.use_gpu "$use_gpu" \
-        ${VERBOSE:+--verbose 1}
+        "${verbose_args[@]}"
     
     # Step 2: Feature matching (COLMAP)
     log_info "Step 2/3: Feature matching (COLMAP)..."
@@ -630,12 +638,12 @@ run_glomap() {
         colmap sequential_matcher \
             --database_path "$workspace_dir/database.db" \
             --SiftMatching.use_gpu "$use_gpu" \
-            ${VERBOSE:+--verbose 1}
+            "${verbose_args[@]}"
     else
         colmap exhaustive_matcher \
             --database_path "$workspace_dir/database.db" \
             --SiftMatching.use_gpu "$use_gpu" \
-            ${VERBOSE:+--verbose 1}
+            "${verbose_args[@]}"
     fi
     
     # Step 3: GLOMAP mapping (the fast part!)
@@ -713,7 +721,7 @@ train_gaussians() {
                 # Pass the opensplat binary path if we know where it is
                 [[ -x "$PROJECT_DIR/opensplat" ]] && wrapper_args+=(--opensplat "$PROJECT_DIR/opensplat")
                 
-                "$wrapper_script" "${wrapper_args[@]}"
+                "$wrapper_script" "${wrapper_args[@]}" >&2
             else
                 if [[ ! -x "$PROJECT_DIR/opensplat" ]]; then
                     log_error "OpenSplat not found. Run: $0 --setup"
@@ -721,10 +729,9 @@ train_gaussians() {
                 fi
                 
                 log_info "Starting OpenSplat training..."
-                "$PROJECT_DIR/opensplat" "$workspace_dir" \
-                    -n "$iterations" \
-                    -o "$output_ply" \
-                    ${VERBOSE:+--verbose}
+                local -a opensplat_args=("$workspace_dir" -n "$iterations" -o "$output_ply")
+                [[ "$VERBOSE" == true ]] && opensplat_args+=(--verbose)
+                "$PROJECT_DIR/opensplat" "${opensplat_args[@]}" >&2
             fi
             ;;
             
@@ -742,8 +749,8 @@ train_gaussians() {
             python examples/simple_trainer.py \
                 --data_dir "$workspace_dir" \
                 --result_dir "$output_dir" \
-                --max_steps "$iterations"
-            
+                --max_steps "$iterations" >&2
+
             deactivate
             
             # gsplat outputs to different location
@@ -779,7 +786,7 @@ train_gaussians() {
                     -- default \
                     --data_dir "$workspace_dir" \
                     --result_dir "$output_dir" \
-                    --max_steps "$iterations"
+                    --max_steps "$iterations" >&2
             else
                 # Single GPU - save current directory
                 local orig_dir="$PWD"
@@ -800,7 +807,7 @@ train_gaussians() {
                 python examples/simple_trainer.py default \
                     --data_dir "$workspace_dir" \
                     --result_dir "$output_dir" \
-                    --max_steps "$iterations"
+                    --max_steps "$iterations" >&2
                 
                 deactivate 2>/dev/null || true
                 cd "$orig_dir"
@@ -832,7 +839,7 @@ train_gaussians() {
                 [[ -n "$GPU_IDS" ]] && wrapper_args+=(--gpu "${GPU_IDS%%,*}")
                 [[ "$VERBOSE" == true ]] && wrapper_args+=(--verbose)
                 
-                "$wrapper_script" "${wrapper_args[@]}"
+                "$wrapper_script" "${wrapper_args[@]}" >&2
             else
                 if [[ ! -x "$PROJECT_DIR/lichtfeld" ]]; then
                     log_error "LichtFeld-Studio not found. Run: ./scripts/setup_lichtfeld.sh"
@@ -842,7 +849,7 @@ train_gaussians() {
                 log_info "Starting LichtFeld-Studio training..."
                 [[ -n "$GPU_IDS" ]] && export CUDA_VISIBLE_DEVICES="${GPU_IDS%%,*}"
                 
-                "$PROJECT_DIR/lichtfeld" -d "$workspace_dir" -o "$output_dir"
+                "$PROJECT_DIR/lichtfeld" -d "$workspace_dir" -o "$output_dir" >&2
             fi
             
             # Find output PLY
@@ -1002,8 +1009,10 @@ main() {
         exit 0
     fi
     
-    # Validate input
-    local input_type=$(validate_input "$INPUT_PATH")
+    # Validate input (declare separately so the exit status of the command
+    # substitution is not masked by 'local')
+    local input_type
+    input_type=$(validate_input "$INPUT_PATH")
     log_info "Input type: $input_type"
     
     # Workspace directory
@@ -1028,8 +1037,10 @@ main() {
         cp -r "$INPUT_PATH"/* "$WORKSPACE_DIR/" 2>/dev/null || true
     fi
     
-    # Step 2: Train Gaussians
-    local output_ply=$(train_gaussians "$WORKSPACE_DIR" "$OUTPUT_DIR" "$TOOL" "$BACKEND" "$ITERATIONS")
+    # Step 2: Train Gaussians (declare separately so a training failure is not
+    # masked by 'local'; the function's stdout is exactly the output PLY path)
+    local output_ply
+    output_ply=$(train_gaussians "$WORKSPACE_DIR" "$OUTPUT_DIR" "$TOOL" "$BACKEND" "$ITERATIONS")
     
     # Step 3: Convert to SPZ if requested
     if [[ "$OUTPUT_FORMAT" == "spz" || "$OUTPUT_FORMAT" == "both" ]]; then

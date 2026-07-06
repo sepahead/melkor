@@ -47,9 +47,11 @@ BLUE='\033[0;34m'
 CYAN='\033[0;36m'
 NC='\033[0m'
 
-log_info()    { echo -e "${BLUE}[INFO]${NC} $1"; }
-log_success() { echo -e "${GREEN}[✓]${NC} $1"; }
-log_warn()    { echo -e "${YELLOW}[WARN]${NC} $1"; }
+# All logging goes to stderr so functions whose stdout is captured via $( )
+# (e.g. fix_colmap_paths) only emit their result on stdout.
+log_info()    { echo -e "${BLUE}[INFO]${NC} $1" >&2; }
+log_success() { echo -e "${GREEN}[✓]${NC} $1" >&2; }
+log_warn()    { echo -e "${YELLOW}[WARN]${NC} $1" >&2; }
 log_error()   { echo -e "${RED}[ERROR]${NC} $1" >&2; }
 
 # ============================================================================
@@ -220,7 +222,7 @@ fix_colmap_paths() {
             colmap model_converter \
                 --input_path "$colmap_dir/sparse/0" \
                 --output_path "$workspace/sparse/0" \
-                --output_type TXT 2>/dev/null || true
+                --output_type TXT >&2 2>/dev/null || true
         fi
     fi
     

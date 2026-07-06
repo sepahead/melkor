@@ -62,11 +62,27 @@ if [ ! -d "$IMAGE_FOLDER" ]; then
     exit 1
 fi
 
-IMAGE_COUNT=$(find "$IMAGE_FOLDER" -type f \( \
+# Resolve output folder to an absolute path early: later steps (e.g. the
+# gsplat branch) cd into tool directories, which would break relative paths.
+mkdir -p "$OUTPUT_FOLDER"
+OUTPUT_FOLDER="$(cd "$OUTPUT_FOLDER" && pwd)"
+
+# Count top-level images only, matching the copy step below (which does not
+# descend into subdirectories).
+IMAGE_COUNT=$(find "$IMAGE_FOLDER" -maxdepth 1 -type f \( \
     -iname "*.jpg" -o -iname "*.jpeg" -o -iname "*.png" -o \
     -iname "*.heic" -o -iname "*.heif" -o -iname "*.webp" -o \
     -iname "*.tiff" -o -iname "*.tif" -o -iname "*.bmp" -o -iname "*.gif" \
-\) | wc -l)
+\) | wc -l | tr -d ' ')
+RECURSIVE_IMAGE_COUNT=$(find "$IMAGE_FOLDER" -type f \( \
+    -iname "*.jpg" -o -iname "*.jpeg" -o -iname "*.png" -o \
+    -iname "*.heic" -o -iname "*.heif" -o -iname "*.webp" -o \
+    -iname "*.tiff" -o -iname "*.tif" -o -iname "*.bmp" -o -iname "*.gif" \
+\) | wc -l | tr -d ' ')
+if [ "$RECURSIVE_IMAGE_COUNT" -gt "$IMAGE_COUNT" ]; then
+    echo "Warning: $((RECURSIVE_IMAGE_COUNT - IMAGE_COUNT)) image(s) found in nested subdirectories of $IMAGE_FOLDER will be IGNORED."
+    echo "Only images directly inside the folder are used. Move them to the top level to include them."
+fi
 if [ "$IMAGE_COUNT" -lt 3 ]; then
     echo "Error: Need at least 3 images for reconstruction. Found: $IMAGE_COUNT"
     exit 1
