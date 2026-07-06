@@ -1,6 +1,10 @@
 #include "melkor/enhanced_converter.hpp"
 #include "melkor/glb_reader.hpp"
 #include "melkor/spatial_grid.hpp"
+
+#ifdef MELKOR_HAS_CUDA
+#include "melkor/cuda_compute.hpp"
+#endif
 #include <array>
 #include <cmath>
 #include <algorithm>
@@ -160,6 +164,33 @@ private:
     std::unordered_map<uint64_t, std::vector<size_t>> cells_;
 };
 
+#ifdef MELKOR_HAS_CUDA
+// Process-wide CUDA context for the converter's k-NN path. The converter
+// API predates ComputeProvider and only carries a Metal context pointer,
+// which is always null on CUDA builds — so the CUDA grid k-NN is reached
+// through this lazily initialized context instead. Returns per-point mean
+// k-NN distances, or empty when no CUDA device is usable.
+static std::vector<float> cudaGridKnnMeanDists(
+    const std::vector<float>& positions, int k) {
+    static cuda::CudaContext ctx;
+    static const bool ok = cuda::CudaContext::isAvailable() && ctx.initialize();
+    if (!ok) return {};
+    auto g = grid::buildGrid(positions);
+    if (!g.valid) return {};
+    cuda::GaussianProcessor processor(ctx);
+    auto stats = processor.knnStatsGrid(positions, g.entries, g.cell_starts,
+                                        g.cell_counts, g.origin.data(),
+                                        g.cell_size, g.dims.data(), k);
+    const size_t n = positions.size() / 3;
+    if (stats.size() != n * 4) return {};
+    std::vector<float> dists(n);
+    for (size_t i = 0; i < n; ++i) {
+        dists[i] = stats[i * 4];
+    }
+    return dists;
+}
+#endif
+
 class EnhancedConverter::Impl {
 public:
     metal::MetalContext* metal_ctx_ = nullptr;
@@ -217,6 +248,17 @@ public:
                 }
             }
         }
+#ifdef MELKOR_HAS_CUDA
+        if (adaptive_scales.empty() && num_points > 0) {
+            auto knn_dists = cudaGridKnnMeanDists(positions, config.knn_neighbors);
+            if (knn_dists.size() == num_points) {
+                adaptive_scales.resize(num_points);
+                for (size_t i = 0; i < num_points; ++i) {
+                    adaptive_scales[i] = knn_dists[i] * 0.5f;
+                }
+            }
+        }
+#endif
         if (adaptive_scales.empty()) {
             adaptive_scales = computeAdaptiveScales(
                 positions, config.knn_neighbors, config);
@@ -700,6 +742,14 @@ std::vector<float> computeKnnDistances(
     size_t num_points = positions.size() / 3;
     std::vector<float> distances(num_points, 0.0f);
     if (num_points == 0) return distances;
+
+#ifdef MELKOR_HAS_CUDA
+    // CUDA builds have no Metal context; try the CUDA grid k-NN first.
+    {
+        auto cuda_dists = cudaGridKnnMeanDists(positions, k);
+        if (cuda_dists.size() == num_points) return cuda_dists;
+    }
+#endif
 
     // Use Metal when a GPU is available: brute force for small clouds,
     // grid-accelerated for large ones.

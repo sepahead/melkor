@@ -85,7 +85,36 @@ public:
     };
     
     bool processCloud(GaussianCloud& cloud, const ProcessConfig& config);
-    
+
+    // Grid-accelerated k-NN statistics, mirroring the Metal
+    // GaussianProcessor::knnStatsGrid API. The uniform grid comes from
+    // melkor::grid::buildGrid so all backends search identical cells.
+    // Returns 4 floats per point (mean distance to k nearest, gap vector
+    // xyz = point minus neighbor centroid), or empty on failure.
+    std::vector<float> knnStatsGrid(
+        const std::vector<float>& positions,
+        const std::vector<uint32_t>& cell_entries,
+        const std::vector<uint32_t>& cell_starts,
+        const std::vector<uint32_t>& cell_counts,
+        const float grid_origin[3], float cell_size,
+        const int grid_dims[3], int k_neighbors);
+
+    // Grid-accelerated candidate filtering for densification, mirroring the
+    // Metal filterCandidatesGrid API. Per candidate: (distance to nearest
+    // cloud point, 1.0 if forward support exists within support_radius; a
+    // zero direction skips that test). Returns 2 floats per candidate, or
+    // empty on failure.
+    std::vector<float> filterCandidatesGrid(
+        const std::vector<float>& candidates,
+        const std::vector<float>& directions,
+        const std::vector<float>& positions,
+        const std::vector<uint32_t>& cell_entries,
+        const std::vector<uint32_t>& cell_starts,
+        const std::vector<uint32_t>& cell_counts,
+        const float grid_origin[3], float cell_size,
+        const int grid_dims[3],
+        float min_separation, float support_radius);
+
 private:
     class Impl;
     std::unique_ptr<Impl> impl_;
@@ -94,9 +123,8 @@ private:
 } // namespace cuda
 } // namespace melkor
 
-// Alias for compatibility with existing code that uses metal namespace
-#ifdef MELKOR_HAS_CUDA
-namespace melkor {
-namespace metal = cuda;
-}
-#endif
+// Note: this header used to alias `namespace melkor::metal = melkor::cuda`
+// under MELKOR_HAS_CUDA for legacy call sites. The alias is gone: it
+// collides with the real melkor::metal namespace (metal_compute.hpp, whose
+// stubs are compiled on every non-Metal platform) in any translation unit
+// that includes both headers.

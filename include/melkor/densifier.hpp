@@ -29,6 +29,7 @@
 
 namespace melkor {
 
+class ComputeProvider;
 namespace metal { class MetalContext; }
 
 struct DensifyConfig {
@@ -61,10 +62,19 @@ struct DensifyStats {
 
 class Densifier {
 public:
+    // CPU-only densifier (no GPU context).
+    Densifier();
+
     // ctx may be null: all neighbor searches then run on the CPU. On non-Metal
     // platforms the Metal calls are stubs that return empty, which triggers
     // the same CPU fallback.
-    explicit Densifier(metal::MetalContext* ctx = nullptr);
+    explicit Densifier(metal::MetalContext* ctx);
+
+    // Backend-agnostic constructor: uses the provider's GPU (Metal or CUDA
+    // grid kernels) when available, CPU otherwise. Preferred entry point for
+    // callers that already hold a ComputeProvider (the CLI).
+    explicit Densifier(ComputeProvider* provider);
+
     ~Densifier();
 
     // Fills holes and densifies sparse regions in place.

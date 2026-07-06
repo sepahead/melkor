@@ -486,7 +486,7 @@ int main(int argc, char* argv[]) {
     // Scene completion: densify sparse regions and bridge interior holes.
     if (fill_holes && !cloud.empty()) {
         std::cout << "Scene completion (densification)...\n";
-        melkor::Densifier densifier(metal_ctx);
+        melkor::Densifier densifier(provider.get());
         melkor::DensifyConfig fill_config;
         fill_config.k_neighbors = knn_neighbors;
         fill_config.max_iterations = fill_iterations;

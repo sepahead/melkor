@@ -164,7 +164,7 @@ bool test_fills_plane_hole() {
     const size_t n0 = cloud.size();
     const float cx = (side - 1) * spacing * 0.5f;
 
-    melkor::Densifier densifier(nullptr);  // CPU path
+    melkor::Densifier densifier;  // CPU path
     melkor::DensifyConfig cfg;
     auto stats = densifier.fillHoles(cloud, cfg);
 
@@ -210,7 +210,7 @@ bool test_no_boundary_growth() {
     float min0[3], max0[3], min1[3], max1[3];
     cloud.computeBoundingBox(min0[0], min0[1], min0[2], max0[0], max0[1], max0[2]);
 
-    melkor::Densifier densifier(nullptr);
+    melkor::Densifier densifier;
     melkor::DensifyConfig cfg;
     auto stats = densifier.fillHoles(cloud, cfg);
 
@@ -231,7 +231,7 @@ bool test_no_boundary_growth() {
 // ---- Test 5: tiny/degenerate inputs ----------------------------------------
 bool test_degenerate_inputs() {
     printf("[test] degenerate inputs\n");
-    melkor::Densifier densifier(nullptr);
+    melkor::Densifier densifier;
     melkor::DensifyConfig cfg;
 
     melkor::GaussianCloud empty;

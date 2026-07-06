@@ -13,6 +13,24 @@ namespace cuda {
 extern bool launchNormalizeQuaternions(PackedGaussian* d_splats, size_t count);
 extern bool launchScalePositions(PackedGaussian* d_splats, size_t count, float scale);
 extern bool launchTransformCoordinates(PackedGaussian* d_splats, size_t count, const float* transform);
+extern bool launchKnnStatsGrid(const float* d_positions,
+                               const unsigned int* d_entries,
+                               const unsigned int* d_starts,
+                               const unsigned int* d_counts,
+                               const float grid_origin[3], float cell_size,
+                               const int grid_dims[3], int k_neighbors,
+                               size_t num_points, float* d_out_stats);
+extern bool launchFilterCandidatesGrid(const float* d_candidates,
+                                       const float* d_directions,
+                                       const float* d_positions,
+                                       const unsigned int* d_entries,
+                                       const unsigned int* d_starts,
+                                       const unsigned int* d_counts,
+                                       const float grid_origin[3], float cell_size,
+                                       const int grid_dims[3],
+                                       float min_separation, float support_radius,
+                                       size_t num_points, size_t num_queries,
+                                       float* d_out_filter);
 
 // ============================================================================
 // CudaContext Implementation
@@ -333,6 +351,130 @@ bool GaussianProcessor::sortByDistance(GaussianCloud& /*cloud*/,
 std::vector<float> GaussianProcessor::computeCovariances(const GaussianCloud& /*cloud*/) {
     // Not implemented yet - can be added later if needed
     return {};
+}
+
+namespace {
+
+// RAII device buffer: uploads host data on construction, frees on scope
+// exit, so the grid wrappers below cannot leak on any early return.
+template <typename T>
+class DeviceBuffer {
+public:
+    DeviceBuffer(const T* host, size_t count) : count_(count) {
+        if (count == 0) return;
+        if (cudaMalloc(&ptr_, count * sizeof(T)) != cudaSuccess) {
+            ptr_ = nullptr;
+            return;
+        }
+        if (host &&
+            cudaMemcpy(ptr_, host, count * sizeof(T),
+                       cudaMemcpyHostToDevice) != cudaSuccess) {
+            cudaFree(ptr_);
+            ptr_ = nullptr;
+        }
+    }
+    ~DeviceBuffer() {
+        if (ptr_) cudaFree(ptr_);
+    }
+    DeviceBuffer(const DeviceBuffer&) = delete;
+    DeviceBuffer& operator=(const DeviceBuffer&) = delete;
+
+    T* get() const { return ptr_; }
+    bool ok() const { return count_ == 0 || ptr_ != nullptr; }
+    bool download(T* host) const {
+        if (!ptr_) return false;
+        return cudaMemcpy(host, ptr_, count_ * sizeof(T),
+                          cudaMemcpyDeviceToHost) == cudaSuccess;
+    }
+
+private:
+    T* ptr_ = nullptr;
+    size_t count_ = 0;
+};
+
+} // namespace
+
+std::vector<float> GaussianProcessor::knnStatsGrid(
+    const std::vector<float>& positions,
+    const std::vector<uint32_t>& cell_entries,
+    const std::vector<uint32_t>& cell_starts,
+    const std::vector<uint32_t>& cell_counts,
+    const float grid_origin[3], float cell_size,
+    const int grid_dims[3], int k_neighbors) {
+
+    const size_t num_points = positions.size() / 3;
+    if (num_points == 0 || cell_entries.size() != num_points ||
+        cell_starts.empty() || cell_starts.size() != cell_counts.size() ||
+        cell_size <= 0.0f || !impl_->context.isInitialized()) {
+        return {};
+    }
+
+    DeviceBuffer<float> d_pos(positions.data(), positions.size());
+    DeviceBuffer<unsigned int> d_entries(cell_entries.data(), cell_entries.size());
+    DeviceBuffer<unsigned int> d_starts(cell_starts.data(), cell_starts.size());
+    DeviceBuffer<unsigned int> d_counts(cell_counts.data(), cell_counts.size());
+    DeviceBuffer<float> d_out(nullptr, num_points * 4);
+    if (!d_pos.ok() || !d_entries.ok() || !d_starts.ok() || !d_counts.ok() ||
+        !d_out.ok()) {
+        return {};
+    }
+
+    if (!launchKnnStatsGrid(d_pos.get(), d_entries.get(), d_starts.get(),
+                            d_counts.get(), grid_origin, cell_size, grid_dims,
+                            k_neighbors, num_points, d_out.get())) {
+        return {};
+    }
+    if (cudaDeviceSynchronize() != cudaSuccess) return {};
+
+    std::vector<float> stats(num_points * 4);
+    if (!d_out.download(stats.data())) return {};
+    return stats;
+}
+
+std::vector<float> GaussianProcessor::filterCandidatesGrid(
+    const std::vector<float>& candidates,
+    const std::vector<float>& directions,
+    const std::vector<float>& positions,
+    const std::vector<uint32_t>& cell_entries,
+    const std::vector<uint32_t>& cell_starts,
+    const std::vector<uint32_t>& cell_counts,
+    const float grid_origin[3], float cell_size,
+    const int grid_dims[3],
+    float min_separation, float support_radius) {
+
+    const size_t num_queries = candidates.size() / 3;
+    const size_t num_points = positions.size() / 3;
+    if (num_queries == 0 || directions.size() < num_queries * 3 ||
+        num_points == 0 || cell_entries.size() != num_points ||
+        cell_starts.empty() || cell_starts.size() != cell_counts.size() ||
+        cell_size <= 0.0f || !impl_->context.isInitialized()) {
+        return {};
+    }
+
+    DeviceBuffer<float> d_cand(candidates.data(), candidates.size());
+    DeviceBuffer<float> d_dir(directions.data(), directions.size());
+    DeviceBuffer<float> d_pos(positions.data(), positions.size());
+    DeviceBuffer<unsigned int> d_entries(cell_entries.data(), cell_entries.size());
+    DeviceBuffer<unsigned int> d_starts(cell_starts.data(), cell_starts.size());
+    DeviceBuffer<unsigned int> d_counts(cell_counts.data(), cell_counts.size());
+    DeviceBuffer<float> d_out(nullptr, num_queries * 2);
+    if (!d_cand.ok() || !d_dir.ok() || !d_pos.ok() || !d_entries.ok() ||
+        !d_starts.ok() || !d_counts.ok() || !d_out.ok()) {
+        return {};
+    }
+
+    if (!launchFilterCandidatesGrid(d_cand.get(), d_dir.get(), d_pos.get(),
+                                    d_entries.get(), d_starts.get(),
+                                    d_counts.get(), grid_origin, cell_size,
+                                    grid_dims, min_separation, support_radius,
+                                    num_points, num_queries, d_out.get())) {
+        return {};
+    }
+    if (cudaDeviceSynchronize() != cudaSuccess) return {};
+
+    std::vector<float> result(num_queries * 2);
+    if (!d_out.download(result.data())) return {};
+    return result;
 }
 
 bool GaussianProcessor::processCloud(GaussianCloud& cloud, const ProcessConfig& config) {
