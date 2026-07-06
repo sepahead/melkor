@@ -1,5 +1,33 @@
 # Changelog
 
+## Unreleased
+
+### Added
+- `viewer/`: a self-contained SparkJS + THREE.js web viewer for Gaussian splats. Ships a curated set of real-world **city/area** scenes covering all four containers SparkJS auto-detects (SPZ, SOG `.zip`, SPLAT, PLY), with scene switcher, named camera feeds, auto-orbit, keyboard/mouse fly controls, dynamic scene-availability probing, and opacity-weighted auto-framing (works around Spark `getBoundingBox()` returning `NaN` for packed scenes).
+- The PLY scene is produced by dogfooding Melkor's own `SPZ → PLY` converter, which both exercises Spark's `.ply` path and validates Melkor output end to end.
+- `viewer/tests/`: Playwright render-test suite that loads each scene in headless Chromium, asserts WebGL2 + non-blank framebuffers across all camera feeds, verifies camera motion, and writes per-view screenshots; the optional PLY scene is skipped when not generated.
+- `viewer/fetch-assets.sh`: idempotent downloader for the viewer's runtime libs and splat scenes, with optional Melkor-driven PLY generation (all artifacts gitignored).
+- `viewer/src-tauri/`: a Tauri v2 desktop shell that wraps the viewer as a native app (WKWebView/WebKitGTK/WebView2). `bun run app` runs it in dev against the bun static server (`serve.js`); `bun run app:build` bundles a lean app via a staged `dist/`.
+- **Scene completion (densification / hole filling)** — the 3DGS counterpart of inpainting: `--fill-holes` (+ `--fill-iterations`, `--fill-strength`, `--max-hole-size`) fills occlusion holes and densifies sparse regions of any loadable splat cloud via advancing-front rim extrapolation with a far-support gate (interior holes get bridged, the outer boundary never grows) plus major-axis splitting for under-dense interiors. Deterministic, prior-free, CPU/Metal-identical. New `Densifier` API (`include/melkor/densifier.hpp`), docs in `docs/SCENE_COMPLETION.md`, full test suite in `tests/test_densifier.cpp`.
+- `ComputeProvider` abstraction (`include/melkor/compute_provider.hpp`) unifying Metal/CUDA/CPU behind one interface with runtime fallback; the CLI no longer `#ifdef`-dispatches per backend. New backend-parity test suite `tests/test_compute_provider.cpp`.
+- Grid-accelerated Metal k-NN (`knn_stats_grid`, `filter_candidates_grid` kernels backed by a host-built uniform grid, `include/melkor/spatial_grid.hpp`): enhanced conversion and scene completion now stay on the GPU for clouds of any size instead of falling back to CPU above 10K points.
+
+### Fixed
+- **Cross-platform link topology**: Linux/CUDA and CPU-only builds could not link — `gaussian_processor.cu` had been dropped from the CUDA target, the Metal-API stubs were missing `enhancedConvert`/`computeKnnDistancesMetal`, the CUDA branch linked no Metal stubs at all, and tests never linked the stub library. The platform GPU library is now a PUBLIC dependency of `melkor_core` on every platform.
+- **Metal memory leaks**: the Objective-C++ sources assumed ARC but were compiled without `-fobjc-arc`; every GPU buffer/pipeline leaked. ARC is now enabled for all Metal targets.
+- **SPZ SH ordering**: higher-order SH coefficients were written to (and read from) SPZ in PLY's channel-major order instead of SPZ's channel-interleaved order, garbling view-dependent color in external SPZ consumers. Encode/decode now transpose correctly (round-trips through Melkor were unaffected).
+- **Backend consistency**: CPU Y-up→Z-up was a reflection (mirrored geometry) while Metal/CUDA rotate; CUDA `processCloud` color/opacity conversions were identity no-ops; quaternion normalization now canonicalizes sign (w ≥ 0) identically on CPU/Metal/CUDA/stub.
+- **GPU failure contract**: `enhancedConvert` returned zero-filled (degenerate) gaussians on command-buffer failure and reported success; it now returns empty and the converter falls back to CPU. `computeCovariances` gained the same pipeline/status guards.
+- **Metal robustness**: optional normals/colors are no longer bound as nil buffers (dummy buffer + `has_normals`/`has_colors` flags); the enhanced-convert kernel honors `use_vertex_colors`/`default_color`; mixed-attribute multi-primitive GLBs no longer cause out-of-bounds attribute reads on either the CPU or GPU path (short arrays are padded).
+- **GLB reader hardening**: full bounds validation of accessors/bufferViews/buffers/strides on untrusted input (malformed GLBs previously caused out-of-bounds reads or crashes); component types are now checked (float positions/normals; float/normalized ubyte/ushort colors, VEC3 or VEC4). Same validation applied to the Gaussian-fitter's GLB path, which also honors `byteStride` for interleaved exports.
+- **PLY reader**: PLY 1.0 sized type aliases (`float32`, `float64`, `uint8`, …) parse with correct strides and conversions; `binary_big_endian` files are byte-swapped instead of silently mis-read; malformed vertex counts return clean errors instead of crashing; CRLF headers and `end_header` inside comments parse correctly.
+- **Pipeline scripts**: log output no longer corrupts command-substitution results (silently skipped COLMAP runs, garbage trainer paths, masked training failures); `${VERBOSE:+…}` no longer always expands; `train_from_images.sh` image counting matches what is actually copied and resolves relative output paths; setup scripts invoked by CI/docs are executable.
+- **Feedforward weights download**: HTML error pages are now rejected (curl `-f`, content sniffing, size sanity) and partial files deleted instead of being reported as successfully installed weights.
+- Enhanced conversion: degenerate (zero-extent) clouds no longer trigger UB in the spatial hash; single-point clouds no longer produce NaN k-NN distances; CLI rejects invalid numeric options (`--knn 0`, zero fit iterations, out-of-range opacity) instead of emitting NaN scales.
+- Viewer: `waitRendered()` no longer resolves on frames of the previous scene during a scene switch; `serve.js` path containment now uses platform-correct path primitives (was 403-ing every request on Windows).
+- Core tests no longer write to a shared hard-coded `/tmp` path.
+- `SpzEncodeConfig::fractional_bits` removed: the spz container fixes position precision at 12 fractional bits and the option was silently ignored.
+
 ## 1.1.0 (2026-06-24)
 
 ### Security

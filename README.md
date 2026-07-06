@@ -32,8 +32,9 @@ chmod +x scripts/setup_all.sh && ./scripts/setup_all.sh
 ## Features
 
 - **Conversion modes**: Basic (fast vertex-to-splat), Enhanced (adaptive scale/surface alignment), Fit (differentiable rendering), Feedforward (neural networks)
+- **Scene completion**: densification-based hole filling for splat clouds (the 3DGS counterpart of inpainting) — bridges occlusion voids and densifies sparse regions without a learned prior; see [docs/SCENE_COMPLETION.md](docs/SCENE_COMPLETION.md)
 - **Format support**: GLB/glTF -> PLY/SPZ, PLY <-> SPZ
-- **GPU**: Metal (macOS), CUDA (Linux), CPU fallback
+- **GPU**: Metal (macOS), CUDA (Linux), CPU fallback; grid-accelerated Metal k-NN scales to multi-million-splat clouds
 - **Training**: OpenSplat, gsplat (CUDA DDP), gsplat-mps (macOS), LichtFeld-Studio (Linux)
 - **Feedforward**: DA3 (DINOv2 transformer, any image count), Splatter-Image, MVSplat
 - **SfM**: COLMAP, GLOMAP (10-100x faster)
@@ -53,6 +54,13 @@ chmod +x scripts/setup_all.sh && ./scripts/setup_all.sh
 ./build/melkor model.glb output.ply --enhanced    # Enhanced
 ./build/melkor model.glb output.ply --fit --iterations 5000  # Fit
 ./build/melkor scene.ply scene.spz               # Compress ~90% with SPZ
+```
+
+### Scene completion (hole filling / densification)
+```bash
+# Fill occlusion holes and densify sparse regions in a trained splat scene
+./build/melkor scene.spz completed.spz --fill-holes
+./build/melkor scene.ply completed.ply --fill-holes --fill-strength 0.8 --max-hole-size 12
 ```
 
 ### Training
