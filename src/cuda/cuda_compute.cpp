@@ -381,17 +381,19 @@ bool GaussianProcessor::processCloud(GaussianCloud& cloud, const ProcessConfig& 
             s.z = tmp;
         }
     }
+    // When these conversions are requested the cloud still holds raw RGB /
+    // linear opacity, so apply the forward transform directly (matching the
+    // CPU provider and the Metal process_all kernel).
     if (config.convert_colors_to_sh) {
         for (auto& s : cloud.splats()) {
-            s.f_dc_0 = utils::rgbToShDc(utils::shDcToRgb(s.f_dc_0));
-            s.f_dc_1 = utils::rgbToShDc(utils::shDcToRgb(s.f_dc_1));
-            s.f_dc_2 = utils::rgbToShDc(utils::shDcToRgb(s.f_dc_2));
+            s.f_dc_0 = utils::rgbToShDc(s.f_dc_0);
+            s.f_dc_1 = utils::rgbToShDc(s.f_dc_1);
+            s.f_dc_2 = utils::rgbToShDc(s.f_dc_2);
         }
     }
     if (config.convert_opacity_to_logit) {
         for (auto& s : cloud.splats()) {
-            float op = utils::sigmoid(s.opacity);
-            s.opacity = utils::logit(std::clamp(op, 0.001f, 0.999f));
+            s.opacity = utils::logit(s.opacity);
         }
     }
 

@@ -20,6 +20,8 @@ public:
     id<MTLComputePipelineState> processAllPipeline = nil;
     id<MTLComputePipelineState> enhancedConvertPipeline = nil;
     id<MTLComputePipelineState> knnDistancesPipeline = nil;
+    id<MTLComputePipelineState> knnStatsGridPipeline = nil;
+    id<MTLComputePipelineState> filterCandidatesPipeline = nil;
     
     Impl(MetalContext& ctx) : context(ctx) {
         createPipelines();
@@ -52,6 +54,8 @@ public:
         processAllPipeline = createPipeline(@"process_all");
         enhancedConvertPipeline = createPipeline(@"enhanced_convert_points");
         knnDistancesPipeline = createPipeline(@"compute_knn_distances");
+        knnStatsGridPipeline = createPipeline(@"knn_stats_grid");
+        filterCandidatesPipeline = createPipeline(@"filter_candidates_grid");
         computeCovPipeline = createPipeline(@"compute_covariances");
     }
     
@@ -266,18 +270,20 @@ bool GaussianProcessor::sortByDistance(GaussianCloud& cloud,
 
 std::vector<float> GaussianProcessor::computeCovariances(const GaussianCloud& cloud) {
     if (cloud.empty()) return {};
-    
+    if (!impl_->computeCovPipeline) return {};
+
     auto packed = cloud.toPackedFormat();
     id<MTLBuffer> dataBuffer = impl_->createBuffer(packed);
-    
+
     id<MTLDevice> device = (__bridge id<MTLDevice>)impl_->context.getDevice();
     id<MTLCommandQueue> queue = (__bridge id<MTLCommandQueue>)impl_->context.getCommandQueue();
-    
+
     // Output buffer: 6 floats per splat
     size_t outputSize = cloud.size() * 6 * sizeof(float);
     id<MTLBuffer> outputBuffer = [device newBufferWithLength:outputSize
                                                      options:MTLResourceStorageModeShared];
-    
+    if (!dataBuffer || !outputBuffer) return {};
+
     id<MTLCommandBuffer> commandBuffer = [queue commandBuffer];
     id<MTLComputeCommandEncoder> encoder = [commandBuffer computeCommandEncoder];
     
@@ -294,11 +300,14 @@ std::vector<float> GaussianProcessor::computeCovariances(const GaussianCloud& cl
     
     [commandBuffer commit];
     [commandBuffer waitUntilCompleted];
-    
+
+    // Empty on GPU failure so callers can distinguish errors from data.
+    if ([commandBuffer status] != MTLCommandBufferStatusCompleted) return {};
+
     // Read back results
     std::vector<float> result(cloud.size() * 6);
     memcpy(result.data(), [outputBuffer contents], outputSize);
-    
+
     return result;
 }
 
@@ -375,33 +384,35 @@ std::vector<PackedGaussian> GaussianProcessor::enhancedConvert(
     const EnhancedConvertConfig& config) {
 
     size_t num_points = positions.size() / 3;
-    std::vector<PackedGaussian> output(num_points);
-    if (num_points == 0) return output;
-
+    if (num_points == 0) return {};
     if (!impl_->enhancedConvertPipeline) return {};
+    if (adaptive_scales.size() < num_points) return {};
 
     id<MTLDevice> device = (__bridge id<MTLDevice>)impl_->context.getDevice();
     id<MTLCommandQueue> queue = (__bridge id<MTLCommandQueue>)impl_->context.getCommandQueue();
 
-    // Create buffers
+    // Optional attribute arrays are used only when they cover every point;
+    // a short array (mixed-attribute multi-primitive input) would otherwise
+    // read out of bounds on the GPU.
+    const bool has_normals = normals.size() >= positions.size();
+    const bool has_colors = colors.size() >= positions.size();
+
+    // Create buffers. Metal buffer bindings must never be nil, so absent
+    // attributes bind a small dummy buffer and the kernel is told via
+    // has_normals/has_colors not to read them.
+    const float dummy[3] = {0.0f, 0.0f, 0.0f};
     size_t pos_bytes = positions.size() * sizeof(float);
     id<MTLBuffer> posBuffer = [device newBufferWithBytes:positions.data()
                                                   length:pos_bytes
                                                  options:MTLResourceStorageModeShared];
 
-    id<MTLBuffer> normBuffer = nil;
-    if (!normals.empty()) {
-        normBuffer = [device newBufferWithBytes:normals.data()
-                                         length:normals.size() * sizeof(float)
-                                        options:MTLResourceStorageModeShared];
-    }
+    id<MTLBuffer> normBuffer = [device newBufferWithBytes:has_normals ? normals.data() : dummy
+                                                   length:has_normals ? normals.size() * sizeof(float) : sizeof(dummy)
+                                                  options:MTLResourceStorageModeShared];
 
-    id<MTLBuffer> colorBuffer = nil;
-    if (!colors.empty()) {
-        colorBuffer = [device newBufferWithBytes:colors.data()
-                                           length:colors.size() * sizeof(float)
-                                          options:MTLResourceStorageModeShared];
-    }
+    id<MTLBuffer> colorBuffer = [device newBufferWithBytes:has_colors ? colors.data() : dummy
+                                                    length:has_colors ? colors.size() * sizeof(float) : sizeof(dummy)
+                                                   options:MTLResourceStorageModeShared];
 
     id<MTLBuffer> scaleBuffer = [device newBufferWithBytes:adaptive_scales.data()
                                                     length:adaptive_scales.size() * sizeof(float)
@@ -409,6 +420,9 @@ std::vector<PackedGaussian> GaussianProcessor::enhancedConvert(
 
     id<MTLBuffer> outBuffer = [device newBufferWithLength:num_points * sizeof(PackedGaussian)
                                                   options:MTLResourceStorageModeShared];
+    if (!posBuffer || !normBuffer || !colorBuffer || !scaleBuffer || !outBuffer) {
+        return {};
+    }
 
     // Config struct matching the Metal shader
     struct MTLEnhancedConfig {
@@ -420,6 +434,11 @@ std::vector<PackedGaussian> GaussianProcessor::enhancedConvert(
         float position_scale;
         int   convert_coordinate_system;
         int   use_surface_alignment;
+        float default_r;
+        float default_g;
+        float default_b;
+        int   has_normals;
+        int   has_colors;
     } cfg = {
         config.scale_factor,
         config.min_scale,
@@ -428,7 +447,12 @@ std::vector<PackedGaussian> GaussianProcessor::enhancedConvert(
         std::clamp(config.default_opacity, 0.001f, 0.999f),
         config.position_scale,
         config.convert_coordinate_system ? 1 : 0,
-        config.use_surface_alignment ? 1 : 0
+        config.use_surface_alignment ? 1 : 0,
+        config.default_color[0],
+        config.default_color[1],
+        config.default_color[2],
+        has_normals ? 1 : 0,
+        has_colors ? 1 : 0
     };
 
     id<MTLBuffer> cfgBuffer = [device newBufferWithBytes:&cfg
@@ -461,10 +485,14 @@ std::vector<PackedGaussian> GaussianProcessor::enhancedConvert(
     [cmdBuffer commit];
     [cmdBuffer waitUntilCompleted];
 
-    if ([cmdBuffer status] == MTLCommandBufferStatusCompleted) {
-        memcpy(output.data(), [outBuffer contents], num_points * sizeof(PackedGaussian));
+    // Contract: empty on failure, so callers fall back to the CPU path
+    // instead of receiving num_points zero-filled (degenerate) gaussians.
+    if ([cmdBuffer status] != MTLCommandBufferStatusCompleted) {
+        return {};
     }
 
+    std::vector<PackedGaussian> output(num_points);
+    memcpy(output.data(), [outBuffer contents], num_points * sizeof(PackedGaussian));
     return output;
 }
 
@@ -521,6 +549,194 @@ std::vector<float> GaussianProcessor::computeKnnDistancesMetal(
     }
 
     return distances;
+}
+
+// Host-side mirror of the GridSearchParams struct in gaussian_compute.metal.
+// float4/int4 in MSL are 16-byte aligned; the trailing scalars pack into one
+// more 16-byte slot, giving 48 bytes on both sides.
+namespace {
+struct alignas(16) GridSearchParams {
+    float origin[4];      // xyz origin, w = cell size
+    int32_t dims[4];      // xyz dims, w = k neighbors
+    uint32_t num_points;
+    uint32_t num_queries;
+    float min_separation;
+    float support_radius;
+};
+static_assert(sizeof(GridSearchParams) == 48, "must match MSL layout");
+} // namespace
+
+std::vector<float> GaussianProcessor::knnStatsGrid(
+    const std::vector<float>& positions,
+    const std::vector<uint32_t>& cell_entries,
+    const std::vector<uint32_t>& cell_starts,
+    const std::vector<uint32_t>& cell_counts,
+    const float grid_origin[3], float cell_size,
+    const int grid_dims[3], int k_neighbors) {
+
+    const size_t num_points = positions.size() / 3;
+    if (num_points == 0 || cell_entries.size() != num_points ||
+        cell_starts.empty() || cell_starts.size() != cell_counts.size() ||
+        cell_size <= 0.0f) {
+        return {};
+    }
+    if (!impl_->knnStatsGridPipeline) return {};
+
+    id<MTLDevice> device = (__bridge id<MTLDevice>)impl_->context.getDevice();
+    id<MTLCommandQueue> queue = (__bridge id<MTLCommandQueue>)impl_->context.getCommandQueue();
+
+    GridSearchParams gp{};
+    gp.origin[0] = grid_origin[0];
+    gp.origin[1] = grid_origin[1];
+    gp.origin[2] = grid_origin[2];
+    gp.origin[3] = cell_size;
+    gp.dims[0] = grid_dims[0];
+    gp.dims[1] = grid_dims[1];
+    gp.dims[2] = grid_dims[2];
+    gp.dims[3] = k_neighbors;
+    gp.num_points = static_cast<uint32_t>(num_points);
+
+    id<MTLBuffer> posBuffer = [device newBufferWithBytes:positions.data()
+                                                  length:positions.size() * sizeof(float)
+                                                 options:MTLResourceStorageModeShared];
+    id<MTLBuffer> entriesBuffer = [device newBufferWithBytes:cell_entries.data()
+                                                      length:cell_entries.size() * sizeof(uint32_t)
+                                                     options:MTLResourceStorageModeShared];
+    id<MTLBuffer> startsBuffer = [device newBufferWithBytes:cell_starts.data()
+                                                     length:cell_starts.size() * sizeof(uint32_t)
+                                                    options:MTLResourceStorageModeShared];
+    id<MTLBuffer> countsBuffer = [device newBufferWithBytes:cell_counts.data()
+                                                     length:cell_counts.size() * sizeof(uint32_t)
+                                                    options:MTLResourceStorageModeShared];
+    id<MTLBuffer> gpBuffer = [device newBufferWithBytes:&gp
+                                                 length:sizeof(gp)
+                                                options:MTLResourceStorageModeShared];
+    // out_stats is float4-aligned: 4 floats per point.
+    id<MTLBuffer> outBuffer = [device newBufferWithLength:num_points * 4 * sizeof(float)
+                                                  options:MTLResourceStorageModeShared];
+    if (!posBuffer || !entriesBuffer || !startsBuffer || !countsBuffer ||
+        !gpBuffer || !outBuffer) {
+        return {};
+    }
+
+    id<MTLCommandBuffer> cmdBuffer = [queue commandBuffer];
+    id<MTLComputeCommandEncoder> encoder = [cmdBuffer computeCommandEncoder];
+
+    [encoder setComputePipelineState:impl_->knnStatsGridPipeline];
+    [encoder setBuffer:posBuffer offset:0 atIndex:0];
+    [encoder setBuffer:entriesBuffer offset:0 atIndex:1];
+    [encoder setBuffer:startsBuffer offset:0 atIndex:2];
+    [encoder setBuffer:countsBuffer offset:0 atIndex:3];
+    [encoder setBuffer:gpBuffer offset:0 atIndex:4];
+    [encoder setBuffer:outBuffer offset:0 atIndex:5];
+
+    NSUInteger threadsPerGroup = MIN([impl_->knnStatsGridPipeline maxTotalThreadsPerThreadgroup], 128);
+    [encoder dispatchThreads:MTLSizeMake(num_points, 1, 1)
+       threadsPerThreadgroup:MTLSizeMake(threadsPerGroup, 1, 1)];
+    [encoder endEncoding];
+
+    [cmdBuffer commit];
+    [cmdBuffer waitUntilCompleted];
+
+    if ([cmdBuffer status] != MTLCommandBufferStatusCompleted) return {};
+
+    std::vector<float> stats(num_points * 4);
+    memcpy(stats.data(), [outBuffer contents], stats.size() * sizeof(float));
+    return stats;
+}
+
+std::vector<float> GaussianProcessor::filterCandidatesGrid(
+    const std::vector<float>& candidates,
+    const std::vector<float>& directions,
+    const std::vector<float>& positions,
+    const std::vector<uint32_t>& cell_entries,
+    const std::vector<uint32_t>& cell_starts,
+    const std::vector<uint32_t>& cell_counts,
+    const float grid_origin[3], float cell_size,
+    const int grid_dims[3],
+    float min_separation, float support_radius) {
+
+    const size_t num_queries = candidates.size() / 3;
+    const size_t num_points = positions.size() / 3;
+    if (num_queries == 0 || directions.size() < num_queries * 3 ||
+        num_points == 0 || cell_entries.size() != num_points ||
+        cell_starts.empty() || cell_starts.size() != cell_counts.size() ||
+        cell_size <= 0.0f) {
+        return {};
+    }
+    if (!impl_->filterCandidatesPipeline) return {};
+
+    id<MTLDevice> device = (__bridge id<MTLDevice>)impl_->context.getDevice();
+    id<MTLCommandQueue> queue = (__bridge id<MTLCommandQueue>)impl_->context.getCommandQueue();
+
+    GridSearchParams gp{};
+    gp.origin[0] = grid_origin[0];
+    gp.origin[1] = grid_origin[1];
+    gp.origin[2] = grid_origin[2];
+    gp.origin[3] = cell_size;
+    gp.dims[0] = grid_dims[0];
+    gp.dims[1] = grid_dims[1];
+    gp.dims[2] = grid_dims[2];
+    gp.num_points = static_cast<uint32_t>(num_points);
+    gp.num_queries = static_cast<uint32_t>(num_queries);
+    gp.min_separation = min_separation;
+    gp.support_radius = support_radius;
+
+    id<MTLBuffer> candBuffer = [device newBufferWithBytes:candidates.data()
+                                                   length:candidates.size() * sizeof(float)
+                                                  options:MTLResourceStorageModeShared];
+    id<MTLBuffer> dirBuffer = [device newBufferWithBytes:directions.data()
+                                                  length:directions.size() * sizeof(float)
+                                                 options:MTLResourceStorageModeShared];
+    id<MTLBuffer> posBuffer = [device newBufferWithBytes:positions.data()
+                                                  length:positions.size() * sizeof(float)
+                                                 options:MTLResourceStorageModeShared];
+    id<MTLBuffer> entriesBuffer = [device newBufferWithBytes:cell_entries.data()
+                                                      length:cell_entries.size() * sizeof(uint32_t)
+                                                     options:MTLResourceStorageModeShared];
+    id<MTLBuffer> startsBuffer = [device newBufferWithBytes:cell_starts.data()
+                                                     length:cell_starts.size() * sizeof(uint32_t)
+                                                    options:MTLResourceStorageModeShared];
+    id<MTLBuffer> countsBuffer = [device newBufferWithBytes:cell_counts.data()
+                                                     length:cell_counts.size() * sizeof(uint32_t)
+                                                    options:MTLResourceStorageModeShared];
+    id<MTLBuffer> gpBuffer = [device newBufferWithBytes:&gp
+                                                 length:sizeof(gp)
+                                                options:MTLResourceStorageModeShared];
+    // out_filter is float2 per candidate.
+    id<MTLBuffer> outBuffer = [device newBufferWithLength:num_queries * 2 * sizeof(float)
+                                                  options:MTLResourceStorageModeShared];
+    if (!candBuffer || !dirBuffer || !posBuffer || !entriesBuffer ||
+        !startsBuffer || !countsBuffer || !gpBuffer || !outBuffer) {
+        return {};
+    }
+
+    id<MTLCommandBuffer> cmdBuffer = [queue commandBuffer];
+    id<MTLComputeCommandEncoder> encoder = [cmdBuffer computeCommandEncoder];
+
+    [encoder setComputePipelineState:impl_->filterCandidatesPipeline];
+    [encoder setBuffer:candBuffer offset:0 atIndex:0];
+    [encoder setBuffer:dirBuffer offset:0 atIndex:1];
+    [encoder setBuffer:posBuffer offset:0 atIndex:2];
+    [encoder setBuffer:entriesBuffer offset:0 atIndex:3];
+    [encoder setBuffer:startsBuffer offset:0 atIndex:4];
+    [encoder setBuffer:countsBuffer offset:0 atIndex:5];
+    [encoder setBuffer:gpBuffer offset:0 atIndex:6];
+    [encoder setBuffer:outBuffer offset:0 atIndex:7];
+
+    NSUInteger threadsPerGroup = MIN([impl_->filterCandidatesPipeline maxTotalThreadsPerThreadgroup], 128);
+    [encoder dispatchThreads:MTLSizeMake(num_queries, 1, 1)
+       threadsPerThreadgroup:MTLSizeMake(threadsPerGroup, 1, 1)];
+    [encoder endEncoding];
+
+    [cmdBuffer commit];
+    [cmdBuffer waitUntilCompleted];
+
+    if ([cmdBuffer status] != MTLCommandBufferStatusCompleted) return {};
+
+    std::vector<float> result(num_queries * 2);
+    memcpy(result.data(), [outBuffer contents], result.size() * sizeof(float));
+    return result;
 }
 
 } // namespace metal

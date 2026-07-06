@@ -257,6 +257,11 @@ struct EnhancedConvertConfig {
     float position_scale;
     int   convert_coordinate_system;
     int   use_surface_alignment;
+    float default_r;
+    float default_g;
+    float default_b;
+    int   has_normals;   // 0: normals buffer is a dummy — do not read it
+    int   has_colors;    // 0: colors buffer is a dummy — use default color
 };
 
 void quaternion_from_normal(float3 n, thread float4& q) {
@@ -309,10 +314,10 @@ kernel void enhanced_convert_points(
     }
 
     float3 color;
-    if (colors != nullptr) {
+    if (cfg.has_colors != 0) {
         color = float3(colors[id * 3 + 0], colors[id * 3 + 1], colors[id * 3 + 2]);
     } else {
-        color = float3(0.5f, 0.5f, 0.5f);
+        color = float3(cfg.default_r, cfg.default_g, cfg.default_b);
     }
     float3 sh_dc = (color - 0.5f) / SH_C0;
 
@@ -324,7 +329,7 @@ kernel void enhanced_convert_points(
     float3 scale_log;
     float4 quat;
 
-    if (cfg.use_surface_alignment != 0 && normals != nullptr) {
+    if (cfg.use_surface_alignment != 0 && cfg.has_normals != 0) {
         float3 n = float3(normals[id * 3 + 0],
                           normals[id * 3 + 1],
                           normals[id * 3 + 2]);
@@ -348,6 +353,195 @@ kernel void enhanced_convert_points(
     g.scale = float4(scale_log, 0.0f);
     g.rotation = quat;
     output[id] = g;
+}
+
+// ============================================================================
+// Grid-accelerated neighbor search (mirrors melkor::grid CPU implementation).
+// The uniform grid is built on the host (spatial_grid.cpp) and uploaded as
+// flat arrays; the kernels walk cells in the exact same shell order as the
+// CPU path so both backends consider identical candidate sets.
+// ============================================================================
+
+struct GridSearchParams {
+    float4 origin;          // xyz = grid origin, w = cell size
+    int4   dims;            // xyz = grid dims, w = k neighbors
+    uint   num_points;
+    uint   num_queries;
+    float  min_separation;
+    float  support_radius;
+};
+
+constant constexpr int GRID_MAX_R = 16;   // matches kMaxShellRadius (CPU)
+constant constexpr int GRID_MAX_K = 32;   // matches kMaxK (CPU)
+
+static inline int clamp_cell(float v, int dim) {
+    return clamp(int(floor(v)), 0, dim - 1);
+}
+
+// Per-point k-NN statistics: out = (mean distance to k nearest, gap vector).
+// The gap vector is point minus neighbor centroid — it points toward local
+// empty space and drives hole-rim detection in the densifier.
+kernel void knn_stats_grid(
+    device const float* positions      [[buffer(0)]],
+    device const uint*  cell_entries   [[buffer(1)]],
+    device const uint*  cell_starts    [[buffer(2)]],
+    device const uint*  cell_counts    [[buffer(3)]],
+    constant GridSearchParams& gp      [[buffer(4)]],
+    device float4* out_stats           [[buffer(5)]],
+    uint id [[thread_position_in_grid]]
+) {
+    if (id >= gp.num_points) return;
+
+    float3 p = float3(positions[id * 3 + 0],
+                      positions[id * 3 + 1],
+                      positions[id * 3 + 2]);
+    const float cell = gp.origin.w;
+    const float inv = 1.0f / cell;
+    const int k = clamp(gp.dims.w, 1, GRID_MAX_K);
+    const int cx = clamp_cell((p.x - gp.origin.x) * inv, gp.dims.x);
+    const int cy = clamp_cell((p.y - gp.origin.y) * inv, gp.dims.y);
+    const int cz = clamp_cell((p.z - gp.origin.z) * inv, gp.dims.z);
+
+    float best_d[GRID_MAX_K];
+    uint  best_i[GRID_MAX_K];
+    int filled = 0;
+
+    for (int r = 0; r <= GRID_MAX_R; ++r) {
+        for (int dz = -r; dz <= r; ++dz) {
+            for (int dy = -r; dy <= r; ++dy) {
+                for (int dx = -r; dx <= r; ++dx) {
+                    if (max(max(abs(dx), abs(dy)), abs(dz)) != r) continue;
+                    int x = cx + dx, y = cy + dy, z = cz + dz;
+                    if (x < 0 || y < 0 || z < 0 ||
+                        x >= gp.dims.x || y >= gp.dims.y || z >= gp.dims.z)
+                        continue;
+                    uint ci = (uint(z) * uint(gp.dims.y) + uint(y)) * uint(gp.dims.x) + uint(x);
+                    uint start = cell_starts[ci];
+                    uint count = cell_counts[ci];
+                    for (uint t = start; t < start + count; ++t) {
+                        uint j = cell_entries[t];
+                        if (j == id) continue;
+                        float3 q = float3(positions[j * 3 + 0],
+                                          positions[j * 3 + 1],
+                                          positions[j * 3 + 2]);
+                        float d = distance(p, q);
+                        if (filled < k) {
+                            int pos = filled;
+                            while (pos > 0 && best_d[pos - 1] > d) {
+                                best_d[pos] = best_d[pos - 1];
+                                best_i[pos] = best_i[pos - 1];
+                                --pos;
+                            }
+                            best_d[pos] = d;
+                            best_i[pos] = j;
+                            ++filled;
+                        } else if (d < best_d[k - 1]) {
+                            int pos = k - 1;
+                            while (pos > 0 && best_d[pos - 1] > d) {
+                                best_d[pos] = best_d[pos - 1];
+                                best_i[pos] = best_i[pos - 1];
+                                --pos;
+                            }
+                            best_d[pos] = d;
+                            best_i[pos] = j;
+                        }
+                    }
+                }
+            }
+        }
+        // Unvisited points lie beyond r * cell — safe to stop.
+        if (filled >= k && best_d[k - 1] <= float(r) * cell) break;
+    }
+
+    if (filled == 0) {
+        out_stats[id] = float4(0.0f);
+        return;
+    }
+    int kk = min(k, filled);
+    float sum = 0.0f;
+    float3 centroid = float3(0.0f);
+    for (int t = 0; t < kk; ++t) {
+        sum += best_d[t];
+        uint j = best_i[t];
+        centroid += float3(positions[j * 3 + 0],
+                           positions[j * 3 + 1],
+                           positions[j * 3 + 2]);
+    }
+    float inv_k = 1.0f / float(kk);
+    out_stats[id] = float4(sum * inv_k, p - centroid * inv_k);
+}
+
+// Per-candidate acceptance stats for densification: out = (distance to
+// nearest cloud point, 1 if forward support exists within support_radius).
+// A zero direction skips the half-space test. Forward support distinguishes
+// an interior hole (far rim exists across the gap) from the scene's outer
+// boundary, so hole filling never grows the cloud outward.
+kernel void filter_candidates_grid(
+    device const float* candidates     [[buffer(0)]],
+    device const float* directions     [[buffer(1)]],
+    device const float* positions      [[buffer(2)]],
+    device const uint*  cell_entries   [[buffer(3)]],
+    device const uint*  cell_starts    [[buffer(4)]],
+    device const uint*  cell_counts    [[buffer(5)]],
+    constant GridSearchParams& gp      [[buffer(6)]],
+    device float2* out_filter          [[buffer(7)]],
+    uint id [[thread_position_in_grid]]
+) {
+    if (id >= gp.num_queries) return;
+
+    float3 c = float3(candidates[id * 3 + 0],
+                      candidates[id * 3 + 1],
+                      candidates[id * 3 + 2]);
+    float3 dir = float3(directions[id * 3 + 0],
+                        directions[id * 3 + 1],
+                        directions[id * 3 + 2]);
+    const bool need_support = any(dir != float3(0.0f));
+    const float cell = gp.origin.w;
+    const float inv = 1.0f / cell;
+    const int r_min = int(ceil(gp.min_separation * inv));
+    const int r_sup = int(ceil(gp.support_radius * inv));
+    const int r_max = min(max(r_min, r_sup), GRID_MAX_R);
+
+    const int cx = clamp_cell((c.x - gp.origin.x) * inv, gp.dims.x);
+    const int cy = clamp_cell((c.y - gp.origin.y) * inv, gp.dims.y);
+    const int cz = clamp_cell((c.z - gp.origin.z) * inv, gp.dims.z);
+
+    float min_dist = 3.4e38f;
+    bool support = !need_support;
+
+    for (int r = 0; r <= r_max; ++r) {
+        for (int dz = -r; dz <= r; ++dz) {
+            for (int dy = -r; dy <= r; ++dy) {
+                for (int dx = -r; dx <= r; ++dx) {
+                    if (max(max(abs(dx), abs(dy)), abs(dz)) != r) continue;
+                    int x = cx + dx, y = cy + dy, z = cz + dz;
+                    if (x < 0 || y < 0 || z < 0 ||
+                        x >= gp.dims.x || y >= gp.dims.y || z >= gp.dims.z)
+                        continue;
+                    uint ci = (uint(z) * uint(gp.dims.y) + uint(y)) * uint(gp.dims.x) + uint(x);
+                    uint start = cell_starts[ci];
+                    uint count = cell_counts[ci];
+                    for (uint t = start; t < start + count; ++t) {
+                        uint j = cell_entries[t];
+                        float3 q = float3(positions[j * 3 + 0],
+                                          positions[j * 3 + 1],
+                                          positions[j * 3 + 2]) - c;
+                        float d = length(q);
+                        min_dist = min(min_dist, d);
+                        if (!support && d <= gp.support_radius &&
+                            dot(q, dir) > 1e-6f) {
+                            support = true;
+                        }
+                    }
+                }
+            }
+        }
+        bool min_settled = min_dist < gp.min_separation || r >= r_min;
+        bool support_settled = support || r >= r_sup;
+        if (min_settled && support_settled) break;
+    }
+
+    out_filter[id] = float2(min_dist, support ? 1.0f : 0.0f);
 }
 
 kernel void compute_knn_distances(

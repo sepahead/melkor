@@ -8,9 +8,11 @@ THIRD_PARTY_DIR="$PROJECT_DIR/third_party"
 # Pinned refs for reproducible fetches. Override with the matching env var to
 # pick up a newer release, but never fetch from a moving branch by default --
 # that makes builds non-reproducible and can silently break the vendored API.
-TINYGLTF_REF="${MELKOR_TINYGLTF_REF:-v2.9.4}"
+TINYGLTF_REF="${MELKOR_TINYGLTF_REF:-v2.9.7}"
 STB_REF="${MELKOR_STB_REF:-57e75b9}"
-SPZ_REF="${MELKOR_SPZ_REF:-v0.3.0}"
+# vendored third_party/spz/src/cc matches the v2.1.0 release exactly; its
+# CMakeLists VERSION string still reads 1.1.0 upstream, so trust the tag here.
+SPZ_REF="${MELKOR_SPZ_REF:-v2.1.0}"
 
 echo "Setting up dependencies in $THIRD_PARTY_DIR"
 echo "  tinygltf ref: $TINYGLTF_REF"

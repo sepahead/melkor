@@ -2,6 +2,7 @@
 // This file provides stub implementations of the Metal GPU classes
 // for platforms that don't support Metal (Linux, etc.)
 
+#include "melkor/compute_provider.hpp"
 #include "melkor/metal_compute.hpp"
 #include "melkor/gaussian_fitter.hpp"
 #include "melkor/enhanced_converter.hpp"
@@ -76,18 +77,28 @@ bool GaussianProcessor::transformCoordinates(GaussianCloud& /*cloud*/,
 }
 
 bool GaussianProcessor::normalizeQuaternions(GaussianCloud& cloud) {
-    // CPU fallback: normalize quaternions on CPU
+    // CPU fallback. Semantics match the Metal kernel: zero length ->
+    // identity, sign canonicalized to w >= 0.
     for (size_t i = 0; i < cloud.size(); ++i) {
         auto& splat = cloud[i];
-        float len = std::sqrt(splat.rot_0 * splat.rot_0 + 
-                             splat.rot_1 * splat.rot_1 + 
-                             splat.rot_2 * splat.rot_2 + 
+        float len = std::sqrt(splat.rot_0 * splat.rot_0 +
+                             splat.rot_1 * splat.rot_1 +
+                             splat.rot_2 * splat.rot_2 +
                              splat.rot_3 * splat.rot_3);
-        if (len > 0.0001f) {
+        if (len > 0.0f) {
             splat.rot_0 /= len;
             splat.rot_1 /= len;
             splat.rot_2 /= len;
             splat.rot_3 /= len;
+        } else {
+            splat.rot_0 = 1.0f;
+            splat.rot_1 = splat.rot_2 = splat.rot_3 = 0.0f;
+        }
+        if (splat.rot_0 < 0.0f) {
+            splat.rot_0 = -splat.rot_0;
+            splat.rot_1 = -splat.rot_1;
+            splat.rot_2 = -splat.rot_2;
+            splat.rot_3 = -splat.rot_3;
         }
     }
     return true;
@@ -129,6 +140,44 @@ bool GaussianProcessor::processCloud(GaussianCloud& cloud, const ProcessConfig& 
         scalePositions(cloud, config.position_scale);
     }
     return true;
+}
+
+std::vector<PackedGaussian> GaussianProcessor::enhancedConvert(
+    const std::vector<float>& /*positions*/,
+    const std::vector<float>& /*normals*/,
+    const std::vector<float>& /*colors*/,
+    const std::vector<float>& /*adaptive_scales*/,
+    const EnhancedConvertConfig& /*config*/) {
+    return {};  // Callers fall back to the CPU conversion path
+}
+
+std::vector<float> GaussianProcessor::computeKnnDistancesMetal(
+    const std::vector<float>& /*positions*/,
+    int /*k_neighbors*/) {
+    return {};  // Callers fall back to the CPU k-NN path
+}
+
+std::vector<float> GaussianProcessor::knnStatsGrid(
+    const std::vector<float>& /*positions*/,
+    const std::vector<uint32_t>& /*cell_entries*/,
+    const std::vector<uint32_t>& /*cell_starts*/,
+    const std::vector<uint32_t>& /*cell_counts*/,
+    const float /*grid_origin*/[3], float /*cell_size*/,
+    const int /*grid_dims*/[3], int /*k_neighbors*/) {
+    return {};  // Callers fall back to melkor::grid::knnStatsCpu
+}
+
+std::vector<float> GaussianProcessor::filterCandidatesGrid(
+    const std::vector<float>& /*candidates*/,
+    const std::vector<float>& /*directions*/,
+    const std::vector<float>& /*positions*/,
+    const std::vector<uint32_t>& /*cell_entries*/,
+    const std::vector<uint32_t>& /*cell_starts*/,
+    const std::vector<uint32_t>& /*cell_counts*/,
+    const float /*grid_origin*/[3], float /*cell_size*/,
+    const int /*grid_dims*/[3],
+    float /*min_separation*/, float /*support_radius*/) {
+    return {};  // Callers fall back to melkor::grid::candidateFilterCpu
 }
 
 } // namespace metal
@@ -208,4 +257,24 @@ bool MeshRenderer::loadGlb(const std::string& /*path*/) {
     return false;
 }
 
+
+// ============================================================================
+// ComputeProvider factory (CPU-only build)
+// ============================================================================
+// On CUDA builds this file is compiled into melkor_cuda for the Metal-API
+// stubs above, but the factory comes from cuda_compute_provider.cpp — so it
+// is compiled out here to avoid a duplicate definition.
+
+#ifndef MELKOR_HAS_CUDA
+std::unique_ptr<melkor::ComputeProvider> melkor::ComputeProvider::create() {
+    return createCpuProvider();
+}
+
+std::unique_ptr<melkor::ComputeProvider> melkor::ComputeProvider::create(ComputeBackend backend) {
+    if (backend == ComputeBackend::CPU) {
+        return createCpuProvider();
+    }
+    return nullptr;  // No GPU backends available on this platform
+}
+#endif // MELKOR_HAS_CUDA
 } // namespace melkor

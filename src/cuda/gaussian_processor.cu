@@ -63,13 +63,25 @@ __global__ void normalizeQuaternionsKernel(PackedGaussian* splats, size_t count)
     float& z = splat.rotation[3];
     
     float len = sqrtf(w * w + x * x + y * y + z * z);
-    
-    if (len > 0.0001f) {
+
+    // Semantics match the Metal normalize_quaternions kernel: zero length
+    // -> identity, sign canonicalized to w >= 0 (q and -q are the same
+    // rotation), so all backends produce component-comparable output.
+    if (len > 0.0f) {
         float inv_len = 1.0f / len;
         w *= inv_len;
         x *= inv_len;
         y *= inv_len;
         z *= inv_len;
+    } else {
+        w = 1.0f;
+        x = y = z = 0.0f;
+    }
+    if (w < 0.0f) {
+        w = -w;
+        x = -x;
+        y = -y;
+        z = -z;
     }
 }
 

@@ -78,6 +78,9 @@ add_library(melkor_core STATIC
     src/enhanced_converter.cpp
     src/feedforward_model.cpp
     src/spz_encoder.cpp
+    src/cpu_compute_provider.cpp
+    src/spatial_grid.cpp
+    src/densifier.cpp
 )
 
 target_include_directories(melkor_core PUBLIC
@@ -114,6 +117,7 @@ if(APPLE AND MELKOR_USE_METAL)
         src/metal/metal_compute.mm
         src/metal/gaussian_processor.mm
         src/metal/gaussian_fitter.mm
+        src/metal/metal_compute_provider.mm
     )
     
     target_include_directories(melkor_metal PUBLIC
@@ -128,9 +132,14 @@ if(APPLE AND MELKOR_USE_METAL)
     )
     
     target_compile_definitions(melkor_metal PUBLIC MELKOR_HAS_METAL)
+    # The Objective-C++ sources are written for ARC (no manual
+    # retain/release); without -fobjc-arc every newBuffer/newFunction object
+    # leaks, growing resident memory on each GPU dispatch.
+    target_compile_options(melkor_metal PRIVATE -fobjc-arc)
     # melkor_core calls into melkor_metal for GPU-accelerated enhanced
-    # conversion and k-NN. CMake resolves the circular static-library
-    # dependency by re-scanning archives at link time.
+    # conversion and k-NN.  The circular static-library dependency is
+    # resolved by the linker re-scanning archives.  Consumers of melkor_core
+    # (tests, CLI) get melkor_metal transitively via this PUBLIC link.
     target_link_libraries(melkor_core PUBLIC melkor_metal)
     
     # Compile Metal shaders
@@ -160,22 +169,32 @@ elseif(MELKOR_PLATFORM STREQUAL "LINUX" AND MELKOR_USE_CUDA AND CUDAToolkit_FOUN
     # Enable CUDA language
     enable_language(CUDA)
     
-    # CUDA compute library
+    # CUDA compute library. gaussian_processor.cu holds the __global__
+    # kernels that cuda_compute.cpp declares extern; gpu_stub.cpp supplies
+    # the Metal-API stubs that melkor_core references on non-Metal platforms
+    # (its ComputeProvider factory is compiled out under MELKOR_HAS_CUDA —
+    # cuda_compute_provider.cpp provides the real one).
     add_library(melkor_cuda STATIC
         src/cuda/cuda_compute.cpp
         src/cuda/gaussian_processor.cu
+        src/cuda/cuda_compute_provider.cpp
+        src/gpu_stub.cpp
     )
-    
+
     target_include_directories(melkor_cuda PUBLIC
         ${CMAKE_SOURCE_DIR}/include
     )
-    
+
     target_link_libraries(melkor_cuda PUBLIC
         melkor_core
         CUDA::cudart
     )
-    
+
     target_compile_definitions(melkor_cuda PUBLIC MELKOR_HAS_CUDA)
+    # Same circular static-library arrangement as the Metal branch: consumers
+    # of melkor_core (tests, CLI) resolve the Metal-stub and provider-factory
+    # symbols via this PUBLIC link.
+    target_link_libraries(melkor_core PUBLIC melkor_cuda)
     
     # Set CUDA architecture (adjust based on your GPU)
     # SM 60 = Pascal (GTX 10xx), SM 70 = Volta (V100), SM 75 = Turing (RTX 20xx)
@@ -219,7 +238,12 @@ else()
     target_link_libraries(melkor_gpu_stub PUBLIC
         melkor_core
     )
-    
+
+    # Consumers of melkor_core (tests, CLI) resolve the Metal-stub and
+    # provider-factory symbols via this PUBLIC link (same arrangement as the
+    # Metal and CUDA branches).
+    target_link_libraries(melkor_core PUBLIC melkor_gpu_stub)
+
     set(MELKOR_GPU_LIBRARY melkor_gpu_stub)
     set(MELKOR_HAS_GPU OFF)
     set(MELKOR_GPU_BACKEND "CPU")
@@ -230,10 +254,11 @@ add_executable(melkor
     src/main.cpp
 )
 
-target_link_libraries(melkor PRIVATE
-    melkor_core
-    ${MELKOR_GPU_LIBRARY}
-)
+# The platform GPU library (melkor_metal / melkor_cuda / melkor_gpu_stub) is
+# a PUBLIC transitive dependency of melkor_core on every platform — listing
+# it again would trigger Apple ld's duplicate-library deduplication, which
+# skips archive re-scans and drops symbols.
+target_link_libraries(melkor PRIVATE melkor_core)
 target_compile_options(melkor PRIVATE
     $<$<CXX_COMPILER_ID:GNU,Clang,AppleClang>:-Wall -Wextra -Wpedantic>
 )
@@ -303,6 +328,26 @@ set_target_properties(test_ply_roundtrip_fuzz PROPERTIES
 )
 add_test(NAME ply_roundtrip_fuzz COMMAND test_ply_roundtrip_fuzz)
 
+# ComputeProvider abstraction tests: factory behavior, CPU backend math
+# against the utils reference, Y-up->Z-up rotation semantics, and CPU/GPU
+# parity of the shared operations when a GPU backend is present.
+add_executable(test_compute_provider tests/test_compute_provider.cpp)
+target_link_libraries(test_compute_provider PRIVATE melkor_core)
+set_target_properties(test_compute_provider PROPERTIES
+    RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}
+)
+add_test(NAME compute_provider_tests COMMAND test_compute_provider)
+
+# Scene-completion (densification) tests: uniform-grid neighbor search,
+# hole filling on a synthetic plane, outer-boundary containment, and CPU/Metal
+# parity of the grid k-NN kernels when a GPU is present.
+add_executable(test_densifier tests/test_densifier.cpp)
+target_link_libraries(test_densifier PRIVATE melkor_core)
+set_target_properties(test_densifier PROPERTIES
+    RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}
+)
+add_test(NAME densifier_tests COMMAND test_densifier)
+
 # Gradient-check test for the differentiable rasterizer (macOS/Metal only).
 # Compares the analytic backward gradients against central finite differences
 # for color and opacity -- the correctness bar for any backward pass. Gated
@@ -310,6 +355,7 @@ add_test(NAME ply_roundtrip_fuzz COMMAND test_ply_roundtrip_fuzz)
 if(APPLE AND MELKOR_USE_METAL)
     add_executable(test_gradient_check tests/test_gradient_check.mm)
     target_link_libraries(test_gradient_check PRIVATE melkor_metal)
+    target_compile_options(test_gradient_check PRIVATE -fobjc-arc)
     set_target_properties(test_gradient_check PROPERTIES
         RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}
     )

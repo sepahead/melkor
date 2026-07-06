@@ -106,6 +106,9 @@ public:
         float position_scale = 1.0f;
         bool convert_coordinate_system = true;
         bool use_surface_alignment = true;
+        // Used when no (or short) vertex-color array is supplied — matches
+        // the CPU path's EnhancedConversionConfig::default_color.
+        float default_color[3] = {0.5f, 0.5f, 0.5f};
     };
 
     std::vector<PackedGaussian> enhancedConvert(
@@ -121,6 +124,35 @@ public:
     std::vector<float> computeKnnDistancesMetal(
         const std::vector<float>& positions,
         int k_neighbors);
+
+    // Grid-accelerated k-NN statistics for clouds of any size. The uniform
+    // grid comes from melkor::grid::buildGrid so the GPU walks the exact
+    // same cells as the CPU reference (spatial_grid.cpp). Returns 4 floats
+    // per point (mean distance to k nearest, gap vector xyz = point minus
+    // neighbor centroid), or empty on failure.
+    std::vector<float> knnStatsGrid(
+        const std::vector<float>& positions,
+        const std::vector<uint32_t>& cell_entries,
+        const std::vector<uint32_t>& cell_starts,
+        const std::vector<uint32_t>& cell_counts,
+        const float grid_origin[3], float cell_size,
+        const int grid_dims[3], int k_neighbors);
+
+    // Grid-accelerated candidate filtering for densification. Per candidate:
+    // (distance to nearest cloud point, 1.0 if a cloud point exists within
+    // support_radius in the forward half-space of the paired direction; a
+    // zero direction skips that test). Returns 2 floats per candidate, or
+    // empty on failure.
+    std::vector<float> filterCandidatesGrid(
+        const std::vector<float>& candidates,
+        const std::vector<float>& directions,
+        const std::vector<float>& positions,
+        const std::vector<uint32_t>& cell_entries,
+        const std::vector<uint32_t>& cell_starts,
+        const std::vector<uint32_t>& cell_counts,
+        const float grid_origin[3], float cell_size,
+        const int grid_dims[3],
+        float min_separation, float support_radius);
     
 private:
     class Impl;

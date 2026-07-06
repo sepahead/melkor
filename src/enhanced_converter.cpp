@@ -1,5 +1,6 @@
 #include "melkor/enhanced_converter.hpp"
 #include "melkor/glb_reader.hpp"
+#include "melkor/spatial_grid.hpp"
 #include <array>
 #include <cmath>
 #include <algorithm>
@@ -183,21 +184,40 @@ public:
         }
         
         // Step 1: Compute adaptive scales using k-NN.
-        // Use Metal brute-force k-NN for small clouds (faster on GPU),
-        // CPU spatial hash for large clouds.
+        // Metal brute-force k-NN for small clouds, Metal grid k-NN for large
+        // ones, CPU spatial hash when no GPU is available.
         std::vector<float> adaptive_scales;
         size_t num_points = positions.size() / 3;
-        bool use_metal_knn = metal_ctx_ && num_points > 0 && num_points < 10000;
-        if (use_metal_knn) {
+        if (metal_ctx_ && num_points > 0) {
             metal::GaussianProcessor processor(*metal_ctx_);
-            auto knn_dists = processor.computeKnnDistancesMetal(
-                positions, config.knn_neighbors);
-            // Scale: half the average k-NN distance (matching CPU path)
-            adaptive_scales.resize(num_points);
-            for (size_t i = 0; i < num_points; ++i) {
-                adaptive_scales[i] = knn_dists[i] * 0.5f;
+            std::vector<float> knn_dists;
+            if (num_points < 10000) {
+                knn_dists = processor.computeKnnDistancesMetal(
+                    positions, config.knn_neighbors);
+            } else {
+                auto g = grid::buildGrid(positions);
+                if (g.valid) {
+                    auto stats = processor.knnStatsGrid(
+                        positions, g.entries, g.cell_starts, g.cell_counts,
+                        g.origin.data(), g.cell_size, g.dims.data(),
+                        config.knn_neighbors);
+                    if (stats.size() == num_points * 4) {
+                        knn_dists.resize(num_points);
+                        for (size_t i = 0; i < num_points; ++i) {
+                            knn_dists[i] = stats[i * 4];
+                        }
+                    }
+                }
             }
-        } else {
+            if (knn_dists.size() == num_points) {
+                // Scale: half the average k-NN distance (matching CPU path)
+                adaptive_scales.resize(num_points);
+                for (size_t i = 0; i < num_points; ++i) {
+                    adaptive_scales[i] = knn_dists[i] * 0.5f;
+                }
+            }
+        }
+        if (adaptive_scales.empty()) {
             adaptive_scales = computeAdaptiveScales(
                 positions, config.knn_neighbors, config);
         }
@@ -207,7 +227,26 @@ public:
         if (final_normals.empty()) {
             final_normals = enhanced::estimateNormals(positions, config.knn_neighbors);
         }
-        
+
+        // Attribute alignment: multi-primitive GLBs can carry colors/normals
+        // for only some primitives, leaving these arrays shorter than
+        // positions — indexing them per point would read out of bounds (on
+        // both the CPU and GPU paths). Pad short arrays to full length:
+        // colors with the default color, normals with zeros (a zero normal
+        // falls back to the default orientation downstream).
+        std::vector<float> final_colors =
+            config.use_vertex_colors ? colors : std::vector<float>{};
+        if (!final_colors.empty() && final_colors.size() < num_points * 3) {
+            while (final_colors.size() < num_points * 3) {
+                final_colors.push_back(config.default_color[0]);
+                final_colors.push_back(config.default_color[1]);
+                final_colors.push_back(config.default_color[2]);
+            }
+        }
+        if (!final_normals.empty() && final_normals.size() < num_points * 3) {
+            final_normals.resize(num_points * 3, 0.0f);
+        }
+
         // Step 3: Convert each point to a Gaussian splat.
         // Use Metal GPU acceleration when available for the per-point loop.
         result.cloud.reserve(num_points * 2);
@@ -224,9 +263,12 @@ public:
             mtl_cfg.position_scale = config.position_scale;
             mtl_cfg.convert_coordinate_system = config.convert_coordinate_system;
             mtl_cfg.use_surface_alignment = config.use_surface_alignment;
+            mtl_cfg.default_color[0] = config.default_color[0];
+            mtl_cfg.default_color[1] = config.default_color[1];
+            mtl_cfg.default_color[2] = config.default_color[2];
 
             auto packed = processor.enhancedConvert(
-                positions, final_normals, colors, adaptive_scales, mtl_cfg);
+                positions, final_normals, final_colors, adaptive_scales, mtl_cfg);
 
             if (!packed.empty()) {
                 // Convert PackedGaussian back to GaussianSplat
@@ -281,10 +323,10 @@ public:
             
             // Color -> SH DC coefficients
             float r, g, b;
-            if (!colors.empty() && config.use_vertex_colors) {
-                r = colors[i*3+0];
-                g = colors[i*3+1];
-                b = colors[i*3+2];
+            if (!final_colors.empty()) {
+                r = final_colors[i*3+0];
+                g = final_colors[i*3+1];
+                b = final_colors[i*3+2];
             } else {
                 r = config.default_color[0];
                 g = config.default_color[1];
@@ -375,8 +417,16 @@ public:
         }
         
         float extent = std::max({max_x - min_x, max_y - min_y, max_z - min_z});
+        // Degenerate extent (single point or all points coincident): a zero
+        // cell size would produce inf/NaN cell coordinates and UB in the
+        // float->int cast inside SpatialHash. Every point gets the minimum
+        // scale instead.
+        if (extent < 1e-9f) {
+            std::fill(scales.begin(), scales.end(), config.min_scale);
+            return scales;
+        }
         float cell_size = extent / std::cbrt(static_cast<float>(num_points)) * 2.0f;
-        
+
         // Build spatial hash
         SpatialHash hash(positions, cell_size);
         
@@ -651,10 +701,26 @@ std::vector<float> computeKnnDistances(
     std::vector<float> distances(num_points, 0.0f);
     if (num_points == 0) return distances;
 
-    // Use Metal brute-force k-NN for small clouds when GPU is available.
+    // Use Metal when a GPU is available: brute force for small clouds,
+    // grid-accelerated for large ones.
     if (metal_ctx && num_points < 10000) {
         metal::GaussianProcessor processor(*metal_ctx);
-        return processor.computeKnnDistancesMetal(positions, k);
+        auto result = processor.computeKnnDistancesMetal(positions, k);
+        if (result.size() == num_points) return result;
+    } else if (metal_ctx) {
+        auto g = grid::buildGrid(positions);
+        if (g.valid) {
+            metal::GaussianProcessor processor(*metal_ctx);
+            auto stats = processor.knnStatsGrid(
+                positions, g.entries, g.cell_starts, g.cell_counts,
+                g.origin.data(), g.cell_size, g.dims.data(), k);
+            if (stats.size() == num_points * 4) {
+                for (size_t i = 0; i < num_points; ++i) {
+                    distances[i] = stats[i * 4];
+                }
+                return distances;
+            }
+        }
     }
 
     // CPU: O(n^2) brute force for small clouds; spatial hash for larger ones.
@@ -673,6 +739,7 @@ std::vector<float> computeKnnDistances(
             
             std::sort(dists.begin(), dists.end());
             int actual_k = std::min(k, static_cast<int>(dists.size()));
+            if (actual_k == 0) continue;  // single-point cloud: avoid 0/0 NaN
             for (int j = 0; j < actual_k; ++j) {
                 distances[i] += dists[j];
             }

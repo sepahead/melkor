@@ -1,16 +1,17 @@
+#include "melkor/compute_provider.hpp"
+#include "melkor/densifier.hpp"
 #include "melkor/glb_reader.hpp"
 #include "melkor/ply_writer.hpp"
-#ifdef MELKOR_HAS_METAL
-#include "melkor/metal_compute.hpp"
-#elif defined(MELKOR_HAS_CUDA)
-#include "melkor/cuda_compute.hpp"
-#else
-#include "melkor/metal_compute.hpp"  // Uses stub implementation
-#endif
 #include "melkor/spz_encoder.hpp"
 #include "melkor/enhanced_converter.hpp"
 #include "melkor/gaussian_fitter.hpp"
 #include "melkor/feedforward_model.hpp"
+
+// Metal-specific features (EnhancedConverter GPU path, GaussianFitter,
+// DifferentiableRenderer) still require metal::MetalContext directly.
+#ifdef MELKOR_HAS_METAL
+#include "melkor/metal_compute.hpp"
+#endif
 
 #include <iostream>
 #include <string>
@@ -20,13 +21,7 @@
 namespace fs = std::filesystem;
 
 void printUsage(const char* program) {
-#ifdef MELKOR_HAS_METAL
-    std::cout << "Melkor - Advanced Gaussian Splatting Toolkit (Metal-accelerated)\n";
-#elif defined(MELKOR_HAS_CUDA)
-    std::cout << "Melkor - Advanced Gaussian Splatting Toolkit (CUDA-accelerated)\n";
-#else
-    std::cout << "Melkor - Advanced Gaussian Splatting Toolkit (CPU)\n";
-#endif
+    std::cout << "Melkor - Advanced Gaussian Splatting Toolkit\n";
     std::cout << "\nUsage: " << program << " <input.glb> <output.ply|output.spz> [options]\n";
     std::cout << "\nSupported conversions:\n";
     std::cout << "  GLB -> PLY    Convert GLB mesh to Gaussian splatting PLY\n";
@@ -53,55 +48,47 @@ void printUsage(const char* program) {
     std::cout << "\nFeedforward Mode Options:\n";
     std::cout << "  --model <type>       Model type: splatter-image, mvsplat (default: splatter-image)\n";
     std::cout << "  --download-model     Download model weights if not present\n";
+    std::cout << "\nScene Completion Options (any splat input: PLY/SPZ/GLB):\n";
+    std::cout << "  --fill-holes         Densify sparse regions and bridge interior holes\n";
+    std::cout << "                       (3DGS densification, aka scene completion/inpainting)\n";
+    std::cout << "  --fill-iterations <int>  Advancing-front passes (default: 3)\n";
+    std::cout << "  --fill-strength <float>  Fill spacing in units of median splat spacing;\n";
+    std::cout << "                       lower is denser (default: 1.0)\n";
+    std::cout << "  --max-hole-size <float>  Largest bridgeable hole, in multiples of the\n";
+    std::cout << "                       median splat spacing (default: 8.0)\n";
     std::cout << "\nGeneral Options:\n";
     std::cout << "  --ascii              Output ASCII PLY instead of binary\n";
-#ifdef MELKOR_HAS_METAL
-    std::cout << "  --no-metal           Disable Metal acceleration\n";
-#endif
+    std::cout << "  --no-gpu             Disable GPU acceleration (use CPU)\n";
+    std::cout << "  --no-metal           Alias for --no-gpu (deprecated)\n";
     std::cout << "  --info               Show GPU info and exit\n";
     std::cout << "  --list-models        List available feedforward models\n";
     std::cout << "  -h, --help           Show this help\n";
 }
 
 void printDeviceInfo() {
-#ifdef MELKOR_HAS_METAL
-    if (!melkor::metal::MetalContext::isAvailable()) {
-        std::cout << "Metal is not available on this system.\n";
+    auto provider = melkor::ComputeProvider::create();
+    if (!provider || !provider->isInitialized()) {
+        std::cout << "No compute backend available.\n";
         return;
     }
 
-    melkor::metal::MetalContext ctx;
-    if (!ctx.initialize()) {
-        std::cout << "Failed to initialize Metal.\n";
-        return;
-    }
-
-    auto info = ctx.getDeviceInfo();
+    auto info = provider->deviceInfo();
     std::cout << "GPU Information:\n";
-    std::cout << "  Backend: Metal\n";
+    std::cout << "  Backend: " << provider->backendName() << "\n";
     std::cout << "  Name: " << info.name << "\n";
-    std::cout << "  Max Working Set: " << (info.recommended_max_working_set_size / (1024*1024)) << " MB\n";
-    std::cout << "  Max Threads/Threadgroup: " << info.max_threads_per_threadgroup << "\n";
-    std::cout << "  Apple Silicon (Family 7+): " << (info.supports_family_apple7 ? "Yes" : "No") << "\n";
-#elif defined(MELKOR_HAS_CUDA)
-    melkor::cuda::CudaContext ctx;
-    if (!ctx.initialize()) {
-        std::cout << "Failed to initialize CUDA.\n";
-        return;
+    if (info.total_memory > 0) {
+        std::cout << "  Memory: " << (info.total_memory / (1024*1024)) << " MB\n";
     }
-
-    auto info = ctx.getDeviceInfo();
-    std::cout << "GPU Information:\n";
-    std::cout << "  Backend: CUDA\n";
-    std::cout << "  Name: " << info.name << "\n";
-    std::cout << "  Total Memory: " << (info.total_memory / (1024*1024)) << " MB\n";
-    std::cout << "  Compute Capability: " << info.compute_capability_major << "." << info.compute_capability_minor << "\n";
-    std::cout << "  Max Threads/Block: " << info.max_threads_per_block << "\n";
-#else
-    std::cout << "GPU Information:\n";
-    std::cout << "  Backend: CPU-only (no GPU acceleration)\n";
-    std::cout << "  Note: Use OpenSplat with CUDA on Linux for GPU training\n";
-#endif
+    if (info.max_threads > 0) {
+        std::cout << "  Max Threads: " << info.max_threads << "\n";
+    }
+    if (info.compute_capability_major > 0) {
+        std::cout << "  Compute Capability: " << info.compute_capability_major
+                  << "." << info.compute_capability_minor << "\n";
+    }
+    if (provider->backend() == melkor::ComputeBackend::CPU) {
+        std::cout << "  Note: Use OpenSplat with CUDA on Linux for GPU training\n";
+    }
 }
 
 std::string getExtension(const std::string& path) {
@@ -133,7 +120,7 @@ int main(int argc, char* argv[]) {
     float pos_scale = 1.0f;
     bool convert_coords = true;
     bool use_binary = true;
-    bool use_metal = true;
+    bool use_gpu = true;
     bool show_info = false;
     bool list_models = false;
     bool download_model = false;
@@ -152,6 +139,12 @@ int main(int argc, char* argv[]) {
 
     // Feedforward mode options
     std::string model_type = "splatter-image";
+
+    // Scene completion options
+    bool fill_holes = false;
+    int fill_iterations = 3;
+    float fill_strength = 1.0f;
+    float max_hole_size = 8.0f;
 
     // Helper: parse a numeric argument safely, returning false on failure.
     auto parseFloat = [&](const char* flag, const char* val, float& out) -> bool {
@@ -213,10 +206,18 @@ int main(int argc, char* argv[]) {
             if (!parseInt("--resolution", argv[++i], fit_resolution)) return 1;
         } else if (arg == "--model" && i + 1 < argc) {
             model_type = argv[++i];
+        } else if (arg == "--fill-holes") {
+            fill_holes = true;
+        } else if (arg == "--fill-iterations" && i + 1 < argc) {
+            if (!parseInt("--fill-iterations", argv[++i], fill_iterations)) return 1;
+        } else if (arg == "--fill-strength" && i + 1 < argc) {
+            if (!parseFloat("--fill-strength", argv[++i], fill_strength)) return 1;
+        } else if (arg == "--max-hole-size" && i + 1 < argc) {
+            if (!parseFloat("--max-hole-size", argv[++i], max_hole_size)) return 1;
         } else if (arg == "--ascii") {
             use_binary = false;
-        } else if (arg == "--no-metal") {
-            use_metal = false;
+        } else if (arg == "--no-gpu" || arg == "--no-metal") {
+            use_gpu = false;
         } else if (arg[0] != '-') {
             if (input_path.empty()) {
                 input_path = arg;
@@ -228,6 +229,29 @@ int main(int argc, char* argv[]) {
         } else {
             std::cerr << "Warning: Unknown option: " << arg << "\n";
         }
+    }
+
+    // Validate numeric options: out-of-range values produce NaN scales
+    // (0/0 in k-NN averaging) or degenerate fits rather than clean errors.
+    if (knn_neighbors < 1) {
+        std::cerr << "Error: --knn must be >= 1 (got " << knn_neighbors << ")\n";
+        return 1;
+    }
+    if (fit_iterations < 1 || fit_views < 1 || fit_resolution < 1) {
+        std::cerr << "Error: --iterations, --views and --resolution must be >= 1\n";
+        return 1;
+    }
+    if (opacity <= 0.0f || opacity > 1.0f) {
+        std::cerr << "Error: --opacity must be in (0, 1] (got " << opacity << ")\n";
+        return 1;
+    }
+    if (fill_iterations < 1) {
+        std::cerr << "Error: --fill-iterations must be >= 1\n";
+        return 1;
+    }
+    if (fill_strength <= 0.0f || max_hole_size <= 0.0f) {
+        std::cerr << "Error: --fill-strength and --max-hole-size must be > 0\n";
+        return 1;
     }
 
     if (show_info) {
@@ -284,22 +308,28 @@ int main(int argc, char* argv[]) {
 
     auto start_time = std::chrono::high_resolution_clock::now();
 
-    // Initialize Metal if requested
-    std::unique_ptr<melkor::metal::MetalContext> metal_ctx;
-    std::unique_ptr<melkor::metal::GaussianProcessor> processor;
+    // Initialize compute backend
+    std::unique_ptr<melkor::ComputeProvider> provider;
+    if (use_gpu) {
+        provider = melkor::ComputeProvider::create();
+    } else {
+        provider = melkor::ComputeProvider::create(melkor::ComputeBackend::CPU);
+    }
 
-    if (use_metal && melkor::metal::MetalContext::isAvailable()) {
-        metal_ctx = std::make_unique<melkor::metal::MetalContext>();
-        if (metal_ctx->initialize()) {
-            processor = std::make_unique<melkor::metal::GaussianProcessor>(*metal_ctx);
-            auto info = metal_ctx->getDeviceInfo();
-            std::cout << "Using Metal acceleration: " << info.name << "\n";
-        } else {
-            std::cout << "Metal initialization failed, using CPU\n";
-            metal_ctx.reset();
-        }
-    } else if (use_metal) {
-        std::cout << "Metal not available, using CPU\n";
+    if (provider && provider->isInitialized()) {
+        auto info = provider->deviceInfo();
+        std::cout << "Using " << provider->backendName() << " acceleration: " << info.name << "\n";
+    } else {
+        std::cout << "No GPU acceleration available, using CPU\n";
+        provider = melkor::ComputeProvider::create(melkor::ComputeBackend::CPU);
+    }
+
+    // Metal-specific features (EnhancedConverter GPU path, GaussianFitter)
+    // need the raw Metal context handle.  Nullptr on non-Metal backends —
+    // EnhancedConverter falls back to CPU when given nullptr.
+    melkor::metal::MetalContext* metal_ctx = nullptr;
+    if (provider && provider->backend() == melkor::ComputeBackend::Metal) {
+        metal_ctx = static_cast<melkor::metal::MetalContext*>(provider->rawContext());
     }
 
     melkor::GaussianCloud cloud;
@@ -312,7 +342,7 @@ int main(int argc, char* argv[]) {
         if (mode == ConversionMode::Enhanced) {
             std::cout << "Using enhanced conversion mode\n";
 
-            melkor::EnhancedConverter converter(metal_ctx.get());
+            melkor::EnhancedConverter converter(metal_ctx);
             melkor::EnhancedConversionConfig config;
             config.knn_neighbors = knn_neighbors;
             config.scale_factor = splat_scale * 50.0f;  // Adjust scale factor
@@ -336,8 +366,9 @@ int main(int argc, char* argv[]) {
             std::cout << "Using render-based Gaussian fitting mode\n";
             std::cout << "This may take several minutes...\n";
 
+#ifdef MELKOR_HAS_METAL
             if (!metal_ctx) {
-                std::cerr << "Error: Fit mode requires GPU acceleration (Metal on macOS)\n";
+                std::cerr << "Error: Fit mode requires Metal GPU acceleration\n";
                 std::cerr << "Use OpenSplat with --backend cuda/metal for GPU-accelerated training\n";
                 return 1;
             }
@@ -365,6 +396,11 @@ int main(int argc, char* argv[]) {
             std::cout << "Fitting complete: " << cloud.size() << " Gaussians\n";
             std::cout << "Final loss: " << result.final_loss << "\n";
             std::cout << "Time: " << result.fitting_time_seconds << "s\n";
+#else
+            std::cerr << "Error: Fit mode requires Metal GPU acceleration (not compiled)\n";
+            std::cerr << "Build with Metal support or use OpenSplat for GPU training\n";
+            return 1;
+#endif
 
         } else if (mode == ConversionMode::Feedforward) {
             std::cout << "Using feedforward neural network mode\n";
@@ -447,18 +483,27 @@ int main(int argc, char* argv[]) {
         return 1;
     }
 
-    // Process with Metal if available (for additional optimizations)
-    if (processor && !cloud.empty()) {
-        std::cout << "Processing with Metal...\n";
+    // Scene completion: densify sparse regions and bridge interior holes.
+    if (fill_holes && !cloud.empty()) {
+        std::cout << "Scene completion (densification)...\n";
+        melkor::Densifier densifier(metal_ctx);
+        melkor::DensifyConfig fill_config;
+        fill_config.k_neighbors = knn_neighbors;
+        fill_config.max_iterations = fill_iterations;
+        fill_config.spacing_multiplier = fill_strength;
+        fill_config.max_hole_size = max_hole_size;
+        fill_config.use_gpu = use_gpu;
 
-        melkor::metal::GaussianProcessor::ProcessConfig proc_config;
-        proc_config.normalize_quaternions = true;
-        proc_config.convert_colors_to_sh = false;  // Already converted in loader
-        proc_config.convert_opacity_to_logit = false;  // Already converted
-        proc_config.position_scale = 1.0f;  // Already scaled
-        proc_config.transform_y_up_to_z_up = false;  // Already transformed
+        auto fill_stats = densifier.fillHoles(cloud, fill_config);
+        std::cout << "Scene completion: +" << fill_stats.added << " splats in "
+                  << fill_stats.passes << " pass(es), median spacing "
+                  << fill_stats.median_spacing << "\n";
+    }
 
-        processor->normalizeQuaternions(cloud);
+    // Process with compute backend if available (normalize quaternions)
+    if (provider && !cloud.empty()) {
+        std::cout << "Processing with " << provider->backendName() << "...\n";
+        provider->normalizeQuaternions(cloud);
     }
 
     // Write output
