@@ -14,6 +14,8 @@ Complete reference for the `pipeline.sh` unified training pipeline.
 - [Advanced Options](#advanced-options)
 - [Examples](#examples)
 - [Troubleshooting](#troubleshooting)
+- [Output Structure](#output-structure)
+- [See Also](#see-also)
 
 ---
 
@@ -38,12 +40,12 @@ The `pipeline.sh` script provides a unified interface for the complete Gaussian 
 
 ### Key Features
 
-- **Auto-detection**: Automatically selects best backend and tool for your platform
-- **Multiple tools**: OpenSplat, LichtFeld-Studio, gsplat-mps
+- **Auto-detection**: Automatically selects the best backend and tool for your platform
+- **Multiple tools**: OpenSplat, LichtFeld-Studio, gsplat-cuda, gsplat-mps
 - **Cross-platform**: macOS (Metal), Linux (CUDA), CPU fallback
 - **Format options**: PLY output, optional SPZ compression
-- **Quality presets**: Fast, medium, high quality options
-- **Advanced features**: Multi-GPU, custom image paths, memory optimization
+- **Quality presets**: Fast, medium, high
+- **Advanced features**: Multi-GPU, GLOMAP SfM, custom image paths, memory optimization
 
 ---
 
@@ -85,36 +87,38 @@ The `pipeline.sh` script provides a unified interface for the complete Gaussian 
 **Input:** Directory of images (JPG, PNG, HEIC, WebP, TIFF, etc.)
 
 The pipeline:
-1. Copies images to workspace
-2. Converts HEIC/HEIF to JPEG (macOS)
-3. Converts WebP to JPEG if needed
-4. Validates minimum image count (3+, 20+ recommended)
+1. Copies images to the workspace
+2. Converts HEIC/HEIF to JPEG (via `sips` on macOS, else ImageMagick or libheif)
+3. Converts WebP to JPEG if ImageMagick is available
+4. Validates the minimum image count (3+, 20+ recommended)
 
 **Supported formats:**
 - JPG, JPEG, PNG (universal)
 - HEIC, HEIF (Apple, auto-converted)
 - WebP, TIFF, TIF, BMP, GIF
 
-### Stage 2: COLMAP Reconstruction
+### Stage 2: SfM Reconstruction (COLMAP or GLOMAP)
 
 **Output:** `sparse/0/cameras.bin`, `images.bin`, `points3D.bin`
 
-Runs COLMAP automatic reconstruction to extract:
+Runs COLMAP automatic reconstruction (or GLOMAP with `--sfm glomap`) to extract:
 - Camera intrinsics (focal length, distortion)
 - Camera extrinsics (position, orientation)
 - Sparse point cloud (for initialization)
 
-**GPU Acceleration:** On Linux with NVIDIA GPU, COLMAP automatically uses CUDA for SIFT feature extraction and matching, significantly speeding up reconstruction.
+**GPU acceleration:** On Linux with an NVIDIA GPU, COLMAP automatically uses CUDA
+for SIFT feature extraction and matching, significantly speeding up reconstruction.
 
-Skip with `--skip-colmap` if you have existing reconstruction.
+Skip with `--skip-colmap` if you have an existing reconstruction.
 
 ### Stage 3: Gaussian Training
 
 **Output:** PLY file containing trained Gaussians
 
-Trains 3D Gaussian splats using selected tool:
+Trains 3D Gaussian splats using the selected tool:
 - **OpenSplat**: Cross-platform, production-grade
-- **LichtFeld-Studio**: Fastest, Linux CUDA only
+- **LichtFeld-Studio**: Fastest single-GPU, Linux CUDA only
+- **gsplat-cuda**: Multi-GPU DDP, Linux CUDA only
 - **gsplat-mps**: Flexible, macOS only
 
 ### Stage 4: Output Generation
@@ -127,7 +131,8 @@ Primary output is always PLY format.
 
 **Output:** `.spz` file (~90% smaller)
 
-With `--format spz` or `--format both`, converts PLY to compressed SPZ.
+With `--format spz` or `--format both`, converts the PLY to compressed SPZ using
+the Melkor CLI.
 
 ---
 
@@ -180,14 +185,14 @@ With `--format spz` or `--format both`, converts PLY to compressed SPZ.
 
 | Option | Values | Default | Description |
 |--------|--------|---------|-------------|
-| `--tool <name>` | `auto`, `opensplat`, `lichtfeld`, `gsplat` | `auto` | Training tool |
+| `--tool <name>` | `auto`, `opensplat`, `gsplat`, `gsplat-cuda`, `lichtfeld` | `auto` | Training tool |
 
 ### Pipeline Control
 
 | Option | Description |
 |--------|-------------|
 | `--skip-colmap` | Skip COLMAP/GLOMAP, use existing reconstruction |
-| `--sfm <tool>` | SfM tool: `colmap` (default), `glomap` (10-100× faster) |
+| `--sfm <tool>` | SfM tool: `colmap` (default), `glomap` (10-100× faster mapping, see [GLOMAP_WRAPPER.md](GLOMAP_WRAPPER.md)) |
 | `--colmap-quality <level>` | Feature extraction quality: `low`, `medium`, `high` |
 
 ### GPU & Memory Options
@@ -204,8 +209,8 @@ With `--format spz` or `--format both`, converts PLY to compressed SPZ.
 | Option | Description |
 |--------|-------------|
 | `--verbose, -v` | Verbose output |
-| `--dry-run` | Show what would be done |
-| `--setup` | Run full setup |
+| `--dry-run` | Show configuration without executing |
+| `--setup` | Install COLMAP and training tools, build Melkor |
 | `--version` | Show version |
 | `--help, -h` | Show help |
 
@@ -215,26 +220,31 @@ With `--format spz` or `--format both`, converts PLY to compressed SPZ.
 
 ### Automatic Selection
 
-With `--tool auto` (default), the pipeline selects:
+With `--tool auto` (default), the pipeline picks the first match among the
+tools that are actually installed:
 
-| Platform | GPU | Selected Tool |
-|----------|-----|---------------|
-| Linux | NVIDIA CUDA 12.8+ | LichtFeld-Studio |
-| Linux | NVIDIA CUDA < 12.8 | OpenSplat |
-| Linux | No GPU | OpenSplat (CPU) |
-| macOS | Apple Silicon | OpenSplat (Metal) |
-| macOS | Intel | OpenSplat (CPU) |
+| Condition | Selected Tool |
+|-----------|---------------|
+| Linux CUDA + `--gpu-ids` set, gsplat-cuda installed | gsplat-cuda (native DDP) |
+| Linux CUDA, LichtFeld-Studio installed | LichtFeld-Studio |
+| OpenSplat installed (any platform) | OpenSplat |
+| gsplat-cuda installed | gsplat-cuda |
+| gsplat-mps installed | gsplat-mps |
+
+> **Note:** LichtFeld-Studio's installer requires CUDA 12.8+; on systems where it
+> is not installed, the pipeline falls back to OpenSplat. If no tool is found,
+> run `./scripts/pipeline.sh --setup`.
 
 ### Tool Comparison
 
-| Feature | OpenSplat | LichtFeld-Studio | gsplat-mps |
-|---------|-----------|------------------|------------|
-| **Platform** | All | Linux CUDA | macOS |
-| **Speed** | ⚡⚡ | ⚡⚡⚡ | ⚡ |
-| **Pose Optimization** | ❌ | ✅ | ❌ |
-| **Multi-GPU** | ✅ (wrapper) | ❌ | ❌ |
-| **Memory Opts** | ✅ | Limited | ✅ |
-| **Custom Training** | Limited | Limited | ✅✅ |
+| Feature | OpenSplat | LichtFeld-Studio | gsplat-cuda | gsplat-mps |
+|---------|-----------|------------------|-------------|------------|
+| **Platform** | All | Linux CUDA | Linux CUDA | macOS |
+| **Speed** | ⚡⚡ | ⚡⚡⚡ | ⚡⚡⚡ | ⚡ |
+| **Pose Optimization** | ❌ | ✅ | ❌ | ❌ |
+| **Multi-GPU** | ✅ (wrapper) | ❌ | ✅ (native DDP) | ❌ |
+| **Memory Opts** | ✅ | Limited | ✅ | ✅ |
+| **Custom Training** | Limited | Limited | ✅ | ✅✅ |
 
 ### Manual Selection
 
@@ -244,6 +254,9 @@ With `--tool auto` (default), the pipeline selects:
 
 # Force LichtFeld-Studio (Linux CUDA only)
 ./scripts/pipeline.sh ~/Photos/scene ~/output/ --tool lichtfeld
+
+# Force gsplat-cuda (Linux CUDA, multi-GPU)
+./scripts/pipeline.sh ~/Photos/scene ~/output/ --tool gsplat-cuda
 
 # Force gsplat-mps (macOS only)
 ./scripts/pipeline.sh ~/Photos/scene ~/output/ --tool gsplat
@@ -285,13 +298,26 @@ Generates both PLY and SPZ files.
 
 ### Important: GLB is INPUT Only
 
-**Note:** The pipeline does NOT output GLB format. GLB is only supported as an INPUT format for converting existing 3D meshes to Gaussian splats:
+The pipeline does NOT output GLB format. GLB is only supported as an INPUT
+format for converting existing 3D meshes to Gaussian splats:
 
 ```bash
 # Convert GLB mesh to Gaussian splats
 ./build/melkor input.glb output.ply
 ./build/melkor input.glb output.spz
 ```
+
+### Post-Processing: Scene Completion
+
+Trained scenes often have occlusion holes and sparse regions. The Melkor CLI can
+fill them after the pipeline finishes:
+
+```bash
+./build/melkor ~/output/point_cloud.ply filled.ply --fill-holes
+```
+
+Parameters (`--fill-iterations`, `--fill-strength`, `--max-hole-size`) and the
+algorithm are documented in [SCENE_COMPLETION.md](SCENE_COMPLETION.md).
 
 ---
 
@@ -355,6 +381,10 @@ When images are in a different location than COLMAP expects:
     --gpu-ids 0,1,2,3 \
     --gpu-split data-parallel
 ```
+
+With `--gpu-ids` set, the pipeline prefers gsplat-cuda (native DDP) when
+installed, otherwise routes through the OpenSplat wrapper. See
+[GSPLAT_CUDA.md](GSPLAT_CUDA.md) and [OPENSPLAT_WRAPPER.md](OPENSPLAT_WRAPPER.md).
 
 ### Memory Optimization
 
@@ -497,7 +527,7 @@ When images are in a different location than COLMAP expects:
 # Downscale images
 ./scripts/pipeline.sh ~/Photos/scene ~/output/ --downscale 2
 
-# Or use wrapper with more options
+# Or use the wrapper with more options
 ./scripts/opensplat_wrapper.sh ~/project \
     --downscale 2 \
     --densify-grad 0.0005 \
@@ -506,7 +536,7 @@ When images are in a different location than COLMAP expects:
 
 ### "Images not found"
 
-**Solution:** Use `--images` to specify correct path:
+**Solution:** Use `--images` to specify the correct path:
 
 ```bash
 ./scripts/pipeline.sh ~/colmap_project ~/output/ \
@@ -516,16 +546,18 @@ When images are in a different location than COLMAP expects:
 
 ### "SPZ conversion failed"
 
-**Solution:** Ensure Melkor is built:
+**Solution:** Ensure the Melkor CLI is built:
 
 ```bash
-cd build && cmake .. && make -j$(nproc)
+./scripts/setup_deps.sh
+cmake -B build -DCMAKE_BUILD_TYPE=Release
+cmake --build build -j
 ```
 
 ### Training is Very Slow
 
 **Check:**
-1. GPU is being used: `nvidia-smi` or check output for "Metal" message
+1. GPU is being used: `nvidia-smi` (Linux) or check the output for a "Metal" message
 2. Use faster quality: `--quality fast`
 3. Downscale large images: `--downscale 2`
 
@@ -545,9 +577,14 @@ output/
 │   │       ├── images.bin    # Camera poses
 │   │       └── points3D.bin  # Sparse points
 │   └── database.db           # COLMAP database
-├── point_cloud.ply           # Trained Gaussians (PLY)
+├── point_cloud.ply           # Trained Gaussians (PLY; gsplat-mps emits splat.ply)
 └── point_cloud.spz           # Compressed (if --format spz/both)
 ```
+
+To inspect the result locally, use the bundled SparkJS viewer
+(`cd viewer && ./fetch-assets.sh && bun run serve` — see
+[viewer/README.md](../viewer/README.md)), or drag the PLY into
+[SuperSplat](https://playcanvas.com/supersplat).
 
 ---
 
@@ -556,3 +593,8 @@ output/
 - [Quick Start Guide](QUICKSTART.md) - Getting started
 - [OpenSplat Wrapper](OPENSPLAT_WRAPPER.md) - Advanced OpenSplat options
 - [LichtFeld Wrapper](LICHTFELD_WRAPPER.md) - LichtFeld-Studio options
+- [GLOMAP Wrapper](GLOMAP_WRAPPER.md) - Faster global SfM (`--sfm glomap`)
+- [gsplat CUDA](GSPLAT_CUDA.md) - Multi-GPU distributed training
+- [DA3 Feedforward](DA3_FEEDFORWARD.md) - COLMAP-free reconstruction
+- [Scene Completion](SCENE_COMPLETION.md) - Hole filling for trained scenes
+- [Viewer](../viewer/README.md) - SparkJS web viewer and Tauri shell

@@ -35,7 +35,7 @@ The `lichtfeld_wrapper.sh` script provides a convenient interface to LichtFeld-S
 | Requirement | Minimum | Recommended |
 |-------------|---------|-------------|
 | **OS** | Linux | Ubuntu 22.04+ |
-| **CUDA** | 12.4 | 12.8+ |
+| **CUDA** | 12.x (setup warns below 12.8) | 12.8+ |
 | **GCC** | 11 | 13+ |
 | **GPU** | NVIDIA with Compute 7.0+ | RTX 30/40 series |
 
@@ -48,6 +48,8 @@ The `lichtfeld_wrapper.sh` script provides a convenient interface to LichtFeld-S
 # Verify installation
 ./lichtfeld --help
 ```
+
+The setup script clones LichtFeld-Studio into `tools/LichtFeld-Studio`, downloads LibTorch 2.7.0 for CUDA 12.8 (~2 GB) into `tools/LichtFeld-Studio/external/libtorch`, builds with CMake + Ninja, and creates the `./lichtfeld` wrapper in the project root.
 
 ### Manual Prerequisites (Ubuntu)
 
@@ -63,10 +65,17 @@ sudo apt-get install -y \
     build-essential \
     cmake \
     ninja-build \
+    git \
+    unzip \
+    wget \
     libopencv-dev \
     libeigen3-dev \
     libglfw3-dev \
-    libglew-dev
+    libglew-dev \
+    libglm-dev \
+    libxinerama-dev \
+    libxcursor-dev \
+    libxi-dev
 
 # GCC 11+ for C++23
 sudo apt-get install gcc-11 g++-11
@@ -84,7 +93,7 @@ LichtFeld-Studio offers several advantages over other training tools:
 | **Pose Optimization** | ✅ Direct + MLP | ❌ | ❌ |
 | **MCMC Densification** | ✅ | ❌ | ✅ |
 | **Interactive Viewer** | ✅ | ❌ | ❌ |
-| **Dependencies** | Custom CUDA | LibTorch | PyTorch |
+| **Dependencies** | LibTorch (auto-downloaded by setup) | LibTorch | PyTorch |
 | **Platform** | Linux CUDA | All | macOS |
 
 ### Key Capabilities
@@ -93,7 +102,7 @@ LichtFeld-Studio offers several advantages over other training tools:
 2. **MCMC Densification**: Better Gaussian placement strategy
 3. **Fast Training**: ~20 minutes for 60k steps at 4K resolution
 4. **Interactive Viewer**: Real-time preview with editing capabilities
-5. **No ML Framework**: Pure CUDA implementation (no PyTorch/LibTorch)
+5. **Self-Contained Setup**: No Python environment required; the setup script downloads LibTorch 2.7.0 (CUDA 12.8) automatically
 
 ## Command Reference
 
@@ -109,6 +118,8 @@ LichtFeld-Studio offers several advantages over other training tools:
 |--------|-------------|
 | `--images <path>` | Override image directory path |
 
+With `--images`, the wrapper builds a temporary workspace: the `sparse/` reconstruction (and `database.db`, if present) is copied and `.jpg`/`.jpeg`/`.png` files from the given directory are symlinked into `images/`. The workspace is deleted after training.
+
 ### Output Options
 
 | Option | Default | Description |
@@ -116,11 +127,15 @@ LichtFeld-Studio offers several advantages over other training tools:
 | `-o, --output <dir>` | `output` | Output directory |
 | `-n, --iterations <n>` | `30000` | Training iterations |
 
+**Note:** `-n, --iterations` is accepted and shown in the configuration summary, but the wrapper does not currently forward it to the LichtFeld-Studio binary.
+
 ### GPU Options
 
 | Option | Default | Description |
 |--------|---------|-------------|
 | `--gpu <id>` | `0` | GPU to use |
+
+GPU selection is applied by exporting `CUDA_VISIBLE_DEVICES=<id>` before launching the binary.
 
 ### Training Options
 
@@ -130,6 +145,10 @@ LichtFeld-Studio offers several advantages over other training tools:
 | `--no-mcmc` | | Disable MCMC densification |
 | `--eval` | | Run evaluation after training |
 | `--gui` | | Launch interactive viewer |
+
+**Notes:**
+- `--pose-opt direct` and `--pose-opt mlp` map to the binary flags `--pose-opt-direct` and `--pose-opt-mlp`.
+- `--no-mcmc` is accepted and shown in the configuration summary, but is not currently forwarded to the binary.
 
 ### Other Options
 
@@ -265,6 +284,8 @@ When COLMAP's stored image paths don't match actual locations:
 
 ### "LichtFeld-Studio binary not found"
 
+The wrapper searches, in order: `./lichtfeld` (project root), `tools/LichtFeld-Studio/build/LichtFeld-Studio`, then `lichtfeld` / `LichtFeld-Studio` on `PATH`.
+
 ```bash
 # Install LichtFeld-Studio
 ./scripts/setup_lichtfeld.sh
@@ -347,9 +368,10 @@ ninja --version
 
 ✅ **Use OpenSplat when:**
 - You need cross-platform support (macOS Metal)
-- You have older CUDA (< 12.4)
-- You need multi-GPU training
+- You have an older CUDA toolkit (LichtFeld-Studio targets 12.8+)
 - You want simpler setup
+
+For multi-GPU distributed training, use gsplat CUDA instead (see the [gsplat CUDA Guide](GSPLAT_CUDA.md)).
 
 ### Performance Comparison
 
@@ -368,12 +390,14 @@ ninja --version
 # Use specific CUDA version
 export CUDA_HOME=/usr/local/cuda-12.8
 
-# Limit GPU memory
+# Limit GPU memory (LibTorch caching allocator)
 export PYTORCH_CUDA_ALLOC_CONF=max_split_size_mb:512
 
-# Use specific GPU
+# Use specific GPU (only when invoking ./lichtfeld directly)
 export CUDA_VISIBLE_DEVICES=1
 ```
+
+When training through `lichtfeld_wrapper.sh`, the wrapper always sets `CUDA_VISIBLE_DEVICES` from its `--gpu` option (default `0`), overriding any value exported beforehand. Use `--gpu <id>` instead.
 
 ### Running Headlessly (Server)
 
@@ -404,3 +428,4 @@ screen -S training
 - [Quick Start Guide](QUICKSTART.md) - Getting started with Melkor
 - [Pipeline Documentation](PIPELINE.md) - Complete pipeline reference
 - [OpenSplat Wrapper](OPENSPLAT_WRAPPER.md) - OpenSplat advanced features
+- [gsplat CUDA Guide](GSPLAT_CUDA.md) - Multi-GPU distributed training

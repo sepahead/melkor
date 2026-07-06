@@ -1,8 +1,9 @@
 # OpenSplat Wrapper - Advanced Training Guide
 
 The `opensplat_wrapper.sh` script provides advanced features for OpenSplat training, including:
+
 - **Custom image paths** - Use images from a different location than COLMAP expects
-- **Multi-GPU training** - Distribute training across multiple GPUs
+- **Multi-GPU modes** - Run training across multiple GPUs (independent parallel runs or sequential rotation; see [Multi-GPU Modes](#multi-gpu-modes))
 - **Memory optimization** - Reduce VRAM usage for large scenes
 
 ## Table of Contents
@@ -15,6 +16,9 @@ The `opensplat_wrapper.sh` script provides advanced features for OpenSplat train
 - [Memory Optimization](#memory-optimization)
 - [Troubleshooting](#troubleshooting)
 - [Linux-Specific Notes](#linux-specific-notes)
+- [Performance Tips](#performance-tips)
+- [Worked Example](#worked-example)
+- [See Also](#see-also)
 
 ## Quick Start
 
@@ -76,6 +80,15 @@ cd /path/to/melkor
 ./opensplat --help
 ```
 
+The setup script downloads LibTorch 2.2.0, clones and builds [OpenSplat](https://github.com/pierotofy/OpenSplat) under `tools/OpenSplat/`, and creates an `./opensplat` wrapper in the repository root. On macOS it builds with the Metal (MPS) runtime; on Linux it selects CUDA when `nvidia-smi` and `nvcc` are present, otherwise CPU.
+
+Environment variables recognized by `setup_opensplat.sh`:
+
+| Variable | Description |
+|----------|-------------|
+| `LIBTORCH_DIR` | Use an existing LibTorch installation instead of downloading |
+| `OPENSPLAT_SRC` | Build from an existing OpenSplat source checkout instead of cloning |
+
 ### Make Wrapper Executable
 
 ```bash
@@ -84,24 +97,25 @@ chmod +x scripts/opensplat_wrapper.sh
 
 ## Common Use Cases
 
-### 1. Images in Different Location (Your Case)
+### 1. Images in a Different Location
 
 When COLMAP stored relative paths like `./images/IMG_*.JPG` but your actual images are elsewhere:
 
 ```bash
-# COLMAP project is at: ~/sep/splattingexperiment1
-# Actual images are at: ~/sep/original_photos
+# COLMAP project is at: ~/projects/scene1
+# Actual images are at:  ~/photos/scene1_originals
 
-./scripts/opensplat_wrapper.sh ~/sep/splattingexperiment1 \
-    --images ~/sep/original_photos \
-    --opensplat ~/sep/Melkor/opensplat \
+./scripts/opensplat_wrapper.sh ~/projects/scene1 \
+    --images ~/photos/scene1_originals \
+    --opensplat ./opensplat \
     -n 30000 \
-    -o ~/sep/output/splat.ply
+    -o ~/output/splat.ply
 ```
 
 **What this does:**
+
 1. Creates a temporary workspace
-2. Copies COLMAP database files (sparse/0/*, database.db)
+2. Copies COLMAP database files (`sparse/0/*`, `database.db`)
 3. Creates symlinks from `workspace/images/` to your actual images
 4. Runs OpenSplat in the temporary workspace
 5. Cleans up when done
@@ -199,7 +213,7 @@ If you're running out of GPU memory:
 
 | Option | Default | Description |
 |--------|---------|-------------|
-| `--gpu <id>` | `0` | Use specific single GPU |
+| `--gpu <id>` | `0` | Use a specific single GPU (forces `--split single`) |
 | `--gpu-ids <ids>` | | Comma-separated GPU IDs for multi-GPU |
 | `--split <mode>` | `single` | Multi-GPU mode: `single`, `data-parallel`, `memory-split` |
 
@@ -208,21 +222,28 @@ If you're running out of GPU memory:
 | Option | Default | Description |
 |--------|---------|-------------|
 | `--downscale <factor>` | `1` | Downscale images by factor (1, 2, 4, 8) |
-| `--densify-grad <val>` | `0.0002` | Gradient threshold for densification (higher = fewer Gaussians) |
-| `--densify-size <val>` | `0.01` | Size threshold for densification |
-| `--densify-interval <n>` | `100` | Interval between densification operations |
-| `--stop-densify <n>` | `15000` | Stop densification after N iterations |
+| `--densify-grad <val>` | `0.0002`* | Gradient threshold for densification (higher = fewer Gaussians) |
+| `--densify-size <val>` | `0.01`* | Size threshold for densification |
+| `--densify-interval <n>` | `100`* | Interval between densification operations |
+| `--stop-densify <n>` | `15000`* | Stop densification after N iterations |
+| `--batch-size <n>` | | Accepted for forward compatibility; currently not forwarded to OpenSplat |
+
+\* OpenSplat's built-in default. The wrapper passes the corresponding OpenSplat flag (`--densify-grad-thresh`, `--densify-size-thresh`, `--densify-every`, `--stop-densify-at`) only when the option is set explicitly.
 
 ### Other Options
 
 | Option | Description |
 |--------|-------------|
-| `--opensplat <path>` | Path to opensplat binary (auto-detected if not specified) |
-| `--verbose, -v` | Enable verbose output |
-| `--dry-run` | Show what would be done without executing |
+| `--opensplat <path>` | Path to opensplat binary. Auto-detected if not specified: `./opensplat` (repo root), `tools/OpenSplat/build/opensplat`, `PATH`, `/usr/local/bin/opensplat`, `~/opensplat` |
+| `--verbose, -v` | Enable verbose output (prints the full OpenSplat command) |
+| `--dry-run` | Show what would be done without executing (honored in `single` split mode) |
 | `--help, -h` | Show help message |
 
+All wrapper log messages are written to stderr; stdout carries only the output of the OpenSplat process itself, so the wrapper is safe to use in command substitution and pipelines.
+
 ## Multi-GPU Modes
+
+In `data-parallel` and `memory-split` modes the wrapper forwards only `--downscale`, `--densify-grad`, and `--stop-densify` to each training run; `--densify-size`, `--densify-interval`, and `--save-every` apply to `single` mode only.
 
 ### `single` (Default)
 
@@ -260,7 +281,7 @@ Runs training sequentially on different GPUs, splitting iterations across them.
 - When each GPU has limited memory
 - Rotating through GPUs to prevent thermal throttling
 
-**Note:** OpenSplat doesn't support resuming from checkpoints, so this mode runs shorter training sessions on each GPU.
+**Note:** OpenSplat does not support resuming from checkpoints, so each GPU trains from scratch for `iterations / num_gpus` steps. Only the final GPU's result is written to the output path; intermediate results are discarded.
 
 ```bash
 ./scripts/opensplat_wrapper.sh ./project \
@@ -501,30 +522,39 @@ screen -r training
    - Standard quality: 20,000-30,000
    - High quality: 50,000+
 
-## Examples for Your Setup
+## Worked Example
 
-Based on your error message, here's the exact command:
+For a COLMAP project whose images have been moved since reconstruction (the database references paths that no longer exist):
 
 ```bash
-# Your COLMAP project: ~/sep/splattingexperiment1
-# OpenSplat binary: /home/jovyan/sep/Melkor/opensplat
-# Find where your actual images are, then:
+# COLMAP project: ~/projects/scene1
+# OpenSplat binary: /path/to/melkor/opensplat
+# Actual image location: /data/photos/scene1
 
-./scripts/opensplat_wrapper.sh ~/sep/splattingexperiment1 \
-    --images /path/to/your/actual/images \
-    --opensplat /home/jovyan/sep/Melkor/opensplat \
+./scripts/opensplat_wrapper.sh ~/projects/scene1 \
+    --images /data/photos/scene1 \
+    --opensplat /path/to/melkor/opensplat \
     -n 30000 \
     -o output.ply
 ```
 
-If you're running out of memory:
+If training runs out of GPU memory:
 
 ```bash
-./scripts/opensplat_wrapper.sh ~/sep/splattingexperiment1 \
-    --images /path/to/your/actual/images \
-    --opensplat /home/jovyan/sep/Melkor/opensplat \
+./scripts/opensplat_wrapper.sh ~/projects/scene1 \
+    --images /data/photos/scene1 \
+    --opensplat /path/to/melkor/opensplat \
     --downscale 2 \
     --densify-grad 0.0005 \
     -n 30000 \
     -o output.ply
 ```
+
+---
+
+## See Also
+
+- [Quick Start Guide](QUICKSTART.md) - Getting started with Melkor
+- [Pipeline Documentation](PIPELINE.md) - Complete pipeline reference
+- [GLOMAP Wrapper](GLOMAP_WRAPPER.md) - Fast global SfM for sparse reconstruction
+- [LichtFeld Wrapper](LICHTFELD_WRAPPER.md) - LichtFeld-Studio options

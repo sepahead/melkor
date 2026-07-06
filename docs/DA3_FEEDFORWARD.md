@@ -34,7 +34,7 @@ DA3 is a transformer-based model that predicts **depth** and **ray directions** 
 | Feature | Description |
 |---------|-------------|
 | **Feedforward** | Single forward pass, no iterative optimization |
-| **Multi-GPU** | Native distributed inference via PyTorch DDP |
+| **Multi-GPU** | Data-parallel distributed inference via `torch.distributed` (NCCL) |
 | **Multi-View** | Handles single or multiple input images |
 | **Fast** | ~1-5 seconds per image on modern GPUs |
 | **No COLMAP** | Doesn't require camera poses (estimates them internally) |
@@ -101,9 +101,11 @@ chmod +x scripts/setup_da3.sh
 ./scripts/setup_da3.sh
 
 # 3. Select models to download when prompted:
-#    - DA3-BASE (recommended, ~2GB)
-#    - DA3-LARGE (~4GB, higher quality)
-#    - DA3-SMALL (~1GB, fastest)
+#    Main series:  DA3-SMALL (~1GB), DA3-BASE (recommended, ~2GB),
+#                  DA3-LARGE (~4GB), DA3-GIANT (~8GB)
+#    Specialized:  DA3MONO-LARGE (~4GB), DA3METRIC-LARGE (~4GB),
+#                  DA3NESTED-GIANT-LARGE (~12GB)
+#    Bundles:      all main series, or skip and download later
 
 # 4. Verify installation
 ./da3-infer --help
@@ -235,6 +237,8 @@ Melkor supports two fundamentally different approaches to 3D Gaussian Splatting:
 ./da3-infer --input images/ --output scene.ply --subsample 2
 ```
 
+**Note:** When the DA3 model loads successfully, the CLI prefers the model's directly estimated Gaussians (`infer_gs` branch). On that path `--scale`, `--min-depth`, and `--max-depth` have no effect; `--subsample` still applies (uniform strided sampling). The depth-range and scale flags apply to the derived depth-ray path (see [How It Works](#how-it-works)).
+
 ### Memory Optimization
 
 ```bash
@@ -254,6 +258,8 @@ DA3 uses **data parallelism** for multi-GPU inference:
 1. Images are distributed across GPUs
 2. Each GPU runs DA3 independently on its subset
 3. Results are gathered and merged on GPU 0
+
+**Trade-off:** The multi-GPU script processes each image with an independent per-image inference call, whereas the single-GPU script issues one batched multi-view call with DA3's Gaussian head enabled, producing jointly consistent geometry and poses across views. Use multi-GPU for throughput on large image sets; use single-GPU when cross-view consistency matters most.
 
 ```
 ┌─────────────────────────────────────────────────────────────────┐
@@ -447,8 +453,8 @@ The number of Gaussians generated varies based on:
 # Best quality (flagship model, ~1.15B parameters)
 ./da3-infer --model DA3-GIANT --input images/ --output best.ply
 
-# Monocular depth only (single image, no 3D reconstruction)
-./da3-infer --model DA3MONO-LARGE --input single_image.jpg --output depth.npy
+# Monocular model (single image; output is still a Gaussian point cloud)
+./da3-infer --model DA3MONO-LARGE --input single_image.jpg --output mono.ply
 
 # Metric depth for robotics (real-world scale in meters)
 ./da3-infer --model DA3METRIC-LARGE --input image.jpg --output metric.ply
@@ -479,16 +485,17 @@ snapshot_download('depth-anything/DA3-GIANT', local_dir='$HOME/.melkor/models/da
 
 ## Output Formats
 
-DA3 can output Gaussian splats in multiple formats:
+DA3 can output Gaussian splats in multiple formats. The format is selected by the file extension of the `--output` path (`.json`, `.npz`, and `.glb` are handled explicitly; any other extension is written as PLY). The multi-GPU script always writes PLY.
 
 ### Supported Output Formats
 
 | Format | Extension | Size | Use Case |
 |--------|-----------|------|----------|
 | **PLY** | `.ply` | Large (100MB-1GB+) | Standard format, editing, archival |
-| **SPZ** | `.spz` | Small (~10% of PLY) | Web, mobile, streaming |
+| **SPZ** | `.spz` | Small (~10% of PLY) | Web, mobile, streaming (via `melkor` conversion) |
 | **GLB** | `.glb` | Medium | Point cloud visualization |
 | **NPZ** | `.npz` | Compressed | Python/NumPy workflows |
+| **JSON** | `.json` | Small | Debugging (truncated to the first 1000 Gaussians) |
 
 ### PLY Output (Default)
 
@@ -524,8 +531,10 @@ Some DA3 models can export directly to GLB for point cloud visualization:
 
 ```bash
 # Export as GLB point cloud (requires trimesh)
-./da3-infer --input images/ --output scene.glb --export-format glb
+./da3-infer --input images/ --output scene.glb
 ```
+
+If `trimesh` is not installed, the script falls back to writing a PLY file next to the requested output.
 
 **Note:** GLB export creates a point cloud representation, not a full mesh. This is useful for:
 - Quick visualization in 3D software
@@ -536,7 +545,7 @@ Some DA3 models can export directly to GLB for point cloud visualization:
 
 ```bash
 # Export for Python workflows
-./da3-infer --input images/ --output scene.npz --export-format npz
+./da3-infer --input images/ --output scene.npz
 ```
 
 NPZ contains compressed NumPy arrays with all Gaussian parameters.
@@ -595,10 +604,9 @@ After generating Gaussians, several post-processing options are available:
 ```bash
 # Use subsampling during generation
 ./da3-infer --input images/ --output scene.ply --subsample 2
-
-# Or use voxel downsampling for fusion
-./da3-infer --input images/ --output scene.ply --voxel-size 0.05
 ```
+
+**Note:** `--voxel-size` is parsed but currently has no effect; the voxel-fusion helper is not wired into the CLI path (views are concatenated directly).
 
 #### 2. Compression (SPZ)
 
@@ -623,6 +631,8 @@ After generating Gaussians, several post-processing options are available:
 # Remove very close or very far points
 ./da3-infer --input images/ --output scene.ply --min-depth 0.5 --max-depth 50.0
 ```
+
+As noted under [Single-GPU Usage](#single-gpu-usage), `--scale`, `--min-depth`, and `--max-depth` apply only to the derived depth-ray path, not to model-direct Gaussians.
 
 #### Post-Processing Pipeline
 
@@ -655,7 +665,7 @@ If you already have Depth-Anything-3 installed:
 ```bash
 # Option 1: Point to your existing installation
 export DA3_MODEL_DIR=/path/to/your/da3/models
-./da3-infer --model-dir $DA3_MODEL_DIR --input images/ --output scene.ply
+./da3-infer --model-dir "$DA3_MODEL_DIR" --input images/ --output scene.ply
 
 # Option 2: Use your own Python environment
 source /path/to/your/venv/bin/activate
@@ -676,14 +686,17 @@ If you have gsplat with CUDA already set up:
 ```bash
 # Option 1: Use existing gsplat for training (COLMAP-based approach)
 source /path/to/your/gsplat/venv/bin/activate
-python -m gsplat.examples.simple_trainer --data_dir /path/to/colmap_project
+cd /path/to/your/gsplat
+python examples/simple_trainer.py default --data_dir /path/to/colmap_project
 
-# Option 2: Point Melkor to your gsplat installation
-export GSPLAT_DIR=/path/to/your/gsplat
+# Option 2: Point Melkor's pipeline at your gsplat checkout.
+# pipeline.sh expects the installation (including its venv/) at tools/gsplat-cuda:
+ln -s /path/to/your/gsplat tools/gsplat-cuda
 ./scripts/pipeline.sh ~/Photos/scene ~/output/ --tool gsplat-cuda
 
 # Option 3: Use gsplat's native multi-GPU training
-torchrun --nproc_per_node=4 -m gsplat.examples.simple_trainer \
+cd /path/to/your/gsplat
+torchrun --nproc_per_node=4 examples/simple_trainer.py default \
     --data_dir /path/to/colmap_project \
     --result_dir ./output
 ```
@@ -695,7 +708,6 @@ Create a custom configuration file:
 ```bash
 # ~/.melkor/config.sh
 export DA3_MODEL_DIR="/custom/path/to/da3/models"
-export GSPLAT_DIR="/custom/path/to/gsplat"
 export CUDA_VISIBLE_DEVICES="0,1,2,3"
 export PYTORCH_CUDA_ALLOC_CONF="max_split_size_mb:512"
 ```
@@ -704,8 +716,10 @@ Then source it before running:
 
 ```bash
 source ~/.melkor/config.sh
-./da3-infer --input images/ --output scene.ply
+./da3-infer --model-dir "$DA3_MODEL_DIR" --input images/ --output scene.ply
 ```
+
+**Note:** `DA3_MODEL_DIR` is a shell convenience, not an environment variable read by the tools — it must be passed explicitly via `--model-dir`. `CUDA_VISIBLE_DEVICES` and `PYTORCH_CUDA_ALLOC_CONF` are honored by PyTorch directly.
 
 ### Feedforward Mode with CUDA
 
@@ -726,6 +740,8 @@ The `--feedforward` mode in Melkor uses neural network inference and supports CU
 - NVIDIA GPU with CUDA 11.8+
 - PyTorch with CUDA support
 - Sufficient VRAM (8GB+ recommended)
+
+**Model weights and the built-in downloader:** `melkor`'s weight manager downloads single-file weights (`splatter-image`, `mvsplat`) with `curl -fL` and validates the payload before accepting it: HTTP 4xx/5xx responses fail the download, and empty files, HTML/error pages, and files implausibly small for the advertised model size are rejected. Partial or invalid downloads are deleted so a broken file is never reported as an installed model. The DA3 models are multi-file Hugging Face repositories and cannot be fetched by the built-in downloader; install them with `./scripts/setup_da3.sh` (or `huggingface_hub`) instead.
 
 ---
 
@@ -842,10 +858,10 @@ DA3 predicts:
 
 ### Gaussian Parameters
 
-From the depth-ray output, we generate Gaussian parameters:
+On the primary single-GPU path, DA3 runs with its Gaussian head enabled (`infer_gs=True`) and the exported splats use the model's directly estimated means, scales, rotations, spherical harmonics, and opacities. When the direct Gaussians are unavailable (model missing, or the batched call failed) — and always in multi-GPU mode — the parameters are derived from the depth-ray output:
 
-| Parameter | Computation |
-|-----------|-------------|
+| Parameter | Computation (derived path) |
+|-----------|----------------------------|
 | **Position** | `P = depth × ray` |
 | **Color** | RGB from input image |
 | **Scale** | Adaptive based on depth (further = larger) |
@@ -898,17 +914,19 @@ From the depth-ray output, we generate Gaussian parameters:
 | Option | Default | Description |
 |--------|---------|-------------|
 | `--input, -i` | Required | Input image or directory |
-| `--output, -o` | Required | Output file (.ply or .json) |
-| `--model, -m` | DA3-BASE | Model variant |
-| `--model-dir` | ~/.melkor/models/da3 | Model weights directory |
-| `--device` | cuda | Device (cuda, cpu) |
-| `--scale` | 0.01 | Base Gaussian scale |
-| `--subsample` | 1 | Pixel subsampling factor |
-| `--min-depth` | 0.1 | Minimum valid depth |
-| `--max-depth` | 100.0 | Maximum valid depth |
-| `--voxel-size` | 0.05 | Voxel size for fusion |
-| `--fp32` | False | Use FP32 instead of FP16 |
-| `--verbose, -v` | False | Verbose output |
+| `--output, -o` | Required | Output file; format selected by extension (`.ply`, `.json`, `.npz`, `.glb`) |
+| `--model, -m` | `DA3-BASE` | Model variant |
+| `--model-dir` | `~/.melkor/models/da3` | Model weights directory |
+| `--device` | `cuda` | Device (`cuda`, `cpu`) |
+| `--scale` | `0.01` | Base Gaussian scale (derived path only) |
+| `--subsample` | `1` | Pixel subsampling factor |
+| `--min-depth` | `0.1` | Minimum valid depth (derived path only) |
+| `--max-depth` | `100.0` | Maximum valid depth (derived path only) |
+| `--voxel-size` | `0.05` | Reserved; currently not applied by the CLI |
+| `--export-format` | `ply` | Declared format (`ply`, `glb`, `npz`); the output extension takes precedence |
+| `--fp32` | off | Use FP32 instead of FP16 |
+| `--allow-fallback-depth` | off | Permit the preview-only intensity-based depth fallback when the DA3 model is unavailable |
+| `--verbose, -v` | off | Verbose output |
 
 ### da3-infer-multigpu (Multi-GPU)
 
@@ -916,11 +934,17 @@ From the depth-ray output, we generate Gaussian parameters:
 ./da3-infer-multigpu [options]
 ```
 
-All options from `da3-infer` plus:
+Supports `--input`, `--output`, `--model`, `--model-dir`, `--scale`, `--subsample`, `--min-depth`, `--max-depth`, `--fp32`, and `--verbose` as above, plus:
 
 | Option | Default | Description |
 |--------|---------|-------------|
-| `--gpus` | All GPUs | Number of GPUs to use |
+| `--gpus=N` | All GPUs | Number of GPUs to launch (the wrapper only recognizes the `--gpus=N` form) |
+
+Differences from `da3-infer`:
+
+- Output is always written as PLY, regardless of extension.
+- `--device`, `--voxel-size`, `--export-format`, and `--allow-fallback-depth` are not available.
+- Inference runs per-image on each rank (no joint multi-view call; see [How Multi-GPU Works](#how-multi-gpu-works)).
 
 ## Troubleshooting
 
@@ -945,6 +969,10 @@ cd tools/da3/Depth-Anything-3
 source ../venv/bin/activate
 pip install -e .
 ```
+
+### "DA3 model unavailable and intensity-based fallback is disabled"
+
+The single-GPU CLI refuses to silently substitute its intensity-based depth heuristic when the DA3 model cannot be loaded. Install the model (`./scripts/setup_da3.sh`), or pass `--allow-fallback-depth` to opt in to a preview-only result that is not suitable for reconstruction.
 
 ### "NCCL error" in multi-GPU
 
@@ -987,8 +1015,8 @@ export NCCL_SOCKET_IFNAME=eth0
 | Variable | Description |
 |----------|-------------|
 | `CUDA_VISIBLE_DEVICES` | Restrict visible GPUs |
-| `MASTER_ADDR` | DDP master address (default: localhost) |
-| `MASTER_PORT` | DDP master port (default: 29500) |
+| `MASTER_ADDR` | `torch.distributed` master address (default: localhost) |
+| `MASTER_PORT` | `torch.distributed` master port (default: 29500) |
 | `NCCL_DEBUG` | NCCL debugging (INFO, WARN) |
 | `NCCL_IB_DISABLE` | Disable InfiniBand (set to 1 if not available) |
 | `NCCL_SOCKET_IFNAME` | Network interface for NCCL (e.g., eth0, ens3) |
@@ -1094,7 +1122,7 @@ DA3 uses **DINOv2** as its backbone encoder:
    - Better edge preservation
 
 **Availability:**
-- GitHub: [facebookresearch/dinov3](https://github.com/facebookresearch/dinov3) (8.6k+ stars)
+- GitHub: [facebookresearch/dinov3](https://github.com/facebookresearch/dinov3)
 - Hugging Face Transformers: v4.56.0+
 - PyTorch Image Models (timm): v1.0.20+
 - License: Commercial use allowed

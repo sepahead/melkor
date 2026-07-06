@@ -90,7 +90,7 @@ GLOMAP replaces only the **mapping/reconstruction** step of COLMAP, not the feat
 │  │    colmap mapper --database_path db --image_path imgs --output out  │   │
 │  │    Time: 10-60+ minutes for large datasets                          │   │
 │  │                                                                      │   │
-│  │  Option B: GLOMAP mapper (global) ← NEW!                            │   │
+│  │  Option B: GLOMAP mapper (global)                                   │   │
 │  │    glomap mapper --database_path db --image_path imgs --output out  │   │
 │  │    Time: 1-5 minutes for same datasets (10-100× faster)            │   │
 │  │                                                                      │   │
@@ -153,7 +153,10 @@ GLOMAP depends on COLMAP for feature extraction and matching:
 | **COLMAP** | Any version | Required for features/matching |
 | **CMake** | 3.28+ | For FetchContent, or 3.10+ otherwise |
 | **C++ Compiler** | C++17 support | GCC 7+, Clang 6+ |
+| **Ninja** | Recommended | Installed by the setup script if missing |
 | **PoseLib** | Auto-fetched | Or install manually |
+
+The setup script installs COLMAP itself if it is not found, and installs the remaining build dependencies (Eigen, Ceres, gflags, glog) via apt (Linux) or Homebrew (macOS).
 
 ### Setup
 
@@ -201,6 +204,8 @@ ninja && sudo ninja install
 ./scripts/pipeline.sh ~/Photos/scene ~/output/ --sfm glomap --quality high
 ```
 
+See [PIPELINE.md](PIPELINE.md) for the full pipeline reference.
+
 ### Via Wrapper Script
 
 ```bash
@@ -212,6 +217,9 @@ ninja && sudo ninja install
 
 # Large-scale dataset
 ./scripts/glomap_wrapper.sh ~/Photos/scene ~/output/ --matcher vocab_tree
+
+# Existing COLMAP database (GLOMAP mapping only)
+./scripts/glomap_wrapper.sh ~/project/ ~/output/ --skip-features --skip-matching
 ```
 
 ### Direct GLOMAP Usage
@@ -246,7 +254,7 @@ colmap sequential_matcher --database_path ~/project/database.db
 # OR
 colmap vocab_tree_matcher --database_path ~/project/database.db
 
-# Step 3: Global SfM (GLOMAP) ← The fast part!
+# Step 3: Global SfM (GLOMAP)
 glomap mapper \
     --database_path ~/project/database.db \
     --image_path ~/Photos/scene \
@@ -282,13 +290,13 @@ glomap mapper \
 
 | Feature | COLMAP | GLOMAP |
 |---------|--------|--------|
-| Feature extraction | ✅ SIFT, etc. | ❌ Uses COLMAP |
-| Feature matching | ✅ Multiple matchers | ❌ Uses COLMAP |
-| Incremental SfM | ✅ | ❌ |
-| Global SfM | ❌ | ✅ |
-| Image undistortion | ✅ | ❌ Use COLMAP |
-| Dense reconstruction | ✅ | ❌ Use COLMAP |
-| GUI | ✅ | ❌ |
+| Feature extraction | Yes (SIFT, etc.) | No (uses COLMAP) |
+| Feature matching | Yes (multiple matchers) | No (uses COLMAP) |
+| Incremental SfM | Yes | No |
+| Global SfM | No | Yes |
+| Image undistortion | Yes | No (use COLMAP) |
+| Dense reconstruction | Yes | No (use COLMAP) |
+| GUI | Yes | No |
 
 ## Command Reference
 
@@ -309,28 +317,41 @@ glomap mapper [options]
 ### Wrapper Script Options
 
 ```bash
-./scripts/glomap_wrapper.sh <input> <output> [options]
+./scripts/glomap_wrapper.sh <input_images> <output_dir> [options]
 ```
+
+`<input_images>` is a directory of images, or a directory containing an existing COLMAP `database.db` when `--skip-features --skip-matching` is used.
 
 | Option | Default | Description |
 |--------|---------|-------------|
-| `--matcher <type>` | `exhaustive` | COLMAP matcher: exhaustive, sequential, vocab_tree |
-| `--gpu` | Auto | Enable/disable GPU for COLMAP features |
-| `--quality <level>` | `medium` | Feature extraction quality |
+| `--matcher <type>` | `exhaustive` | COLMAP matcher: `exhaustive` (<500 images), `sequential` (video/ordered images), `vocab_tree` (1000+ images) |
+| `--quality <level>` | `medium` | Feature extraction quality: `low` (4096 SIFT features), `medium` (8192), `high` (16384) |
+| `--gpu <mode>` | `auto` | GPU for COLMAP feature extraction/matching: `auto`, `0` (disable), `1` (enable). `auto` enables the GPU only on Linux with `nvidia-smi` present |
+| `--skip-features` | Off | Skip feature extraction (requires an existing `database.db` in the input directory) |
+| `--skip-matching` | Off | Skip feature matching (use existing matches in the database) |
 | `--verbose, -v` | Off | Verbose output |
 | `--dry-run` | Off | Show commands without executing |
+| `--help, -h` | | Show help |
+
+Notes:
+
+- Supported input formats: JPG, JPEG, PNG, TIFF, TIF, BMP. HEIC/HEIF files are converted to JPEG automatically (via `sips` on macOS or ImageMagick `convert`). At least 3 images are required; 20+ are recommended.
+- With `--matcher vocab_tree`, the vocabulary tree is looked up in `~/.colmap/` and `/usr/share/colmap/`, and downloaded to `~/.colmap/vocab_tree_flickr100K_words256K.bin` if not found.
+- The output directory will contain `database.db`, `images/` (symlinked or copied images), and `sparse/0/` (the GLOMAP reconstruction).
 
 ## Troubleshooting
 
 ### "glomap: command not found"
 
 ```bash
-# Ensure GLOMAP is installed
+# Ensure GLOMAP is installed (creates a ./glomap wrapper in the repo root)
 ./scripts/setup_glomap.sh
 
-# Or add to PATH
-export PATH="$HOME/.local/bin:$PATH"
+# Verify
+./glomap --help
 ```
+
+The wrapper script searches for the binary in this order: `./glomap` (repo root), `tools/glomap/build/glomap/glomap`, `tools/glomap/build/glomap`, `PATH`, `/usr/local/bin/glomap`.
 
 ### "Empty sparse reconstruction"
 
@@ -358,7 +379,7 @@ glomap mapper --database_path database.db --image_path images/ --output_path spa
 
 ### "CMake version too old"
 
-GLOMAP's FetchContent requires CMake 3.28+:
+GLOMAP's FetchContent-based build requires CMake 3.28+. The setup script warns and attempts the build with older versions, which then requires manually installed dependencies. To upgrade:
 
 ```bash
 # Install newer CMake

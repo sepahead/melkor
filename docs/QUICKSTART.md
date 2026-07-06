@@ -1,6 +1,6 @@
 # Melkor Quick Start Guide
 
-**Complete guide to 3D Gaussian Splatting: from photos to PLY or SPZ output.**
+Complete guide to 3D Gaussian Splatting with Melkor: from photos to PLY or SPZ output.
 
 ## Table of Contents
 
@@ -11,6 +11,9 @@
 5. [Tool Selection](#tool-selection)
 6. [Common Workflows](#common-workflows)
 7. [Troubleshooting](#troubleshooting)
+8. [Preprocessing & Postprocessing](#preprocessing--postprocessing)
+9. [Quick Reference](#quick-reference)
+10. [Next Steps](#next-steps)
 
 ---
 
@@ -20,10 +23,12 @@
 
 Melkor is a unified toolkit for 3D Gaussian Splatting that provides:
 
-- **Multiple training backends**: OpenSplat, LichtFeld-Studio, gsplat-mps, DA3
-- **Two approaches**: COLMAP-based (traditional) and COLMAP-Free (feedforward)
+- **Multiple training backends**: OpenSplat, LichtFeld-Studio, gsplat (CUDA and MPS), DA3
+- **Two approaches**: COLMAP-based (traditional) and COLMAP-free (feedforward)
 - **Format conversion**: GLB → PLY → SPZ (GLB is input only)
-- **Cross-platform support**: macOS (Metal), Linux (CUDA), CPU fallback
+- **Scene completion**: densification-based hole filling via `--fill-holes` — see [SCENE_COMPLETION.md](SCENE_COMPLETION.md)
+- **Bundled viewer**: SparkJS web viewer with an optional Tauri desktop shell — see [viewer/README.md](../viewer/README.md)
+- **Cross-platform GPU support**: Metal (macOS), CUDA (Linux), CPU fallback; `melkor --info` prints the active backend
 
 ### Two Approaches: COLMAP vs COLMAP-Free
 
@@ -94,28 +99,37 @@ Melkor is a unified toolkit for 3D Gaussian Splatting that provides:
 
 ```bash
 # Clone Melkor
-git clone https://github.com/sepehrmn/melkor.git
+git clone https://github.com/sepahead/melkor.git
 cd melkor
 
-# Install everything (auto-detects platform)
+# Build the Melkor CLI (fetches pinned third-party deps, then builds)
+./scripts/setup_deps.sh
+cmake -B build -DCMAKE_BUILD_TYPE=Release
+cmake --build build -j
+
+# Verify the build and see which GPU backend is active (Metal/CUDA/CPU)
+./build/melkor --info
+
+# Install the training tools (auto-detects platform; installs COLMAP too)
 ./scripts/setup_all.sh
-
-# Install COLMAP (required for training from images)
-# macOS:
-brew install colmap
-
-# Linux:
-sudo apt-get install colmap
 ```
+
+> **Note:** `setup_all.sh` installs COLMAP automatically (Homebrew on macOS, apt on
+> Linux). If that step fails, install it manually: `brew install colmap` or
+> `sudo apt-get install colmap`.
 
 ### What Gets Installed
 
-| Tool | Platform | Description |
-|------|----------|-------------|
-| **OpenSplat** | All | Cross-platform, production-grade |
-| **LichtFeld-Studio** | Linux CUDA | Fastest, pose optimization |
-| **gsplat-mps** | macOS | Research, flexible |
-| **Melkor CLI** | All | Format conversion |
+| Tool | Platform | Setup script | Description |
+|------|----------|--------------|-------------|
+| **Melkor CLI** | All | `setup_deps.sh` + CMake build | Format conversion, scene completion |
+| **COLMAP** | All | `setup_all.sh` | Structure-from-motion |
+| **OpenSplat** | All | `setup_all.sh` / `setup_opensplat.sh` | Cross-platform, production-grade |
+| **gsplat-mps** | macOS | `setup_all.sh` / `setup_gsplat_mps.sh` | Research, flexible |
+| **LichtFeld-Studio** | Linux CUDA | `setup_all.sh` / `setup_lichtfeld.sh` | Fastest, pose optimization |
+| **gsplat-cuda** (optional) | Linux CUDA | `setup_gsplat_cuda.sh` | Multi-GPU DDP training |
+| **GLOMAP** (optional) | All | `setup_glomap.sh` | 10-100× faster SfM mapping |
+| **DA3** (optional) | Linux CUDA | `setup_da3.sh` | COLMAP-free feedforward |
 
 ---
 
@@ -123,7 +137,8 @@ sudo apt-get install colmap
 
 ### Option 1: COLMAP-Free with DA3 (Fastest - Seconds)
 
-No COLMAP, no camera poses, just images → 3D Gaussians:
+No COLMAP, no camera poses, just images → 3D Gaussians
+(full reference: [DA3_FEEDFORWARD.md](DA3_FEEDFORWARD.md)):
 
 ```bash
 # 1. Install DA3 (Linux CUDA only)
@@ -132,7 +147,7 @@ No COLMAP, no camera poses, just images → 3D Gaussians:
 # 2. Single image to 3DGS
 ./da3-infer --input photo.jpg --output scene.ply
 
-# 3. Multiple images (no COLMAP needed!)
+# 3. Multiple images (no COLMAP required)
 ./da3-infer --input ~/Photos/my_scene/ --output scene.ply
 
 # 4. Multi-GPU for faster processing
@@ -157,7 +172,8 @@ No COLMAP, no camera poses, just images → 3D Gaussians:
 
 ### Option 2: COLMAP-Based Pipeline (Best Quality - Minutes)
 
-Traditional approach with camera pose estimation:
+Traditional approach with camera pose estimation
+(full option reference: [PIPELINE.md](PIPELINE.md)):
 
 ```bash
 # Basic usage
@@ -168,6 +184,10 @@ Traditional approach with camera pose estimation:
     --quality high \
     --format both \
     --tool auto
+
+# Minimal alternative: COLMAP + OpenSplat/gsplat-mps, fewer options
+# (--tool opensplat|gsplat, --quality fast|high; default: high)
+./scripts/train_from_images.sh ~/Photos/my_scene ~/output/my_scene
 ```
 
 ### Option 3: Step-by-Step (Manual Control)
@@ -191,20 +211,22 @@ ls ~/Photos/my_scene/*.{jpg,jpeg,png,JPG,JPEG,PNG} | wc -l
 mkdir -p ~/output/my_scene
 
 # COLMAP automatic reconstruction
-# On Linux with NVIDIA GPU, add --SiftExtraction.use_gpu 1 --SiftMatching.use_gpu 1
+# On Linux with an NVIDIA GPU, append:
+#   --SiftExtraction.use_gpu 1 --SiftMatching.use_gpu 1
 colmap automatic_reconstructor \
     --workspace_path ~/output/my_scene \
     --image_path ~/Photos/my_scene \
     --quality high \
-    --SiftExtraction.use_gpu 1 \
-    --SiftMatching.use_gpu 1
+    --single_camera 1
 
 # Verify output
 ls ~/output/my_scene/sparse/0/
 # Should see: cameras.bin, images.bin, points3D.bin
 ```
 
-> **Note:** The pipeline scripts automatically detect NVIDIA GPUs and enable CUDA acceleration for COLMAP.
+> **Note:** The pipeline scripts automatically detect NVIDIA GPUs and enable CUDA
+> acceleration for COLMAP. For much faster SfM on large image sets, see
+> [GLOMAP_WRAPPER.md](GLOMAP_WRAPPER.md).
 
 #### Step 3: Train Gaussian Splat
 
@@ -219,9 +241,11 @@ ls ~/output/my_scene/sparse/0/
 
 # gsplat-mps (macOS, research)
 source tools/gsplat-mps/venv/bin/activate
-python tools/gsplat-mps/examples/simple_trainer.py \
+cd tools/gsplat-mps
+python examples/simple_trainer.py \
     --data_dir ~/output/my_scene \
-    --result_dir ~/output/my_scene
+    --result_dir ~/output/my_scene \
+    --max_steps 30000
 ```
 
 #### Step 4: Convert to Desired Format
@@ -235,10 +259,17 @@ python tools/gsplat-mps/examples/simple_trainer.py \
 
 # GLB → SPZ (convert mesh directly to compressed format)
 ./build/melkor model.glb output.spz
+
+# Optional: fill holes / densify sparse regions before converting
+./build/melkor ~/output/my_scene/splat.ply filled.ply --fill-holes
 ```
 
-> **Note:** GLB is only supported as an INPUT format (for converting 3D meshes to Gaussian splats). 
-> PLY and SPZ are the supported OUTPUT formats.
+> **Note:** GLB is only supported as an INPUT format (for converting 3D meshes to
+> Gaussian splats). PLY and SPZ are the supported OUTPUT formats.
+> Run `./build/melkor --help` for all conversion modes (`--basic`, `--enhanced`,
+> `--fit`, `--feedforward`) and options. `--no-gpu` forces the CPU path
+> (`--no-metal` is a deprecated alias). Hole-filling parameters are documented in
+> [SCENE_COMPLETION.md](SCENE_COMPLETION.md).
 
 ---
 
@@ -304,9 +335,10 @@ python tools/gsplat-mps/examples/simple_trainer.py \
 # Let Melkor choose the best tool for your platform
 ./scripts/pipeline.sh ~/Photos/scene ~/output/ --tool auto
 
-# On Linux with CUDA: Uses LichtFeld-Studio
-# On Linux without CUDA: Uses OpenSplat (CPU)
-# On macOS: Uses OpenSplat (Metal) or gsplat-mps
+# Linux + CUDA: LichtFeld-Studio (or gsplat-cuda when --gpu-ids is set)
+# Linux without CUDA: OpenSplat (CPU)
+# macOS: OpenSplat (Metal on Apple Silicon)
+# Selection falls back to whichever tools are installed
 ```
 
 ### Manual Selection
@@ -314,7 +346,8 @@ python tools/gsplat-mps/examples/simple_trainer.py \
 ```bash
 # Force specific tool
 ./scripts/pipeline.sh ~/Photos/scene ~/output/ --tool opensplat
-./scripts/pipeline.sh ~/Photos/scene ~/output/ --tool lichtfeld   # Linux CUDA only
+./scripts/pipeline.sh ~/Photos/scene ~/output/ --tool lichtfeld    # Linux CUDA only
+./scripts/pipeline.sh ~/Photos/scene ~/output/ --tool gsplat-cuda  # Linux CUDA, multi-GPU
 ./scripts/pipeline.sh ~/Photos/scene ~/output/ --tool gsplat       # macOS only
 ```
 
@@ -390,11 +423,16 @@ When your images are in a different location than COLMAP expects:
 ### 6. Multi-GPU Training
 
 ```bash
-# Distribute across multiple GPUs (OpenSplat)
+# Distribute across multiple GPUs (OpenSplat wrapper)
 ./scripts/opensplat_wrapper.sh ~/project \
     --gpu-ids 0,1,2,3 \
     --split data-parallel \
     -o output.ply
+
+# Or via the pipeline (prefers gsplat-cuda when installed)
+./scripts/pipeline.sh ~/Photos/scene ~/output/ \
+    --gpu-ids 0,1,2,3 \
+    --gpu-split data-parallel
 ```
 
 ### 7. Using Existing COLMAP Project
@@ -433,7 +471,7 @@ done
 1. Add more images (minimum 20-30)
 2. Ensure 60-80% overlap between images
 3. Avoid blurry or dark images
-4. Try different COLMAP quality: `--quality low` or `--quality medium`
+4. Try different COLMAP quality: `--colmap-quality low` or `--colmap-quality medium`
 
 ### "Can't open/read file" or "Segmentation fault"
 
@@ -473,7 +511,7 @@ done
 ### Training is Very Slow
 
 **Possible causes**:
-1. **No GPU**: Check with `nvidia-smi` (Linux) or ensure Metal is working (macOS)
+1. **No GPU**: Check with `nvidia-smi` (Linux) or `./build/melkor --info` (prints the active Metal/CUDA/CPU backend)
 2. **Too many iterations**: Try `--quality fast` first
 3. **Large images**: Use `--downscale 2` or `--downscale 4`
 
@@ -516,6 +554,12 @@ for f in os.listdir('images'):
 # Compress PLY to SPZ (~90% smaller)
 ./build/melkor scene.ply scene.spz
 
+# Fill holes / densify sparse regions (scene completion)
+./build/melkor scene.ply scene_filled.ply --fill-holes
+
+# Tune fill density and the largest bridgeable hole
+./build/melkor scene.spz filled.spz --fill-holes --fill-strength 0.8 --max-hole-size 12
+
 # Remove outliers and downsample (requires open3d)
 python3 -c "
 import open3d as o3d
@@ -527,9 +571,14 @@ print(f'Cleaned: {len(pcd.points)} points')
 "
 ```
 
-### Web-Based Editor
+Hole-filling algorithm, parameters, and limits: [SCENE_COMPLETION.md](SCENE_COMPLETION.md).
 
-- **SuperSplat**: https://playcanvas.com/supersplat - Drag & drop PLY for cleaning, filtering, compression
+### Viewers & Editors
+
+- **Bundled SparkJS viewer** (PLY/SPZ/SOG/SPLAT): `cd viewer && ./fetch-assets.sh && bun run serve`;
+  `bun run test` runs the Playwright render tests, `bun run app` opens the Tauri
+  desktop shell — see [viewer/README.md](../viewer/README.md)
+- **SuperSplat** (web editor): https://playcanvas.com/supersplat — drag & drop PLY for cleaning, filtering, compression
 
 ---
 
@@ -542,34 +591,40 @@ print(f'Cleaned: {len(pcd.points)} points')
 ./scripts/pipeline.sh <images> <output> [options]
 
 # Options:
-#   --quality fast|medium|high   Training quality (default: medium)
-#   --format ply|spz|both        Output format (default: ply)
-#   --tool auto|opensplat|lichtfeld|gsplat
-#   --skip-colmap                Skip COLMAP (use existing project)
-#   --gpu-ids 0,1,2              Multi-GPU (comma-separated)
-#   --downscale 1|2|4            Downscale images (memory saver)
-#   --images <path>              Custom image path
+#   --backend auto|cuda|metal|cpu    Compute backend (default: auto)
+#   --quality fast|medium|high       Training quality (default: medium)
+#   --iterations <n>                 Override iteration count
+#   --format ply|spz|both            Output format (default: ply)
+#   --tool auto|opensplat|gsplat|gsplat-cuda|lichtfeld
+#   --sfm colmap|glomap              SfM tool (default: colmap)
+#   --colmap-quality low|medium|high Feature extraction quality
+#   --skip-colmap                    Skip SfM (use existing project)
+#   --gpu-ids 0,1,2                  Multi-GPU (comma-separated)
+#   --gpu-split single|data-parallel|memory-split
+#   --downscale 1|2|4|8              Downscale images (memory saver)
+#   --images <path>                  Custom image path
+#   --verbose | --dry-run | --setup | --version
 ```
 
 ### Direct Tool Usage
 
 ```bash
-# DA3 Feedforward (COLMAP-Free, Linux CUDA)
+# DA3 Feedforward (COLMAP-free, Linux CUDA)
 ./da3-infer --input <images> --output <output.ply>
 ./da3-infer-multigpu --input <images> --output <output.ply>  # Multi-GPU
 
-# OpenSplat (COLMAP-Based)
+# OpenSplat (COLMAP-based)
 ./opensplat <colmap_project> -n <iterations> -o <output.ply>
 
-# LichtFeld-Studio (Linux CUDA, COLMAP-Based)
+# LichtFeld-Studio (Linux CUDA, COLMAP-based)
 ./lichtfeld -d <colmap_project> -o <output_dir>/
 
-# gsplat CUDA (COLMAP-Based, Multi-GPU)
+# gsplat CUDA (COLMAP-based, multi-GPU)
 ./gsplat-cuda-train default --data_dir <colmap_project> --result_dir ./output
 ./gsplat-cuda-train-distributed --gpus 0,1,2,3 -- default --data_dir <colmap_project>
 
-# Melkor conversion
-./build/melkor <input> <output>   # Auto-detects formats
+# Melkor conversion (formats auto-detected from extensions)
+./build/melkor <input> <output> [options]
 ```
 
 ### Wrapper Scripts (Advanced Features)
@@ -580,13 +635,17 @@ print(f'Cleaned: {len(pcd.points)} points')
 
 # LichtFeld with pose optimization
 ./scripts/lichtfeld_wrapper.sh <project> [options]
+
+# GLOMAP global SfM (10-100× faster mapping)
+./scripts/glomap_wrapper.sh <images> <output_dir> [options]
 ```
 
 ---
 
 ## Next Steps
 
-- **View your splat**: Upload PLY to [SuperSplat](https://playcanvas.com/supersplat)
+- **View your splat**: Use the bundled [SparkJS viewer](../viewer/README.md) (`cd viewer && bun run serve`) or upload the PLY to [SuperSplat](https://playcanvas.com/supersplat)
+- **Fill holes**: Run `melkor <in> <out> --fill-holes` on trained scenes — [SCENE_COMPLETION.md](SCENE_COMPLETION.md)
 - **Mobile/Web**: Use SPZ format for streaming
-- **Game engines**: Many engines now support PLY splats directly
-- **Advanced docs**: See `docs/OPENSPLAT_WRAPPER.md` for all options
+- **Pipeline reference**: [PIPELINE.md](PIPELINE.md) for all `pipeline.sh` options
+- **Advanced docs**: [OPENSPLAT_WRAPPER.md](OPENSPLAT_WRAPPER.md), [LICHTFELD_WRAPPER.md](LICHTFELD_WRAPPER.md), [GLOMAP_WRAPPER.md](GLOMAP_WRAPPER.md), [GSPLAT_CUDA.md](GSPLAT_CUDA.md), [DA3_FEEDFORWARD.md](DA3_FEEDFORWARD.md)

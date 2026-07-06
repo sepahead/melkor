@@ -60,9 +60,10 @@ chmod +x scripts/setup_gsplat_cuda.sh
 
 ### What Gets Installed
 
-- **gsplat library** - CUDA-accelerated Gaussian Splatting
-- **PyTorch with CUDA** - Automatically matched to your CUDA version
-- **Training examples** - Simple trainer and MCMC trainer
+- **gsplat library** - CUDA-accelerated Gaussian Splatting (built from source in `tools/gsplat-cuda`)
+- **PyTorch with CUDA** - cu121 wheels for CUDA 12.x, cu118 wheels for CUDA 11.x
+- **Training examples** - `examples/simple_trainer.py` with `default` and `mcmc` strategies
+- **Training dependencies** - includes `nerfview` (web-based live training viewer)
 - **Wrapper scripts:**
   - `gsplat-cuda-train` - Single-GPU training
   - `gsplat-cuda-train-distributed` - Multi-GPU distributed training
@@ -200,12 +201,15 @@ Monte Carlo Markov Chain based densification (often better quality):
 
 | Option | Default | Description |
 |--------|---------|-------------|
-| `--data_dir` | Required | Path to COLMAP project |
-| `--result_dir` | `./results` | Output directory |
-| `--max_steps` | 30000 | Number of training steps |
-| `--data_factor` | 1 | Downscale factor for images |
-| `--test_every` | 1000 | Test/eval frequency |
-| `--save_steps` | 7000 30000 | Steps at which to save |
+| `--data_dir` | Required in practice | Path to COLMAP project |
+| `--result_dir` | `results/garden` | Output directory |
+| `--max_steps` | `30000` | Number of training steps |
+| `--data_factor` | `4` | Image downscale factor (`1` = full resolution) |
+| `--test_every` | `8` | Hold out every Nth image for evaluation |
+| `--eval_steps` | `7000 30000` | Steps at which to run evaluation |
+| `--save_steps` | `7000 30000` | Steps at which to save checkpoints |
+
+Defaults are set by upstream gsplat `examples/simple_trainer.py` and may change between versions. Run `./gsplat-cuda-train default --help` for the authoritative list.
 
 ### Common Configurations
 
@@ -232,6 +236,14 @@ Monte Carlo Markov Chain based densification (often better quality):
     --max_steps 50000
 ```
 
+### Pipeline Integration
+
+gsplat CUDA can also be selected as the training tool in the main pipeline (see [Pipeline Documentation](PIPELINE.md)):
+
+```bash
+./scripts/pipeline.sh ~/Photos/scene ~/output/ --tool gsplat-cuda
+```
+
 ## Performance Tuning
 
 ### Reducing Memory Usage
@@ -240,8 +252,8 @@ Monte Carlo Markov Chain based densification (often better quality):
 # Downscale images (2x = 4x less memory)
 ./gsplat-cuda-train default --data_dir ~/data --data_factor 2
 
-# Reduce batch size (if supported)
-./gsplat-cuda-train default --data_dir ~/data --batch_size 1
+# Packed rasterization mode (lower memory usage, slightly slower)
+./gsplat-cuda-train default --data_dir ~/data --packed
 ```
 
 ### Speed Optimization
@@ -281,8 +293,8 @@ export TORCH_CUDA_ARCH_LIST="8.6"  # For RTX 30xx
 |---------|-------------|------------------|
 | **Multi-GPU** | ✅ Yes | ❌ No |
 | **Training Speed** | Fast | Fastest |
-| **Pose Optimization** | ❌ No | ✅ Yes |
-| **Interactive GUI** | ❌ No | ✅ Yes |
+| **Pose Optimization** | Basic (`--pose_opt`) | Direct + MLP |
+| **Interactive GUI** | Web viewer (`nerfview`) | Native GUI |
 | **Language** | Python | C++23 |
 | **Flexibility** | High | Low |
 
@@ -296,7 +308,7 @@ export TORCH_CUDA_ARCH_LIST="8.6"  # For RTX 30xx
 
 ❌ **Don't use gsplat when:**
 - You have a single powerful GPU (use LichtFeld instead)
-- You need pose optimization (use LichtFeld)
+- You need advanced pose optimization (direct/MLP modes; use LichtFeld)
 - You want the absolute fastest training (use LichtFeld)
 
 ## Troubleshooting
@@ -388,6 +400,6 @@ nvidia-smi
 ## See Also
 
 - [Quick Start Guide](QUICKSTART.md) - Getting started with Melkor
-- [Pipeline Documentation](PIPELINE.md) - Complete pipeline reference  
+- [Pipeline Documentation](PIPELINE.md) - Complete pipeline reference
 - [OpenSplat Wrapper](OPENSPLAT_WRAPPER.md) - OpenSplat advanced features
 - [LichtFeld Wrapper](LICHTFELD_WRAPPER.md) - LichtFeld-Studio options
