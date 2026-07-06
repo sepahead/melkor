@@ -72,10 +72,19 @@ static spz::GaussianCloud toSpzCloud(const GaussianCloud& cloud, int sh_degree) 
         spz_cloud.colors.push_back(splat.f_dc_1);
         spz_cloud.colors.push_back(splat.f_dc_2);
         
-        // SH rest: only emit up to sh_rest_count coefficients
-        for (int j = 0; j < sh_rest_count; ++j) {
-            spz_cloud.sh.push_back(
-                (j < static_cast<int>(splat.sh_rest.size())) ? splat.sh_rest[j] : 0.0f);
+        // SH rest. Melkor stores sh_rest in the 3DGS PLY convention
+        // (channel-major: all R coefficients, then all G, then all B), while
+        // SPZ interleaves the channel as the fastest axis (c0r c0g c0b c1r
+        // ... — see splat-types.h). Transpose while copying so external SPZ
+        // consumers read each coefficient in the channel it came from.
+        const int num_coeffs = sh_rest_count / 3;
+        for (int j = 0; j < num_coeffs; ++j) {
+            for (int ch = 0; ch < 3; ++ch) {
+                const int src = ch * num_coeffs + j;
+                spz_cloud.sh.push_back(
+                    (src < static_cast<int>(splat.sh_rest.size()))
+                        ? splat.sh_rest[src] : 0.0f);
+            }
         }
     }
     
@@ -132,7 +141,10 @@ static GaussianCloud fromSpzCloud(const spz::GaussianCloud& spz_cloud) {
         splat.f_dc_1 = spz_cloud.colors[i * 3 + 1];
         splat.f_dc_2 = spz_cloud.colors[i * 3 + 2];
         
-        // Higher order SH
+        // Higher order SH. SPZ stores the channel as the fastest axis
+        // (c0r c0g c0b ...); transpose back into Melkor's channel-major
+        // sh_rest layout (all R, then all G, then all B) — the inverse of
+        // the transpose in toSpzCloud.
         if (spz_cloud.shDegree > 0 && !spz_cloud.sh.empty()) {
             size_t sh_per_point = 0;
             switch (spz_cloud.shDegree) {
@@ -140,9 +152,16 @@ static GaussianCloud fromSpzCloud(const spz::GaussianCloud& spz_cloud) {
                 case 2: sh_per_point = 24; break;
                 case 3: sh_per_point = 45; break;
             }
-            size_t sh_start = i * sh_per_point;
-            for (size_t j = 0; j < sh_per_point && sh_start + j < spz_cloud.sh.size(); ++j) {
-                splat.sh_rest.push_back(spz_cloud.sh[sh_start + j]);
+            const size_t num_coeffs = sh_per_point / 3;
+            const size_t sh_start = i * sh_per_point;
+            splat.sh_rest.assign(sh_per_point, 0.0f);
+            for (size_t j = 0; j < num_coeffs; ++j) {
+                for (size_t ch = 0; ch < 3; ++ch) {
+                    const size_t src = sh_start + j * 3 + ch;
+                    if (src < spz_cloud.sh.size()) {
+                        splat.sh_rest[ch * num_coeffs + j] = spz_cloud.sh[src];
+                    }
+                }
             }
         }
         

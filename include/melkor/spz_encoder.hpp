@@ -12,9 +12,10 @@ namespace melkor {
 struct SpzEncodeConfig {
     // Spherical harmonics degree to encode (0-3)
     int sh_degree = 0;
-    
-    // Fractional bits for position quantization (higher = more precision)
-    int fractional_bits = 12;
+
+    // Note: position quantization precision (fractional bits) is fixed by
+    // the spz container format writer (12 bits) and is not configurable —
+    // spz::PackOptions exposes no such knob, so no field is offered here.
 };
 
 // SPZ encoding result

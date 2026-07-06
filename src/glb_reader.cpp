@@ -18,14 +18,17 @@ public:
         result.success = true;
         result.total_meshes = model.meshes.size();
         
-        // Count total vertices first for reservation
+        // Count total vertices first for reservation. Only count accessors
+        // that pass validation so a crafted count can't force a huge reserve.
         size_t total_verts = 0;
         for (const auto& mesh : model.meshes) {
             for (const auto& primitive : mesh.primitives) {
                 auto pos_it = primitive.attributes.find("POSITION");
                 if (pos_it != primitive.attributes.end()) {
-                    const auto& accessor = model.accessors[pos_it->second];
-                    total_verts += accessor.count;
+                    size_t stride = 0;
+                    if (validateAndGetAccessorData(model, pos_it->second, stride)) {
+                        total_verts += model.accessors[pos_it->second].count;
+                    }
                 }
                 result.total_primitives++;
             }
@@ -45,6 +48,84 @@ public:
     }
     
 private:
+    static void appendError(GlbLoadResult& result, const std::string& message) {
+        if (!result.error_message.empty()) {
+            result.error_message += "; ";
+        }
+        result.error_message += message;
+    }
+
+    // Validates an attribute accessor index against untrusted GLB data:
+    // accessor index, bufferView index (bufferView == -1, legal for sparse/
+    // zero-filled accessors, is not supported here), buffer index, a positive
+    // byte stride (ByteStride() returns -1 for invalid combinations), and
+    // that every element lies within the buffer view and the buffer view
+    // lies within the buffer. Returns a pointer to the first element and
+    // writes the stride to out_stride on success; returns nullptr otherwise.
+    static const uint8_t* validateAndGetAccessorData(const tinygltf::Model& model,
+                                                     int accessor_index,
+                                                     size_t& out_stride) {
+        if (accessor_index < 0 ||
+            static_cast<size_t>(accessor_index) >= model.accessors.size()) {
+            return nullptr;
+        }
+        const auto& accessor = model.accessors[accessor_index];
+
+        if (accessor.bufferView < 0 ||
+            static_cast<size_t>(accessor.bufferView) >= model.bufferViews.size()) {
+            return nullptr;
+        }
+        const auto& buffer_view = model.bufferViews[accessor.bufferView];
+
+        if (buffer_view.buffer < 0 ||
+            static_cast<size_t>(buffer_view.buffer) >= model.buffers.size()) {
+            return nullptr;
+        }
+        const auto& buffer = model.buffers[buffer_view.buffer];
+
+        // Buffer view must lie within the buffer
+        if (buffer_view.byteOffset > buffer.data.size() ||
+            buffer_view.byteLength > buffer.data.size() - buffer_view.byteOffset) {
+            return nullptr;
+        }
+
+        const int stride = accessor.ByteStride(buffer_view);
+        if (stride <= 0) {
+            return nullptr;
+        }
+
+        const int component_size = tinygltf::GetComponentSizeInBytes(
+            static_cast<uint32_t>(accessor.componentType));
+        const int num_components = tinygltf::GetNumComponentsInType(
+            static_cast<uint32_t>(accessor.type));
+        if (component_size <= 0 || num_components <= 0) {
+            return nullptr;
+        }
+        const size_t element_size = static_cast<size_t>(component_size) *
+                                    static_cast<size_t>(num_components);
+        if (static_cast<size_t>(stride) < element_size) {
+            return nullptr;
+        }
+
+        // All elements must lie within the buffer view:
+        // byteOffset + (count - 1) * stride + element_size <= byteLength
+        // (rearranged to avoid overflow)
+        if (accessor.byteOffset > buffer_view.byteLength) {
+            return nullptr;
+        }
+        const size_t available = buffer_view.byteLength - accessor.byteOffset;
+        if (accessor.count > 0) {
+            if (element_size > available ||
+                accessor.count - 1 >
+                    (available - element_size) / static_cast<size_t>(stride)) {
+                return nullptr;
+            }
+        }
+
+        out_stride = static_cast<size_t>(stride);
+        return buffer.data.data() + buffer_view.byteOffset + accessor.byteOffset;
+    }
+
     void processGltfPrimitive(const tinygltf::Model& model,
                               const tinygltf::Primitive& primitive,
                               const GlbConversionConfig& config,
@@ -55,67 +136,73 @@ private:
             return;
         }
         
+        size_t pos_stride = 0;
+        const uint8_t* pos_data =
+            validateAndGetAccessorData(model, pos_it->second, pos_stride);
+        if (pos_data == nullptr) {
+            appendError(result, "Skipped primitive: POSITION accessor references "
+                                "out-of-range or inconsistent buffer data");
+            return;
+        }
+
         const auto& pos_accessor = model.accessors[pos_it->second];
-        const auto& pos_buffer_view = model.bufferViews[pos_accessor.bufferView];
-        const auto& pos_buffer = model.buffers[pos_buffer_view.buffer];
-        
-        const uint8_t* pos_data = pos_buffer.data.data() + 
-                                   pos_buffer_view.byteOffset + 
-                                   pos_accessor.byteOffset;
-        
-        size_t pos_stride = pos_accessor.ByteStride(pos_buffer_view);
-        if (pos_stride == 0) pos_stride = sizeof(float) * 3;
-        
-        // Try to get color accessor
+        if (pos_accessor.componentType != TINYGLTF_COMPONENT_TYPE_FLOAT ||
+            pos_accessor.type != TINYGLTF_TYPE_VEC3) {
+            appendError(result, "Skipped primitive: POSITION accessor must be "
+                                "float VEC3");
+            return;
+        }
+
+        // Try to get color accessor. Invalid or unsupported color data is
+        // ignored (the default color is used instead).
         const uint8_t* color_data = nullptr;
         size_t color_stride = 0;
-        int color_type = -1;  // -1: none, 0: VEC3, 1: VEC4
         int color_component_type = TINYGLTF_COMPONENT_TYPE_FLOAT;
-        
+
         if (config.use_vertex_colors) {
             auto color_it = primitive.attributes.find("COLOR_0");
             if (color_it != primitive.attributes.end()) {
-                const auto& color_accessor = model.accessors[color_it->second];
-                const auto& color_buffer_view = model.bufferViews[color_accessor.bufferView];
-                const auto& color_buffer = model.buffers[color_buffer_view.buffer];
-                
-                color_data = color_buffer.data.data() + 
-                            color_buffer_view.byteOffset + 
-                            color_accessor.byteOffset;
-                
-                color_stride = color_accessor.ByteStride(color_buffer_view);
-                color_type = (color_accessor.type == TINYGLTF_TYPE_VEC4) ? 1 : 0;
-                color_component_type = color_accessor.componentType;
-                
-                if (color_stride == 0) {
-                    int num_components = (color_type == 1) ? 4 : 3;
-                    if (color_component_type == TINYGLTF_COMPONENT_TYPE_UNSIGNED_BYTE) {
-                        color_stride = num_components;
-                    } else if (color_component_type == TINYGLTF_COMPONENT_TYPE_UNSIGNED_SHORT) {
-                        color_stride = num_components * 2;
-                    } else {
-                        color_stride = num_components * sizeof(float);
+                size_t stride = 0;
+                const uint8_t* data =
+                    validateAndGetAccessorData(model, color_it->second, stride);
+                if (data != nullptr) {
+                    const auto& color_accessor = model.accessors[color_it->second];
+                    const bool supported_type =
+                        color_accessor.type == TINYGLTF_TYPE_VEC3 ||
+                        color_accessor.type == TINYGLTF_TYPE_VEC4;
+                    const bool supported_component =
+                        color_accessor.componentType == TINYGLTF_COMPONENT_TYPE_FLOAT ||
+                        color_accessor.componentType == TINYGLTF_COMPONENT_TYPE_UNSIGNED_BYTE ||
+                        color_accessor.componentType == TINYGLTF_COMPONENT_TYPE_UNSIGNED_SHORT;
+                    if (supported_type && supported_component &&
+                        color_accessor.count >= pos_accessor.count) {
+                        color_data = data;
+                        color_stride = stride;
+                        color_component_type = color_accessor.componentType;
                     }
                 }
             }
         }
-        
-        // Try to get normal accessor for orientation
+
+        // Try to get normal accessor for orientation. Invalid or non-float
+        // normals are ignored (the identity quaternion is used instead).
         const uint8_t* normal_data = nullptr;
         size_t normal_stride = 0;
-        
+
         auto normal_it = primitive.attributes.find("NORMAL");
         if (normal_it != primitive.attributes.end()) {
-            const auto& normal_accessor = model.accessors[normal_it->second];
-            const auto& normal_buffer_view = model.bufferViews[normal_accessor.bufferView];
-            const auto& normal_buffer = model.buffers[normal_buffer_view.buffer];
-            
-            normal_data = normal_buffer.data.data() + 
-                         normal_buffer_view.byteOffset + 
-                         normal_accessor.byteOffset;
-            
-            normal_stride = normal_accessor.ByteStride(normal_buffer_view);
-            if (normal_stride == 0) normal_stride = sizeof(float) * 3;
+            size_t stride = 0;
+            const uint8_t* data =
+                validateAndGetAccessorData(model, normal_it->second, stride);
+            if (data != nullptr) {
+                const auto& normal_accessor = model.accessors[normal_it->second];
+                if (normal_accessor.componentType == TINYGLTF_COMPONENT_TYPE_FLOAT &&
+                    normal_accessor.type == TINYGLTF_TYPE_VEC3 &&
+                    normal_accessor.count >= pos_accessor.count) {
+                    normal_data = data;
+                    normal_stride = stride;
+                }
+            }
         }
         
         // Process each vertex

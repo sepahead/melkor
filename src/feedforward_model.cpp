@@ -9,6 +9,7 @@
 #include <chrono>
 #include <cmath>
 #include <limits>
+#include <cstdint>
 #include <cstdio>
 #ifdef __unix__
 #include <sys/wait.h>
@@ -362,51 +363,105 @@ ModelWeightManager::DownloadResult ModelWeightManager::downloadWeights(
     
     auto models = impl_->getModelRegistry();
     std::string url;
-    
+    size_t size_mb = 0;
+
     for (const auto& model : models) {
         if (model.name == model_type) {
             url = model.url;
+            size_mb = model.size_mb;
             break;
         }
     }
-    
+
     if (url.empty()) {
         result.error_message = "Unknown model type: " + model_type;
         return result;
     }
-    
+
     // Create directory
     std::string dir = impl_->weights_dir_ + "/" + model_type;
     fs::create_directories(dir);
-    
+
     // Download using curl. Shell-escape both the output path and URL to
     // prevent command injection via metacharacters in either string.
+    // -f/--fail makes curl exit non-zero on HTTP 4xx/5xx instead of saving the
+    // server's error page as if it were the weights file.
     std::string output_path = getWeightsPath(model_type);
-    std::string cmd = "curl -L -o " + shellEscape(output_path) + " " + shellEscape(url);
-    
+    std::string cmd = "curl -fL -o " + shellEscape(output_path) + " " + shellEscape(url);
+
     if (progress_callback) {
         progress_callback(0.0f);
     }
-    
+
     int ret = std::system(cmd.c_str());
     bool cmd_ok = (ret != -1) && (ret == 0
 #ifdef __unix__
                    || (WIFEXITED(ret) && WEXITSTATUS(ret) == 0)
 #endif
                   );
-    
-    if (cmd_ok && fs::exists(output_path)) {
-        result.success = true;
-        result.local_path = output_path;
-        result.bytes_downloaded = fs::file_size(output_path);
-        
-        if (progress_callback) {
-            progress_callback(1.0f);
+
+    if (!cmd_ok || !fs::exists(output_path)) {
+        // Drop any partial download so hasWeights()/isModelAvailable() don't
+        // report a broken file as an installed model forever.
+        if (fs::exists(output_path)) {
+            fs::remove(output_path);
         }
-    } else {
-        result.error_message = "Download failed";
+        result.error_message = "Download failed: curl reported an error for " + url;
+        return result;
     }
-    
+
+    // Validate the payload before declaring success. A repo landing page or an
+    // HTML error page (e.g. the da3-* Hugging Face URLs, which point at the
+    // repo, not a file) downloads "successfully" as HTML and then makes
+    // inference fail opaquely later.
+    std::string reject_reason;
+    {
+        std::ifstream f(output_path, std::ios::binary);
+        std::array<char, 256> head{};
+        f.read(head.data(), head.size());
+        const size_t head_len = static_cast<size_t>(f.gcount());
+        size_t i = 0;
+        while (i < head_len && (head[i] == ' ' || head[i] == '\t' ||
+                                head[i] == '\r' || head[i] == '\n')) {
+            ++i;
+        }
+        if (head_len == 0) {
+            reject_reason = "downloaded file is empty";
+        } else if (i < head_len && head[i] == '<') {
+            // Covers '<', '<!DOCTYPE', '<html', and any other markup.
+            reject_reason = "downloaded file is an HTML page, not a weights "
+                            "binary (URL likely points to a repo page)";
+        }
+    }
+
+    // Sanity-check the size against the advertised size: an HTML/error page is
+    // a few KB, real weights are hundreds of MB. Allow generous slack (1%).
+    const std::uintmax_t actual_bytes = fs::file_size(output_path);
+    if (reject_reason.empty() && size_mb > 0) {
+        const std::uintmax_t min_bytes =
+            static_cast<std::uintmax_t>(size_mb) * 1024ull * 1024ull / 100ull;
+        if (actual_bytes < min_bytes) {
+            reject_reason = "downloaded file is implausibly small (" +
+                std::to_string(actual_bytes) + " bytes) for a ~" +
+                std::to_string(size_mb) + " MB model";
+        }
+    }
+
+    if (!reject_reason.empty()) {
+        fs::remove(output_path);
+        result.error_message =
+            "Download validation failed for " + model_type + ": " + reject_reason;
+        return result;
+    }
+
+    result.success = true;
+    result.local_path = output_path;
+    result.bytes_downloaded = actual_bytes;
+
+    if (progress_callback) {
+        progress_callback(1.0f);
+    }
+
     return result;
 }
 

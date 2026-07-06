@@ -1037,75 +1037,142 @@ GaussianFitResult GaussianFitter::fitFromGlb(
         return result;
     }
     
-    // Extract mesh data
+    // Extract mesh data. Attribute reads honor bufferView.byteStride
+    // (interleaved exports), validate accessor/bufferView/buffer bounds
+    // against untrusted input, and check component types: POSITION/NORMAL
+    // must be float VEC3; COLOR_0 supports float and normalized
+    // ubyte/ushort, VEC3 or VEC4 (rgb taken from VEC4).
     std::vector<float> positions;
     std::vector<float> normals;
     std::vector<float> colors;
-    
+
+    struct AttrView {
+        const uint8_t* base = nullptr;
+        size_t stride = 0;
+        size_t count = 0;
+        int components = 0;
+        int component_type = 0;
+    };
+    auto resolveAttr = [&](int accessor_idx, bool allow_vec4,
+                           std::initializer_list<int> allowed_types,
+                           size_t comp_size_max, AttrView& out) -> bool {
+        if (accessor_idx < 0 ||
+            accessor_idx >= static_cast<int>(model.accessors.size())) return false;
+        const auto& acc = model.accessors[accessor_idx];
+        bool type_ok = false;
+        for (int t : allowed_types) type_ok |= (acc.componentType == t);
+        if (!type_ok) return false;
+        size_t comp_size = 0;
+        switch (acc.componentType) {
+            case TINYGLTF_COMPONENT_TYPE_UNSIGNED_BYTE: comp_size = 1; break;
+            case TINYGLTF_COMPONENT_TYPE_UNSIGNED_SHORT: comp_size = 2; break;
+            case TINYGLTF_COMPONENT_TYPE_FLOAT: comp_size = 4; break;
+            default: return false;
+        }
+        if (comp_size > comp_size_max) return false;
+        int components;
+        if (acc.type == TINYGLTF_TYPE_VEC3) components = 3;
+        else if (acc.type == TINYGLTF_TYPE_VEC4 && allow_vec4) components = 4;
+        else return false;
+        if (acc.count == 0) return false;
+        if (acc.bufferView < 0 ||
+            acc.bufferView >= static_cast<int>(model.bufferViews.size())) return false;
+        const auto& bv = model.bufferViews[acc.bufferView];
+        if (bv.buffer < 0 ||
+            bv.buffer >= static_cast<int>(model.buffers.size())) return false;
+        const auto& buf = model.buffers[bv.buffer];
+        if (bv.byteOffset > buf.data.size() ||
+            bv.byteLength > buf.data.size() - bv.byteOffset) return false;
+        const int stride_i = acc.ByteStride(bv);
+        if (stride_i <= 0) return false;
+        const size_t stride = static_cast<size_t>(stride_i);
+        const size_t elem = comp_size * static_cast<size_t>(components);
+        if (stride < elem) return false;
+        if (acc.byteOffset > bv.byteLength) return false;
+        const size_t span = (acc.count - 1) * stride + elem;
+        if (span > bv.byteLength - acc.byteOffset) return false;
+        out.base = buf.data.data() + bv.byteOffset + acc.byteOffset;
+        out.stride = stride;
+        out.count = acc.count;
+        out.components = components;
+        out.component_type = acc.componentType;
+        return true;
+    };
+
     for (const auto& mesh : model.meshes) {
         for (const auto& primitive : mesh.primitives) {
             auto pos_it = primitive.attributes.find("POSITION");
             if (pos_it == primitive.attributes.end()) continue;
-            
-            const auto& pos_accessor = model.accessors[pos_it->second];
-            const auto& pos_buffer_view = model.bufferViews[pos_accessor.bufferView];
-            const auto& pos_buffer = model.buffers[pos_buffer_view.buffer];
-            
-            const float* pos_data = reinterpret_cast<const float*>(
-                pos_buffer.data.data() + pos_buffer_view.byteOffset + pos_accessor.byteOffset);
-            
-            for (size_t i = 0; i < pos_accessor.count; ++i) {
-                positions.push_back(pos_data[i*3+0]);
-                positions.push_back(pos_data[i*3+1]);
-                positions.push_back(pos_data[i*3+2]);
+
+            AttrView pos;
+            if (!resolveAttr(pos_it->second, false,
+                             {TINYGLTF_COMPONENT_TYPE_FLOAT}, 4, pos)) {
+                continue;  // malformed or non-float positions: skip primitive
             }
-            
+            for (size_t i = 0; i < pos.count; ++i) {
+                const float* v = reinterpret_cast<const float*>(pos.base + i * pos.stride);
+                positions.push_back(v[0]);
+                positions.push_back(v[1]);
+                positions.push_back(v[2]);
+            }
+
             // Normals
             auto norm_it = primitive.attributes.find("NORMAL");
-            if (norm_it != primitive.attributes.end()) {
-                const auto& norm_accessor = model.accessors[norm_it->second];
-                const auto& norm_buffer_view = model.bufferViews[norm_accessor.bufferView];
-                const auto& norm_buffer = model.buffers[norm_buffer_view.buffer];
-                
-                const float* norm_data = reinterpret_cast<const float*>(
-                    norm_buffer.data.data() + norm_buffer_view.byteOffset + norm_accessor.byteOffset);
-                
-                for (size_t i = 0; i < norm_accessor.count; ++i) {
-                    normals.push_back(norm_data[i*3+0]);
-                    normals.push_back(norm_data[i*3+1]);
-                    normals.push_back(norm_data[i*3+2]);
+            AttrView nrm;
+            if (norm_it != primitive.attributes.end() &&
+                resolveAttr(norm_it->second, false,
+                            {TINYGLTF_COMPONENT_TYPE_FLOAT}, 4, nrm) &&
+                nrm.count >= pos.count) {
+                for (size_t i = 0; i < pos.count; ++i) {
+                    const float* v = reinterpret_cast<const float*>(nrm.base + i * nrm.stride);
+                    normals.push_back(v[0]);
+                    normals.push_back(v[1]);
+                    normals.push_back(v[2]);
                 }
             }
-            
+
             // Colors
             auto color_it = primitive.attributes.find("COLOR_0");
-            if (color_it != primitive.attributes.end()) {
-                const auto& color_accessor = model.accessors[color_it->second];
-                const auto& color_buffer_view = model.bufferViews[color_accessor.bufferView];
-                const auto& color_buffer = model.buffers[color_buffer_view.buffer];
-                
-                const uint8_t* color_ptr = color_buffer.data.data() + 
-                    color_buffer_view.byteOffset + color_accessor.byteOffset;
-                
-                for (size_t i = 0; i < color_accessor.count; ++i) {
-                    if (color_accessor.componentType == TINYGLTF_COMPONENT_TYPE_UNSIGNED_BYTE) {
-                        colors.push_back(color_ptr[i*3+0] / 255.0f);
-                        colors.push_back(color_ptr[i*3+1] / 255.0f);
-                        colors.push_back(color_ptr[i*3+2] / 255.0f);
-                    } else if (color_accessor.componentType == TINYGLTF_COMPONENT_TYPE_FLOAT) {
-                        const float* cf = reinterpret_cast<const float*>(color_ptr);
-                        colors.push_back(cf[i*3+0]);
-                        colors.push_back(cf[i*3+1]);
-                        colors.push_back(cf[i*3+2]);
+            AttrView col;
+            if (color_it != primitive.attributes.end() &&
+                resolveAttr(color_it->second, true,
+                            {TINYGLTF_COMPONENT_TYPE_FLOAT,
+                             TINYGLTF_COMPONENT_TYPE_UNSIGNED_BYTE,
+                             TINYGLTF_COMPONENT_TYPE_UNSIGNED_SHORT}, 4, col) &&
+                col.count >= pos.count) {
+                for (size_t i = 0; i < pos.count; ++i) {
+                    const uint8_t* p = col.base + i * col.stride;
+                    if (col.component_type == TINYGLTF_COMPONENT_TYPE_FLOAT) {
+                        const float* cf = reinterpret_cast<const float*>(p);
+                        colors.push_back(cf[0]);
+                        colors.push_back(cf[1]);
+                        colors.push_back(cf[2]);
+                    } else if (col.component_type == TINYGLTF_COMPONENT_TYPE_UNSIGNED_BYTE) {
+                        colors.push_back(p[0] / 255.0f);
+                        colors.push_back(p[1] / 255.0f);
+                        colors.push_back(p[2] / 255.0f);
+                    } else {  // UNSIGNED_SHORT
+                        const uint16_t* cs = reinterpret_cast<const uint16_t*>(p);
+                        colors.push_back(cs[0] / 65535.0f);
+                        colors.push_back(cs[1] / 65535.0f);
+                        colors.push_back(cs[2] / 65535.0f);
                     }
                 }
             }
         }
     }
-    
+
     if (positions.empty()) {
         result.error_message = "No mesh data found in GLB";
         return result;
+    }
+    // Mixed-attribute primitives can leave normals/colors shorter than
+    // positions; pad so per-point indexing downstream stays in bounds.
+    if (!normals.empty() && normals.size() < positions.size()) {
+        normals.resize(positions.size(), 0.0f);
+    }
+    if (!colors.empty() && colors.size() < positions.size()) {
+        colors.resize(positions.size(), 0.5f);
     }
     
     // Compute bounding box and center

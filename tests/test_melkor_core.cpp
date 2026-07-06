@@ -29,8 +29,11 @@
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <filesystem>
 #include <string>
 #include <vector>
+
+#include <unistd.h>  // getpid(), for per-process temp file names
 
 namespace {
 
@@ -65,11 +68,18 @@ bool test_spz_quaternion_order() {
     cloud.addSplat(s);
     cloud.setShDegree(0);
 
+    // Unique per-process path so concurrent CI runners (or different users
+    // sharing /tmp) cannot collide; removed on every exit path below.
+    const std::string spz_path =
+        (std::filesystem::temp_directory_path() /
+         ("melkor_test_quat_" + std::to_string(getpid()) + ".spz")).string();
+
     SpzEncoder enc;
     SpzEncodeConfig cfg;
-    auto res = enc.encodeToFile("/tmp/melkor_test_quat.spz", cloud, cfg);
+    auto res = enc.encodeToFile(spz_path, cloud, cfg);
     if (!res.success) {
         check(false, "encode to file");
+        std::filesystem::remove(spz_path);
         return false;
     }
 
@@ -77,9 +87,10 @@ bool test_spz_quaternion_order() {
     // cannot hide: melkor stores w-first, spz expects xyzw.
     spz::UnpackOptions uo;
     uo.to = spz::CoordinateSystem::RDF;
-    auto spz_cloud = spz::loadSpz("/tmp/melkor_test_quat.spz", uo);
+    auto spz_cloud = spz::loadSpz(spz_path, uo);
     if (spz_cloud.numPoints != 1) {
         check(false, "spz decoded point count");
+        std::filesystem::remove(spz_path);
         return false;
     }
     // spz rotations are xyzw; melkor wrote (w,x,y,z), so after reordering we
@@ -91,6 +102,7 @@ bool test_spz_quaternion_order() {
     check(std::abs(gx - x) < tol && std::abs(gy - y) < tol &&
           std::abs(gz - z) < tol && std::abs(gw - w) < tol,
           "spz decoded quaternion matches input (xyzw order)");
+    std::filesystem::remove(spz_path);
     return true;
 }
 #endif

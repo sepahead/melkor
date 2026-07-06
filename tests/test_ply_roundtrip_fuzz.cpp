@@ -17,9 +17,12 @@
 #include "melkor/gaussian_data.hpp"
 #include "melkor/ply_writer.hpp"
 
+#include <cstdint>
 #include <cstdio>
+#include <cstring>
 #include <cmath>
 #include <random>
+#include <string>
 #include <vector>
 
 namespace {
@@ -136,6 +139,151 @@ int main() {
         printf(ok ? "  PASS [ascii n=50]: round-trip within precision\n"
                   : "  FAIL [ascii n=50]\n");
         if (!ok) ++failures;
+    }
+
+    // Hand-crafted reader cases: type aliases, big-endian, CRLF headers,
+    // end_header inside a comment, and malformed vertex counts.
+    printf("[fuzz] PLY reader hand-crafted cases\n");
+
+    auto append_str = [](std::vector<uint8_t>& v, const std::string& s) {
+        v.insert(v.end(), s.begin(), s.end());
+    };
+    auto push_be_float = [](std::vector<uint8_t>& v, float f) {
+        uint32_t bits; std::memcpy(&bits, &f, 4);
+        v.push_back(static_cast<uint8_t>(bits >> 24));
+        v.push_back(static_cast<uint8_t>(bits >> 16));
+        v.push_back(static_cast<uint8_t>(bits >> 8));
+        v.push_back(static_cast<uint8_t>(bits));
+    };
+    auto push_le_double = [](std::vector<uint8_t>& v, double d) {
+        uint64_t bits; std::memcpy(&bits, &d, 8);
+        for (int i = 0; i < 8; ++i) v.push_back(static_cast<uint8_t>(bits >> (8 * i)));
+    };
+    auto expect = [&](const char* label, bool ok) {
+        printf(ok ? "  PASS [%s]\n" : "  FAIL [%s]\n", label);
+        if (!ok) ++failures;
+    };
+
+    // Big-endian binary: three float positions, hand-encoded most-significant
+    // byte first. Must decode to the exact values, not silent garbage.
+    {
+        std::vector<uint8_t> buf;
+        append_str(buf,
+            "ply\n"
+            "format binary_big_endian 1.0\n"
+            "element vertex 1\n"
+            "property float x\n"
+            "property float y\n"
+            "property float z\n"
+            "end_header\n");
+        push_be_float(buf, 1.0f);
+        push_be_float(buf, -2.5f);
+        push_be_float(buf, 3.25f);
+        PlyReader r;
+        auto res = r.readFromBuffer(buf.data(), buf.size());
+        expect("big-endian binary", res.success && res.cloud.size() == 1 &&
+               approx(res.cloud[0].x, 1.0f) && approx(res.cloud[0].y, -2.5f) &&
+               approx(res.cloud[0].z, 3.25f));
+    }
+
+    // Sized type aliases: float64 positions (8-byte stride) plus uint8 colors
+    // (1-byte stride). Wrong alias sizes would garble vertex 1 or reject the
+    // buffer as too small. Also checks the uint8 color /255 -> SH-DC path.
+    {
+        std::vector<uint8_t> buf;
+        append_str(buf,
+            "ply\n"
+            "format binary_little_endian 1.0\n"
+            "element vertex 2\n"
+            "property float64 x\n"
+            "property float64 y\n"
+            "property float64 z\n"
+            "property uint8 red\n"
+            "property uint8 green\n"
+            "property uint8 blue\n"
+            "end_header\n");
+        push_le_double(buf, 1.5);  push_le_double(buf, -2.25); push_le_double(buf, 3.0);
+        buf.push_back(255); buf.push_back(0); buf.push_back(128);
+        push_le_double(buf, -4.5); push_le_double(buf, 5.0);   push_le_double(buf, -6.75);
+        buf.push_back(0); buf.push_back(255); buf.push_back(64);
+        PlyReader r;
+        auto res = r.readFromBuffer(buf.data(), buf.size());
+        expect("float64 + uint8 aliases", res.success && res.cloud.size() == 2 &&
+               approx(res.cloud[0].x, 1.5f)  && approx(res.cloud[0].y, -2.25f) &&
+               approx(res.cloud[0].z, 3.0f)  &&
+               approx(res.cloud[0].f_dc_0, melkor::utils::rgbToShDc(1.0f)) &&
+               approx(res.cloud[1].x, -4.5f) && approx(res.cloud[1].y, 5.0f) &&
+               approx(res.cloud[1].z, -6.75f));
+    }
+
+    // CRLF-terminated header lines must parse (data starts after end_header's
+    // newline).
+    {
+        std::vector<uint8_t> buf;
+        append_str(buf,
+            "ply\r\n"
+            "format ascii 1.0\r\n"
+            "element vertex 1\r\n"
+            "property float x\r\n"
+            "property float y\r\n"
+            "property float z\r\n"
+            "end_header\r\n"
+            "1 2 3\r\n");
+        PlyReader r;
+        auto res = r.readFromBuffer(buf.data(), buf.size());
+        expect("CRLF header", res.success && res.cloud.size() == 1 &&
+               approx(res.cloud[0].x, 1.0f) && approx(res.cloud[0].y, 2.0f) &&
+               approx(res.cloud[0].z, 3.0f));
+    }
+
+    // A comment merely containing "end_header" must not truncate the header.
+    {
+        std::vector<uint8_t> buf;
+        append_str(buf,
+            "ply\n"
+            "format ascii 1.0\n"
+            "comment beware end_header appears here\n"
+            "element vertex 1\n"
+            "property float x\n"
+            "property float y\n"
+            "property float z\n"
+            "end_header\n"
+            "7 8 9\n");
+        PlyReader r;
+        auto res = r.readFromBuffer(buf.data(), buf.size());
+        expect("end_header in comment", res.success && res.cloud.size() == 1 &&
+               approx(res.cloud[0].x, 7.0f) && approx(res.cloud[0].z, 9.0f));
+    }
+
+    // Overflowing vertex count: must return an error, not throw/terminate.
+    {
+        std::vector<uint8_t> buf;
+        append_str(buf,
+            "ply\n"
+            "format ascii 1.0\n"
+            "element vertex 99999999999999999999999999\n"
+            "property float x\n"
+            "end_header\n"
+            "1\n");
+        PlyReader r;
+        auto res = r.readFromBuffer(buf.data(), buf.size());
+        expect("overflowing vertex count", !res.success);
+    }
+
+    // Huge-but-parseable count with a tiny binary payload: must be rejected
+    // before reserve(), not crash with bad_alloc or read out of bounds.
+    {
+        std::vector<uint8_t> buf;
+        append_str(buf,
+            "ply\n"
+            "format binary_little_endian 1.0\n"
+            "element vertex 4294967295\n"
+            "property float x\n"
+            "end_header\n");
+        buf.push_back(0); buf.push_back(0); buf.push_back(0); buf.push_back(0);
+        PlyReader r;
+        auto res = r.readFromBuffer(buf.data(), buf.size());
+        expect("huge count vs tiny data", !res.success);
     }
 
     printf(failures == 0 ? "\n  ALL PLY ROUND-TRIP TESTS PASSED\n"
