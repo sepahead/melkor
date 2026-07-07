@@ -1,5 +1,10 @@
 # Changelog
 
+## Unreleased
+
+### Added
+- **SOTA feedforward models** (`scripts/setup_feedforward_sota.sh`, [docs/FEEDFORWARD_SOTA.md](docs/FEEDFORWARD_SOTA.md)): a single installer for the strongest 2025–2026 pose-free reconstruction models beyond Depth-Anything-3, selected from a verified multi-source survey. Geometry models — **VGGT**, **MapAnything**, **Pi3**, **AMB3R** — export a COLMAP `sparse/` that drops straight into the existing `pipeline.sh`/`opensplat_wrapper.sh` training path (replacing the SfM stage); direct-splat models — **YoNoSplat**, **SPFSplatV2** — output Gaussians in one pass to PLY; **MoGe-2** does single-image geometry. The installer gates on license class — permissive (MIT/Apache) install by default, CC-BY-NC weights need `--accept-noncommercial`, and AMB3R (no published license) needs `--accept-unlicensed` — and re-prints each repo's actual `LICENSE` at install time. Verified: all seven repo URLs resolve and licenses were checked against each repo (AMB3R confirmed to have no LICENSE file).
+
 ## 1.2.1 (2026-07-07)
 
 ### Fixed
