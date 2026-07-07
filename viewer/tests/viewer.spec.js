@@ -207,8 +207,39 @@ test.describe("Melkor · SparkJS splat viewer", () => {
     });
     const after = await page.evaluate(() => window.__viewer.get4DState().count);
     expect(after, "4D frames cleared on switch to normal scene").toBe(0);
-    const px = await pixelStats(page);
-    expect(px.nonBgFrac, "normal scene renders after leaving 4D").toBeGreaterThan(0.001);
+    // Poll: a large scene loaded progressively may need a few extra frames
+    // past waitRendered before its splats produce visible pixels.
+    let frac = 0;
+    for (let i = 0; i < 40 && frac <= 0.001; i++) {
+      frac = (await pixelStats(page)).nonBgFrac;
+      if (frac <= 0.001) await page.waitForTimeout(50);
+    }
+    expect(frac, "normal scene renders after leaving 4D").toBeGreaterThan(0.001);
+    expect(errors, "no page errors").toEqual([]);
+  });
+
+  // The "4D format producer" (pack-4d.js) packs a per-frame sequence into
+  // per-frame SPZ + a manifest; the temporal player streams it identically to
+  // the PLY sequence. Skip if the SPZ pack isn't generated.
+  test("4D player streams an SPZ-packed sequence (producer -> player)", async ({ page, request }) => {
+    const has = (await request.fetch("/public/splats/4d/wave-spz/manifest.json",
+      { method: "HEAD" })).status() === 200;
+    test.skip(!has, "SPZ 4D pack not generated (run node pack-4d.js ... --spz)");
+
+    const errors = await boot(page);
+    await page.evaluate(async () => {
+      await window.__viewer.load("wave-4d-spz");
+      await window.__viewer.waitRendered(120_000);
+    });
+    const st = await page.evaluate(() => window.__viewer.get4DState());
+    expect(st.count, "SPZ sequence has multiple frames").toBeGreaterThan(1);
+    expect(st.playing, "SPZ sequence plays on load").toBe(true);
+    expect(st.buffered, "SPZ sequence is windowed").toBeLessThan(st.count);
+
+    const a = await page.evaluate(() => window.__viewer.get4DState().active);
+    await page.waitForTimeout(700);
+    const b = await page.evaluate(() => window.__viewer.get4DState().active);
+    expect(a === b ? -1 : 1, "SPZ sequence advances while playing").toBe(1);
     expect(errors, "no page errors").toEqual([]);
   });
 });

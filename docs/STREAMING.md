@@ -108,9 +108,23 @@ Seeking loads the target frame on demand. It advances on a play/pause + scrub
 timeline at the manifest fps, exposed for automation as
 `__viewer.play4D/pause4D/seek4D/get4DState` (the latter reports `buffered`,
 the resident window size). Try it: `node viewer/make-4d-demo.js` generates a
-synthetic sequence, then pick **Wave · 4D** in the viewer. To view real
-content, drop a 4D-GS export's `time_*.ply` into
-`viewer/public/splats/4d/<name>/` with a `manifest.json`.
+synthetic sequence, then pick **Wave · 4D** in the viewer.
+
+**The 4D format producer** (`viewer/pack-4d.js`) closes the pipeline —
+reconstruct (4D-GS) → **pack + compress** (melkor) → stream (viewer):
+
+```bash
+# a 4D-GS export dir of time_*.ply -> a compressed, streamable 4D scene
+node viewer/pack-4d.js /path/to/4dgs_export --spz --fps 24 \
+     --out viewer/public/splats/4d/myscene
+```
+
+It sorts the per-frame files numerically, optionally compresses each frame
+PLY → **SPZ via the melkor binary (~90–94% smaller)** — 4D sequences are N
+frames × a full cloud each, so this is what makes them streamable — writes
+the `manifest.json`, and prints the viewer `SCENES` entry to add. The
+temporal player streams the SPZ frames identically to PLY (the demo ships
+both **Wave · 4D** and **Wave · 4D (SPZ)**, the latter 94% smaller).
 
 Other 4D methods need converters, not drop-in: 3DGStream (MIT) uses a
 keyframe PLY + per-frame NTC deltas; V3/VideoGS (MIT) packs frames into a

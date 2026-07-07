@@ -134,7 +134,9 @@ Run `./fetch-assets.sh` first so the scenes are present.
   for automation as `__viewer.play4D` / `pause4D` / `seek4D` / `get4DState` (reports
   `buffered`, the window size). No web splat renderer plays temporal sequences
   natively, so this is a melkor addition; `node make-4d-demo.js` generates a demo
-  sequence.
+  sequence, and `node pack-4d.js <4dgs_export_dir> --spz` packages a real 4D-GS
+  export into a compressed, streamable 4D scene (per-frame SPZ via melkor, ~94%
+  smaller, + a `manifest.json`).
 - A monotonic **load token** guards `loadScene` so a superseded load (e.g. the boot
   auto-load racing a user click) never clobbers viewer state.
 - `window.__viewer` exposes a small automation API (`load`, `setView`, `setAngles`,

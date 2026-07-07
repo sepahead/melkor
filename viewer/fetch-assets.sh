@@ -100,5 +100,13 @@ if command -v node >/dev/null 2>&1 && [ ! -s "public/splats/4d/wave/manifest.jso
   echo "== 4D demo sequence =="
   node make-4d-demo.js && echo "ok     public/splats/4d/wave/ (24 frames)"
 fi
+# Optional: pack the demo to per-frame SPZ (the "4D format producer" path).
+# Needs the melkor binary; demonstrates ~94% smaller streamable 4D.
+if command -v node >/dev/null 2>&1 && [ -n "$MELKOR_BIN" ] \
+   && [ -s "public/splats/4d/wave/manifest.json" ] \
+   && [ ! -s "public/splats/4d/wave-spz/manifest.json" ]; then
+  echo "== 4D SPZ pack =="
+  node pack-4d.js public/splats/4d/wave --spz --out public/splats/4d/wave-spz --melkor "$MELKOR_BIN"
+fi
 
 echo "Done. Serve with:  python3 -m http.server 8771 --bind 127.0.0.1  (then open /index.html)"
