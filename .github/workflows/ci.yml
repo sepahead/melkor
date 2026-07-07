@@ -17,14 +17,23 @@ jobs:
           ./scripts/setup_deps.sh
       - name: Build
         run: |
-          mkdir -p build && cd build
-          cmake .. && make -j$(sysctl -n hw.ncpu)
+          cmake -B build -DMELKOR_WERROR=ON
+          cmake --build build -j$(sysctl -n hw.ncpu)
       - name: Test
         run: |
-          # Run the real correctness test suite (SPZ quaternion order, PLY
-          # parsing, PCA normals, SH constant) plus the smoke check.
+          # Run the real correctness test suite (SPZ quaternion order + SH
+          # channel order, PLY parsing, PCA normals, provider parity, scene
+          # completion) plus the smoke checks.
           cd build && ctest --output-on-failure
           ./melkor --info
+          ./melkor --version
+      - name: Build CPU-only (stub link topology)
+        run: |
+          # Same link shape as Linux CPU builds; catches missing Metal-stub
+          # symbols that the default macOS configuration cannot see.
+          cmake -B build-cpu -DMELKOR_USE_METAL=OFF -DMELKOR_WERROR=ON
+          cmake --build build-cpu -j$(sysctl -n hw.ncpu)
+          cd build-cpu && ctest --output-on-failure
 
   sanitize-macos:
     runs-on: macos-14
@@ -56,12 +65,32 @@ jobs:
           ./scripts/setup_deps.sh
       - name: Build
         run: |
-          mkdir -p build && cd build
-          cmake .. && make -j$(nproc)
+          cmake -B build -DMELKOR_WERROR=ON
+          cmake --build build -j$(nproc)
       - name: Test
         run: |
           cd build && ctest --output-on-failure
           ./melkor --info
+          ./melkor --version
+
+  # Compile-only check for the CUDA backend. Hosted runners have no GPU, but
+  # nvcc compilation catches the entire class of CUDA build breakage
+  # (undefined kernels, signature drift, host/device qualifier errors) that a
+  # Metal-only development machine cannot see. Tests are skipped: no device.
+  build-linux-cuda:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y cmake build-essential nvidia-cuda-toolkit
+          ./scripts/setup_deps.sh
+      - name: Build with CUDA
+        run: |
+          nvcc --version
+          cmake -B build -DMELKOR_USE_CUDA=ON
+          cmake --build build -j$(nproc)
 
   lint-python:
     runs-on: ubuntu-latest

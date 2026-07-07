@@ -1,0 +1,44 @@
+# Normalize line endings on commit; declared types check out as LF.
+* text=auto
+
+# Source
+*.c text eol=lf
+*.cpp text eol=lf
+*.h text eol=lf
+*.hpp text eol=lf
+*.mm text eol=lf
+*.cu text eol=lf
+*.cuh text eol=lf
+*.metal text eol=lf
+*.py text eol=lf
+*.rs text eol=lf
+*.js text eol=lf
+*.html text eol=lf
+*.css text eol=lf
+
+# Scripts and configuration
+*.sh text eol=lf
+*.yml text eol=lf
+*.yaml text eol=lf
+*.json text eol=lf
+*.toml text eol=lf
+*.md text eol=lf
+*.cmake text eol=lf
+CMakeLists.txt text eol=lf
+
+# Binary assets
+*.png binary
+*.icns binary
+*.ico binary
+*.gif binary
+
+# Vendored trees: exclude from language stats and review diffs
+third_party/** linguist-vendored
+tools/OpenSplat/** linguist-vendored
+ml-sharp/** linguist-vendored
+DA3coreml/** linguist-vendored
+viewer/vendor/** linguist-vendored
+
+# Lockfiles
+viewer/package-lock.json linguist-generated
+viewer/src-tauri/Cargo.lock linguist-generated

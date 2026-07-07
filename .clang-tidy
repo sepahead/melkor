@@ -1,0 +1,22 @@
+# Advisory static-analysis profile for first-party code (run manually with
+# run-clang-tidy or via IDE integration; not enforced in CI).
+#
+#   clang-tidy -p build src/*.cpp
+#
+# Checks are chosen for signal on this codebase: correctness and memory
+# safety on, style churn off. Vendored trees (third_party/, tools/OpenSplat/,
+# ml-sharp/, DA3coreml/) are out of scope.
+Checks: >
+  bugprone-*,
+  clang-analyzer-*,
+  performance-*,
+  portability-*,
+  modernize-use-nullptr,
+  modernize-use-override,
+  readability-container-size-empty,
+  readability-misleading-indentation,
+  -bugprone-easily-swappable-parameters,
+  -bugprone-narrowing-conversions
+WarningsAsErrors: ''
+HeaderFilterRegex: 'include/melkor/.*'
+FormatStyle: file

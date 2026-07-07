@@ -1,0 +1,28 @@
+name: Feature request
+description: Propose a new capability or improvement
+labels: ["enhancement"]
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem
+      description: What you are trying to do and where the current behavior falls short.
+    validations:
+      required: true
+  - type: textarea
+    id: solution
+    attributes:
+      label: Proposed solution
+      description: How melkor should behave, including any new flags or formats.
+    validations:
+      required: true
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives
+      description: Other approaches or workarounds you considered.
+  - type: textarea
+    id: scope
+    attributes:
+      label: Scope notes
+      description: Affected backends (Metal / CUDA / CPU), formats, or viewer components. Backend-semantic changes must land in all three backends together — see CONTRIBUTING.md.
