@@ -157,8 +157,14 @@ test.describe("Melkor · SparkJS splat viewer", () => {
     });
 
     const st = await page.evaluate(() => window.__viewer.get4DState());
-    expect(st.count, "multiple frames loaded").toBeGreaterThan(1);
+    expect(st.count, "sequence has multiple frames").toBeGreaterThan(1);
     expect(st.playing, "playback started on load").toBe(true);
+
+    // Buffered-window streaming: only a window of frames is resident, so
+    // memory is bounded below the full sequence length.
+    expect(st.buffered, "only a window of frames is buffered (bounded memory)")
+      .toBeLessThan(st.count);
+    expect(st.buffered, "at least the active frame is buffered").toBeGreaterThan(0);
 
     // Frame advances over time while playing.
     const a = await page.evaluate(() => window.__viewer.get4DState().active);
@@ -168,7 +174,7 @@ test.describe("Melkor · SparkJS splat viewer", () => {
 
     // The rendered image differs between two distinct frames (real motion).
     const shot = async (frame) => page.evaluate(async (f) => {
-      window.__viewer.seek4D(f);
+      await window.__viewer.seek4D(f);
       await new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r)));
       const cv = document.querySelector("canvas");
       const g = cv.getContext("webgl2") || cv.getContext("webgl");
@@ -177,14 +183,21 @@ test.describe("Melkor · SparkJS splat viewer", () => {
       let s = 0; for (let i = 0; i < buf.length; i += 4 * 131) s += buf[i] + buf[i + 1] * 2 + buf[i + 2] * 3;
       return s;
     }, frame);
+    const count = await page.evaluate(() => window.__viewer.get4DState().count);
     const s0 = await shot(0);
-    const sMid = await shot(Math.floor((await page.evaluate(() => window.__viewer.get4DState().count)) / 2));
+    const sMid = await shot(Math.floor(count / 2));
     expect(Math.abs(s0 - sMid), "frames render differently (temporal motion)").toBeGreaterThan(0);
 
-    // Pause + seek is deterministic.
-    const seeked = await page.evaluate(() => { window.__viewer.seek4D(3); const s = window.__viewer.get4DState(); return { active: s.active, playing: s.playing }; });
+    // Seek to a far frame (outside the initial window) still works: the
+    // player loads it on demand — proves streaming, not preloaded.
+    const seeked = await page.evaluate(async () => {
+      await window.__viewer.seek4D(3);
+      const s = window.__viewer.get4DState();
+      return { active: s.active, playing: s.playing, buffered: s.buffered, count: s.count };
+    });
     expect(seeked.active, "seek sets the active frame").toBe(3);
     expect(seeked.playing, "seek pauses playback").toBe(false);
+    expect(seeked.buffered, "buffer stays windowed after seeking").toBeLessThan(seeked.count);
 
     // Switch from the 4D sequence back to a normal scene: must clear the
     // frames cleanly (no double-dispose) and render the new scene.

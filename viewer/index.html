@@ -336,61 +336,119 @@ async function loadScene(id) {
 }
 
 // ---------------------------------------------------------------------------
-// 4D temporal player
+// 4D temporal player — buffered-window streaming
 // ---------------------------------------------------------------------------
 // A 4D scene is a sequence of per-frame splat files (standard PLY/SPZ, the
 // shape a 4D-GS `export_perframe_3DGS.py` produces) plus a manifest.json
 // { fps, frames: [...] }. No web splat renderer plays temporal sequences
-// natively, so this loads every frame as a SplatMesh, keeps them all in the
-// scene with only the active frame visible, and advances on a timeline.
-// (Load-all suits short clips; long volumetric video would stream a buffered
-// window ahead — noted in docs/STREAMING.md.)
+// natively. To support arbitrarily long volumetric video within a bounded
+// memory budget, this streams a WINDOW of frames around the playhead: it
+// keeps only frames [active-BEHIND, active+AHEAD] loaded (in the scene, one
+// visible), prefetches ahead as it plays, and evicts frames that fall outside
+// the window. Memory is therefore O(window), not O(sequence length).
+const BUF_AHEAD = 6, BUF_BEHIND = 2, EVICT_MARGIN = 2;
 const tl = document.getElementById("tl");
 const tlPlay = document.getElementById("tlPlay");
 const tlSlider = document.getElementById("tlSlider");
 const tlLabel = document.getElementById("tlLabel");
-let frames4d = [];            // SplatMesh per frame
+let seq4d = null;             // { base, frames:[...], count }
+let cache4d = new Map();      // index -> ready SplatMesh (in scene, visible=false except active)
+let loading4d = new Map();    // index -> in-flight Promise<mesh|null> (shared by concurrent callers)
 let active4d = 0;
 let playing4d = false;
 let fps4d = 12;
 let acc4d = 0;                // seconds accumulated toward the next frame
-const state4d = { active: 0, count: 0, playing: false, fps: 12 };
+const state4d = { active: 0, count: 0, playing: false, fps: 12, buffered: 0 };
 
 function clear4d() {
   playing4d = false;
-  const hadCurrent = frames4d.includes(currentMesh);
-  for (const m of frames4d) { scene.remove(m); try { m.dispose(); } catch {} }
-  frames4d = [];
-  active4d = 0;
-  state4d.active = 0; state4d.count = 0; state4d.playing = false;
-  // currentMesh may point at a just-disposed frame; null it so the normal
-  // load path doesn't remove/dispose it a second time.
-  if (hadCurrent) currentMesh = null;
+  // currentMesh may point at a frame we are about to dispose; null it so the
+  // normal load path doesn't remove/dispose it a second time.
+  const disposingCurrent = currentMesh && [...cache4d.values()].includes(currentMesh);
+  for (const m of cache4d.values()) { scene.remove(m); try { m.dispose(); } catch {} }
+  cache4d = new Map();
+  loading4d = new Map();
+  seq4d = null; active4d = 0;
+  state4d.active = 0; state4d.count = 0; state4d.playing = false; state4d.buffered = 0;
+  if (disposingCurrent) currentMesh = null;
   tl.hidden = true;
 }
 
-function show4dFrame(i) {
-  if (!frames4d.length) return;
-  active4d = ((i % frames4d.length) + frames4d.length) % frames4d.length;
-  for (let f = 0; f < frames4d.length; f++) frames4d[f].visible = (f === active4d);
-  currentMesh = frames4d[active4d];
-  state4d.active = active4d;
-  tlSlider.value = String(active4d);
-  tlLabel.textContent = `${active4d + 1} / ${frames4d.length}`;
-  state.splatCount = splatCountOf(currentMesh);
-  updateHud();
+// Load frame i (idempotent): concurrent callers share one in-flight promise,
+// so it is safe to prefetch a window and await a specific frame at once.
+function loadFrame4d(i, gen) {
+  if (!seq4d || i < 0 || i >= seq4d.count) return Promise.resolve(null);
+  if (cache4d.has(i)) return Promise.resolve(cache4d.get(i));
+  if (loading4d.has(i)) return loading4d.get(i);
+  const mesh = new SplatMesh({ url: seq4d.base + seq4d.frames[i] });
+  mesh.quaternion.set(1, 0, 0, 0);
+  mesh.visible = false;
+  const p = mesh.initialized.then(() => {
+    loading4d.delete(i);
+    if (gen !== loadGen || !seq4d) { try { mesh.dispose(); } catch {} return null; }
+    scene.add(mesh);
+    cache4d.set(i, mesh);
+    state4d.buffered = cache4d.size;
+    return mesh;
+  }).catch((err) => {
+    loading4d.delete(i);
+    try { mesh.dispose(); } catch {}
+    console.error("4D frame " + i + " failed:", err);
+    return null;
+  });
+  loading4d.set(i, p);
+  return p;
 }
 
-function play4d() { if (frames4d.length > 1) { playing4d = true; state4d.playing = true; tlPlay.textContent = "❚❚"; } }
+// Ensure the window around `center` is loading; evict frames outside it.
+function ensureWindow4d(center, gen) {
+  if (!seq4d) return;
+  const lo = Math.max(0, center - BUF_BEHIND);
+  const hi = Math.min(seq4d.count - 1, center + BUF_AHEAD);
+  for (let i = lo; i <= hi; i++) loadFrame4d(i, gen);
+  const evLo = lo - EVICT_MARGIN, evHi = hi + EVICT_MARGIN;
+  for (const [i, m] of [...cache4d]) {
+    if (i < evLo || i > evHi) {
+      if (m === currentMesh) continue;   // never evict the visible frame
+      scene.remove(m); try { m.dispose(); } catch {}
+      cache4d.delete(i);
+    }
+  }
+  state4d.buffered = cache4d.size;
+}
+
+function present4d(i) {
+  const mesh = cache4d.get(i);
+  if (!mesh) return false;               // not buffered yet (caller stalls)
+  for (const [j, m] of cache4d) m.visible = (j === i);
+  currentMesh = mesh;
+  active4d = i;
+  state4d.active = i;
+  tlSlider.value = String(i);
+  tlLabel.textContent = `${i + 1} / ${seq4d.count}`;
+  state.splatCount = splatCountOf(mesh);
+  updateHud();
+  return true;
+}
+
+function play4d() { if (seq4d && seq4d.count > 1) { playing4d = true; state4d.playing = true; tlPlay.textContent = "❚❚"; } }
 function pause4d() { playing4d = false; state4d.playing = false; tlPlay.textContent = "▶︎"; }
+
+// Jump to a frame, awaiting its load if it isn't buffered yet (scrubbing).
+async function seek4dAsync(i) {
+  if (!seq4d) return;
+  const gen = loadGen;
+  i = ((i % seq4d.count) + seq4d.count) % seq4d.count;
+  ensureWindow4d(i, gen);
+  if (!cache4d.has(i)) await loadFrame4d(i, gen);
+  if (gen !== loadGen) return;
+  present4d(i);
+}
 
 async function load4DSequence(def) {
   const gen = ++loadGen;
   clear4d();
-  if (currentMesh && !frames4d.includes(currentMesh)) {
-    scene.remove(currentMesh); try { currentMesh.dispose(); } catch {}
-    currentMesh = null;
-  }
+  if (currentMesh) { scene.remove(currentMesh); try { currentMesh.dispose(); } catch {} currentMesh = null; }
   state.loading = true; state.error = null; state.rendered = false;
   frameCountSinceLoad = 0;
   showOverlay(`Loading ${def.label}…`);
@@ -404,35 +462,25 @@ async function load4DSequence(def) {
     showError("Failed to load 4D manifest for " + def.label + "\n" + err);
     throw err;
   }
+  if (gen !== loadGen) return null;
   fps4d = manifest.fps || 12; state4d.fps = fps4d;
+  seq4d = { base, frames: manifest.frames, count: manifest.frames.length };
+  state4d.count = seq4d.count;
 
-  const meshes = [];
-  for (let i = 0; i < manifest.frames.length; i++) {
-    if (gen !== loadGen) { for (const m of meshes) { try { m.dispose(); } catch {} } return null; }
-    const mesh = new SplatMesh({ url: base + manifest.frames[i] });
-    mesh.quaternion.set(1, 0, 0, 0);
-    mesh.visible = false;
-    try { await mesh.initialized; } catch (err) {
-      for (const m of meshes) { try { m.dispose(); } catch {} }
-      try { mesh.dispose(); } catch {}
-      state.loading = false; state.error = String(err);
-      showError("Failed to load 4D frame " + i + " of " + def.label + "\n" + err);
-      throw err;
-    }
-    meshes.push(mesh);
-    const p = ((i + 1) / manifest.frames.length) * 100;
-    fill.style.width = p.toFixed(0) + "%"; pct.textContent = `${i + 1}/${manifest.frames.length}`;
+  // Load the initial window and present frame 0 before revealing the scene.
+  ensureWindow4d(0, gen);
+  const first = await loadFrame4d(0, gen);
+  if (gen !== loadGen) { clear4d(); return null; }
+  if (!first) {
+    state.loading = false; state.error = "no 4D frames";
+    showError("Failed to load 4D frame 0 of " + def.label);
+    throw new Error("no 4D frames");
   }
-  if (gen !== loadGen) { for (const m of meshes) { try { m.dispose(); } catch {} } return null; }
-
-  frames4d = meshes;
-  for (const m of frames4d) scene.add(m);
-  state4d.count = frames4d.length;
-  show4dFrame(0);
-  frameMesh(frames4d[0]);
+  present4d(0);
+  frameMesh(first);
   orbitEnabled = true; manualControl = false; syncOrbitBtn();
 
-  tlSlider.min = "0"; tlSlider.max = String(frames4d.length - 1); tlSlider.value = "0";
+  tlSlider.min = "0"; tlSlider.max = String(seq4d.count - 1); tlSlider.value = "0";
   tl.hidden = false;
   acc4d = 0; play4d();
 
@@ -442,11 +490,11 @@ async function load4DSequence(def) {
   currentScene = def;
   updateHud(); updateSceneButtons();
   hideOverlay();
-  return frames4d;
+  return seq4d;
 }
 
 tlPlay.addEventListener("click", () => (playing4d ? pause4d() : play4d()));
-tlSlider.addEventListener("input", () => { pause4d(); show4dFrame(Number(tlSlider.value)); });
+tlSlider.addEventListener("input", () => { pause4d(); seek4dAsync(Number(tlSlider.value)); });
 
 // ---------------------------------------------------------------------------
 // HUD + UI
@@ -520,13 +568,16 @@ renderer.setAnimationLoop(() => {
     applyOrbit();
   }
 
-  // 4D temporal playback: advance to the next frame at the manifest fps.
-  if (playing4d && frames4d.length > 1) {
+  // 4D temporal playback: advance to the next frame at the manifest fps,
+  // stalling (buffering) if the next frame in the window isn't ready yet.
+  if (playing4d && seq4d && seq4d.count > 1) {
     acc4d += dt;
     const step = 1 / fps4d;
     if (acc4d >= step) {
-      acc4d %= step;
-      show4dFrame(active4d + 1);
+      const next = (active4d + 1) % seq4d.count;
+      ensureWindow4d(active4d, loadGen);   // prefetch ahead of the playhead
+      if (cache4d.has(next)) { acc4d %= step; present4d(next); }
+      else { acc4d = step; }               // hold at threshold until buffered
     }
   }
 
@@ -563,7 +614,7 @@ window.__viewer = {
   // 4D temporal player controls (no-ops when not in a 4D scene).
   play4D() { play4d(); },
   pause4D() { pause4d(); },
-  seek4D(i) { pause4d(); show4dFrame(i); },
+  async seek4D(i) { pause4d(); return seek4dAsync(i); },
   get4DState() { return { ...state4d }; },
   setView,
   setOrbit(on) { orbitEnabled = !!on; manualControl = false; syncOrbitBtn(); },

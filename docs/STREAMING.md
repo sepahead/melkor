@@ -97,18 +97,20 @@ non-commercial `diff-gaussian-rasterization`, so commercial use is
 constrained despite the Apache-2.0 top level.)
 
 **The viewer temporal player**: a 4D scene is that per-frame sequence plus a
-`manifest.json` (`{ "fps": 12, "frames": [...] }`). The player loads every
-frame as a `SplatMesh`, keeps them in the scene with only the active frame
-visible, and advances on a timeline (play/pause + scrub), driven by the
-manifest fps. Exposed for automation as `__viewer.play4D/pause4D/seek4D/
-get4DState`. Try it: `node viewer/make-4d-demo.js` generates a synthetic
-sequence, then pick **Wave · 4D** in the viewer. To view real content, drop a
-4D-GS export's `time_*.ply` into `viewer/public/splats/4d/<name>/` with a
-`manifest.json`.
-
-*Limitation:* the player loads the whole sequence up front (fine for short
-clips). Long volumetric video should stream a buffered window of frames ahead
-and evict past ones — the natural next step.
+`manifest.json` (`{ "fps": 12, "frames": [...] }`). The player **streams a
+bounded window** of frames around the playhead — it keeps only frames
+`[active-2, active+6]` resident (in the scene, one visible), prefetches ahead
+as it plays, and evicts frames that fall outside the window. Memory is
+therefore **O(window), not O(sequence length)**, so arbitrarily long
+volumetric video plays within a fixed budget; if the next frame isn't
+buffered yet, playback briefly stalls (buffering) rather than dropping it.
+Seeking loads the target frame on demand. It advances on a play/pause + scrub
+timeline at the manifest fps, exposed for automation as
+`__viewer.play4D/pause4D/seek4D/get4DState` (the latter reports `buffered`,
+the resident window size). Try it: `node viewer/make-4d-demo.js` generates a
+synthetic sequence, then pick **Wave · 4D** in the viewer. To view real
+content, drop a 4D-GS export's `time_*.ply` into
+`viewer/public/splats/4d/<name>/` with a `manifest.json`.
 
 Other 4D methods need converters, not drop-in: 3DGStream (MIT) uses a
 keyframe PLY + per-frame NTC deltas; V3/VideoGS (MIT) packs frames into a
