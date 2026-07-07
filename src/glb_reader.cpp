@@ -44,6 +44,15 @@ public:
         }
         
         result.total_vertices = result.cloud.size();
+        // If every primitive was rejected (or the file has none), report
+        // failure instead of handing back an empty cloud with success=true —
+        // callers would otherwise write empty output files with exit code 0.
+        if (result.cloud.empty()) {
+            result.success = false;
+            if (result.error_message.empty()) {
+                result.error_message = "No usable vertex data found in glTF";
+            }
+        }
         return result;
     }
     

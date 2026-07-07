@@ -7,6 +7,8 @@
 #include "melkor/gaussian_fitter.hpp"
 #include "melkor/enhanced_converter.hpp"
 
+#include <utility>
+
 namespace melkor {
 namespace metal {
 
@@ -183,6 +185,37 @@ std::vector<float> GaussianProcessor::filterCandidatesGrid(
 } // namespace metal
 
 // ============================================================================
+// Camera Stub
+// ============================================================================
+// Camera's methods are defined in gaussian_fitter.mm on Metal builds; any
+// non-Metal caller would otherwise hit undefined references only at Linux
+// link time. Stub with identity matrices / a default-constructed camera.
+
+void Camera::computeMatrices() {
+    for (int i = 0; i < 16; ++i) {
+        const float ident = (i % 5 == 0) ? 1.0f : 0.0f;
+        view_matrix[i] = ident;
+        proj_matrix[i] = ident;
+        view_proj_matrix[i] = ident;
+    }
+}
+
+Camera Camera::createOrbital(float /*distance*/, float /*azimuth*/,
+                             float /*elevation*/, int width, int height,
+                             float fov_y) {
+    Camera cam{};
+    cam.width = width;
+    cam.height = height;
+    cam.fov_y = fov_y;
+    cam.aspect = height > 0 ? static_cast<float>(width) / height : 1.0f;
+    cam.up[1] = 1.0f;
+    cam.near_plane = 0.01f;
+    cam.far_plane = 100.0f;
+    cam.computeMatrices();
+    return cam;
+}
+
+// ============================================================================
 // GaussianFitter Stub
 // ============================================================================
 
@@ -191,8 +224,15 @@ public:
     // No-op implementation
 };
 
+GaussianFitter::GaussianFitter() : impl_(nullptr) {}
 GaussianFitter::GaussianFitter(metal::MetalContext& /*ctx*/) : impl_(nullptr) {}
 GaussianFitter::~GaussianFitter() = default;
+
+std::vector<uint8_t> GaussianFitter::renderView(const GaussianCloud& /*cloud*/,
+                                                const Camera& /*camera*/,
+                                                int /*width*/, int /*height*/) {
+    return {};  // Rendering requires Metal
+}
 
 GaussianFitResult GaussianFitter::fitFromGlb(const std::string& /*glb_path*/,
                                               const GaussianFitConfig& /*config*/) {
@@ -215,13 +255,10 @@ GaussianFitResult GaussianFitter::fitFromImages(const std::vector<std::vector<ui
 // ============================================================================
 // DifferentiableRenderer Stub
 // ============================================================================
-// NOTE: forward()/backward() are only declared in the header and implemented
-// in the Metal path (gaussian_fitter.mm). The previous stub defined render()
-// and computeGradients() returning a GaussianGradient type that no longer
-// exist in the public API, which broke Linux/CPU fallback builds. Those dead
-// stubs were removed; on non-Metal platforms the renderer simply isn't
-// constructible into a working state, which is consistent with the Fit mode
-// requiring Metal (see main.cpp).
+// forward()/backward() and the ForwardResult special members are implemented
+// in gaussian_fitter.mm on Metal builds. The stubs below keep every declared
+// symbol defined on non-Metal platforms so new call sites fail at runtime
+// with empty results, not at Linux link time.
 
 class DifferentiableRenderer::Impl {
 public:
@@ -230,6 +267,37 @@ public:
 
 DifferentiableRenderer::DifferentiableRenderer(metal::MetalContext& /*ctx*/) : impl_(nullptr) {}
 DifferentiableRenderer::~DifferentiableRenderer() = default;
+
+DifferentiableRenderer::ForwardResult::~ForwardResult() = default;
+DifferentiableRenderer::ForwardResult::ForwardResult(ForwardResult&& other) noexcept
+    : image(std::move(other.image)),
+      alpha(std::move(other.alpha)),
+      internal_state(other.internal_state) {
+    other.internal_state = nullptr;
+}
+DifferentiableRenderer::ForwardResult&
+DifferentiableRenderer::ForwardResult::operator=(ForwardResult&& other) noexcept {
+    if (this != &other) {
+        image = std::move(other.image);
+        alpha = std::move(other.alpha);
+        internal_state = other.internal_state;
+        other.internal_state = nullptr;
+    }
+    return *this;
+}
+
+DifferentiableRenderer::ForwardResult DifferentiableRenderer::forward(
+    const std::vector<PackedGaussian>& /*gaussians*/,
+    const Camera& /*camera*/,
+    const float /*background*/[3]) {
+    return {};  // Differentiable rendering requires Metal
+}
+
+DifferentiableRenderer::BackwardResult DifferentiableRenderer::backward(
+    ForwardResult& /*forward_result*/,
+    const std::vector<float>& /*grad_image*/) {
+    return {};  // Differentiable rendering requires Metal
+}
 
 // ============================================================================
 // MeshRenderer Stub

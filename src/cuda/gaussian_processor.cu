@@ -324,7 +324,7 @@ __global__ void filterCandidatesGridKernel(
     const int cy = clampCellCuda((py - gp.origin[1]) * inv, gp.dims[1]);
     const int cz = clampCellCuda((pz - gp.origin[2]) * inv, gp.dims[2]);
 
-    float min_dist = 3.4e38f;
+    float min_dist = 3.402823466e38f;  // FLT_MAX, matches the CPU sentinel
     bool support = !need_support;
 
     for (int r = 0; r <= r_max; ++r) {

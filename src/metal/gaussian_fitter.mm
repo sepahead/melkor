@@ -369,9 +369,7 @@ static void cov2d_to_conic_vjp(const float conic[3], const float v_conic[3],
                                 float v_cov2d[3]) {
     // 2x2 symmetric matrices: conic = [[c0, c1], [c1, c2]], v_conic = [[v0, v1], [v1, v2]]
     // v_Sigma = -X * G * X where X = conic, G = v_conic.
-    float a = -(conic[0]*v_conic[0]*conic[0] + conic[0]*v_conic[1]*conic[1] + conic[1]*v_conic[0]*conic[1] + conic[1]*v_conic[1]*conic[2]);
-    float b = -(conic[0]*v_conic[0]*conic[1] + conic[0]*v_conic[1]*conic[2] + conic[1]*v_conic[0]*conic[2] + conic[1]*v_conic[1]*conic[2]);
-    // Actually let me just do the 2x2 matrix multiply properly.
+    // 2x2 matrix multiply done explicitly below.
     // X = [[conic[0], conic[1]], [conic[1], conic[2]]]
     // G = [[v_conic[0], v_conic[1]], [v_conic[1], v_conic[2]]]
     // XG = [[c0*v0+c1*v1, c0*v1+c1*v2], [c1*v0+c2*v1, c1*v1+c2*v2]]
@@ -1277,10 +1275,10 @@ GaussianFitResult GaussianFitter::fitFromGlb(
 }
 
 GaussianFitResult GaussianFitter::fitFromImages(
-    const std::vector<std::vector<uint8_t>>& images,
-    const std::vector<Camera>& cameras,
-    const GaussianCloud& initial_cloud,
-    const GaussianFitConfig& config) {
+    const std::vector<std::vector<uint8_t>>& /*images*/,
+    const std::vector<Camera>& /*cameras*/,
+    const GaussianCloud& /*initial_cloud*/,
+    const GaussianFitConfig& /*config*/) {
     
     GaussianFitResult result;
     result.error_message = "fitFromImages not yet implemented";
@@ -1333,12 +1331,12 @@ MeshRenderer::MeshRenderer(metal::MetalContext& ctx)
 
 MeshRenderer::~MeshRenderer() = default;
 
-bool MeshRenderer::loadGlb(const std::string& path) {
+bool MeshRenderer::loadGlb(const std::string& /*path*/) {
     // TODO: Implement full mesh loading
     return false;
 }
 
-std::vector<uint8_t> MeshRenderer::render(const Camera& camera, int width, int height) {
+std::vector<uint8_t> MeshRenderer::render(const Camera& /*camera*/, int width, int height) {
     // TODO: Implement mesh rendering
     return std::vector<uint8_t>(width * height * 4, 255);
 }

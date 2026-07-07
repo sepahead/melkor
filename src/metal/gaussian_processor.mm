@@ -2,6 +2,7 @@
 #import <Foundation/Foundation.h>
 #include "melkor/metal_compute.hpp"
 #include <vector>
+#include <algorithm>
 
 namespace melkor {
 namespace metal {
@@ -65,7 +66,6 @@ public:
                    id<MTLBuffer> paramsBuffer = nil) {
         if (!pipeline) return false;
         
-        id<MTLDevice> device = (__bridge id<MTLDevice>)context.getDevice();
         id<MTLCommandQueue> queue = (__bridge id<MTLCommandQueue>)context.getCommandQueue();
         
         id<MTLCommandBuffer> commandBuffer = [queue commandBuffer];
@@ -79,9 +79,8 @@ public:
         }
         
         // Calculate threadgroup size
-        NSUInteger threadExecutionWidth = [pipeline threadExecutionWidth];
         NSUInteger maxThreadsPerGroup = [pipeline maxTotalThreadsPerThreadgroup];
-        NSUInteger threadsPerGroup = MIN(maxThreadsPerGroup, 256);
+        NSUInteger threadsPerGroup = std::min<NSUInteger>(maxThreadsPerGroup, 256);
         
         MTLSize gridSize = MTLSizeMake(count, 1, 1);
         MTLSize threadgroupSize = MTLSizeMake(threadsPerGroup, 1, 1);
@@ -291,7 +290,7 @@ std::vector<float> GaussianProcessor::computeCovariances(const GaussianCloud& cl
     [encoder setBuffer:dataBuffer offset:0 atIndex:0];
     [encoder setBuffer:outputBuffer offset:0 atIndex:1];
     
-    NSUInteger threadsPerGroup = MIN([impl_->computeCovPipeline maxTotalThreadsPerThreadgroup], 256);
+    NSUInteger threadsPerGroup = std::min<NSUInteger>([impl_->computeCovPipeline maxTotalThreadsPerThreadgroup], 256);
     MTLSize gridSize = MTLSizeMake(cloud.size(), 1, 1);
     MTLSize threadgroupSize = MTLSizeMake(threadsPerGroup, 1, 1);
     
@@ -318,7 +317,6 @@ bool GaussianProcessor::processCloud(GaussianCloud& cloud, const ProcessConfig& 
     id<MTLBuffer> dataBuffer = impl_->createBuffer(packed);
     
     id<MTLDevice> device = (__bridge id<MTLDevice>)impl_->context.getDevice();
-    id<MTLCommandQueue> queue = (__bridge id<MTLCommandQueue>)impl_->context.getCommandQueue();
     
     // Build flags
     uint32_t flags = 0;
@@ -476,7 +474,7 @@ std::vector<PackedGaussian> GaussianProcessor::enhancedConvert(
     [encoder setBuffer:cfgBuffer offset:0 atIndex:5];
     [encoder setBuffer:npBuffer offset:0 atIndex:6];
 
-    NSUInteger threadsPerGroup = MIN([impl_->enhancedConvertPipeline maxTotalThreadsPerThreadgroup], 256);
+    NSUInteger threadsPerGroup = std::min<NSUInteger>([impl_->enhancedConvertPipeline maxTotalThreadsPerThreadgroup], 256);
     MTLSize gridSize = MTLSizeMake(num_points, 1, 1);
     MTLSize threadgroupSize = MTLSizeMake(threadsPerGroup, 1, 1);
     [encoder dispatchThreads:gridSize threadsPerThreadgroup:threadgroupSize];
@@ -535,7 +533,7 @@ std::vector<float> GaussianProcessor::computeKnnDistancesMetal(
     [encoder setBuffer:npBuffer offset:0 atIndex:2];
     [encoder setBuffer:kBuffer offset:0 atIndex:3];
 
-    NSUInteger threadsPerGroup = MIN([impl_->knnDistancesPipeline maxTotalThreadsPerThreadgroup], 64);
+    NSUInteger threadsPerGroup = std::min<NSUInteger>([impl_->knnDistancesPipeline maxTotalThreadsPerThreadgroup], 64);
     MTLSize gridSize = MTLSizeMake(num_points, 1, 1);
     MTLSize threadgroupSize = MTLSizeMake(threadsPerGroup, 1, 1);
     [encoder dispatchThreads:gridSize threadsPerThreadgroup:threadgroupSize];
@@ -578,6 +576,13 @@ std::vector<float> GaussianProcessor::knnStatsGrid(
     if (num_points == 0 || cell_entries.size() != num_points ||
         cell_starts.empty() || cell_starts.size() != cell_counts.size() ||
         cell_size <= 0.0f) {
+        return {};
+    }
+    // The kernel indexes cell arrays by (z*dy + y)*dx + x; mismatched dims
+    // would read past the buffers on the GPU.
+    if (grid_dims[0] <= 0 || grid_dims[1] <= 0 || grid_dims[2] <= 0 ||
+        static_cast<size_t>(grid_dims[0]) * grid_dims[1] * grid_dims[2] !=
+            cell_starts.size()) {
         return {};
     }
     if (!impl_->knnStatsGridPipeline) return {};
@@ -630,7 +635,7 @@ std::vector<float> GaussianProcessor::knnStatsGrid(
     [encoder setBuffer:gpBuffer offset:0 atIndex:4];
     [encoder setBuffer:outBuffer offset:0 atIndex:5];
 
-    NSUInteger threadsPerGroup = MIN([impl_->knnStatsGridPipeline maxTotalThreadsPerThreadgroup], 128);
+    NSUInteger threadsPerGroup = std::min<NSUInteger>([impl_->knnStatsGridPipeline maxTotalThreadsPerThreadgroup], 128);
     [encoder dispatchThreads:MTLSizeMake(num_points, 1, 1)
        threadsPerThreadgroup:MTLSizeMake(threadsPerGroup, 1, 1)];
     [encoder endEncoding];
@@ -662,6 +667,11 @@ std::vector<float> GaussianProcessor::filterCandidatesGrid(
         num_points == 0 || cell_entries.size() != num_points ||
         cell_starts.empty() || cell_starts.size() != cell_counts.size() ||
         cell_size <= 0.0f) {
+        return {};
+    }
+    if (grid_dims[0] <= 0 || grid_dims[1] <= 0 || grid_dims[2] <= 0 ||
+        static_cast<size_t>(grid_dims[0]) * grid_dims[1] * grid_dims[2] !=
+            cell_starts.size()) {
         return {};
     }
     if (!impl_->filterCandidatesPipeline) return {};
@@ -724,7 +734,7 @@ std::vector<float> GaussianProcessor::filterCandidatesGrid(
     [encoder setBuffer:gpBuffer offset:0 atIndex:6];
     [encoder setBuffer:outBuffer offset:0 atIndex:7];
 
-    NSUInteger threadsPerGroup = MIN([impl_->filterCandidatesPipeline maxTotalThreadsPerThreadgroup], 128);
+    NSUInteger threadsPerGroup = std::min<NSUInteger>([impl_->filterCandidatesPipeline maxTotalThreadsPerThreadgroup], 128);
     [encoder dispatchThreads:MTLSizeMake(num_queries, 1, 1)
        threadsPerThreadgroup:MTLSizeMake(threadsPerGroup, 1, 1)];
     [encoder endEncoding];

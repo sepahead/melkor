@@ -105,7 +105,127 @@ bool test_spz_quaternion_order() {
     std::filesystem::remove(spz_path);
     return true;
 }
+
+// ---- Test 1b: SPZ SH-rest channel order against canonical decoder ---------
+// Melkor stores sh_rest channel-major (all R coefficients, then G, then B —
+// the 3DGS PLY convention); SPZ interleaves the channel as the fastest axis.
+// Decode with spz's own loader so a symmetric transpose double-bug in
+// melkor's encode+decode cannot hide.
+bool test_spz_sh_channel_order() {
+    printf("[test] SPZ SH-rest channel order against canonical decoder\n");
+    using namespace melkor;
+    GaussianCloud cloud;
+    GaussianSplat s{};
+    s.opacity = 5.0f;
+    s.scale_0 = s.scale_1 = s.scale_2 = -2.0f;
+    s.rot_0 = 1.0f;
+    // Degree 1: 3 coefficients x 3 channels, channel-major. All nine values
+    // pairwise distinct by >= 0.2 so any mis-ordering exceeds the
+    // quantization tolerance below.
+    const float r[3] = {0.8f, 0.4f, 0.0f};
+    const float g[3] = {-0.4f, -0.8f, 0.6f};
+    const float b[3] = {-0.6f, 0.2f, -0.2f};
+    for (float v : r) s.sh_rest.push_back(v);
+    for (float v : g) s.sh_rest.push_back(v);
+    for (float v : b) s.sh_rest.push_back(v);
+    cloud.addSplat(s);
+    cloud.setShDegree(1);
+
+    const std::string spz_path =
+        (std::filesystem::temp_directory_path() /
+         ("melkor_test_sh_" + std::to_string(getpid()) + ".spz")).string();
+
+    SpzEncoder enc;
+    SpzEncodeConfig cfg;
+    cfg.sh_degree = 1;
+    if (!enc.encodeToFile(spz_path, cloud, cfg).success) {
+        check(false, "SH encode to file");
+        std::filesystem::remove(spz_path);
+        return false;
+    }
+
+    spz::UnpackOptions uo;
+    uo.to = spz::CoordinateSystem::RDF;
+    auto spz_cloud = spz::loadSpz(spz_path, uo);
+    if (spz_cloud.numPoints != 1 || spz_cloud.sh.size() != 9) {
+        check(false, "spz decoded SH size");
+        std::filesystem::remove(spz_path);
+        return false;
+    }
+    // Expected SPZ layout: c0r c0g c0b, c1r c1g c1b, c2r c2g c2b.
+    const float expected[9] = {r[0], g[0], b[0], r[1], g[1], b[1],
+                               r[2], g[2], b[2]};
+    const float tol = 0.09f;  // 8-bit SH quantization
+    bool interleaved_ok = true;
+    for (int i = 0; i < 9; ++i) {
+        if (std::abs(spz_cloud.sh[i] - expected[i]) > tol) interleaved_ok = false;
+    }
+    check(interleaved_ok, "spz stores SH channel-interleaved (c0 rgb, c1 rgb, ...)");
+
+    // Melkor's own decoder must transpose back to channel-major.
+    SpzDecoder dec;
+    auto round = dec.decodeFromFile(spz_path);
+    bool round_ok = round.success && round.cloud.size() == 1 &&
+                    round.cloud[0].sh_rest.size() == 9;
+    if (round_ok) {
+        for (int i = 0; i < 9; ++i) {
+            if (std::abs(round.cloud[0].sh_rest[i] - s.sh_rest[i]) > tol)
+                round_ok = false;
+        }
+    }
+    check(round_ok, "melkor decode restores channel-major sh_rest");
+    std::filesystem::remove(spz_path);
+    return true;
+}
 #endif
+
+// ---- Test 1c: enhanced converter pads short attribute arrays --------------
+// Multi-primitive GLBs can carry colors/normals for only some primitives;
+// the converter must pad rather than read out of bounds, and must not crash
+// on degenerate single-point input.
+bool test_enhanced_converter_short_attributes() {
+    printf("[test] enhanced converter with short colors/normals\n");
+    using namespace melkor;
+    std::vector<float> positions;
+    for (int i = 0; i < 8; ++i) {
+        positions.push_back(static_cast<float>(i % 4));
+        positions.push_back(static_cast<float>(i / 4));
+        positions.push_back(0.0f);
+    }
+    // Colors and normals for only the first two points.
+    std::vector<float> colors = {1.0f, 0.0f, 0.0f, 0.0f, 1.0f, 0.0f};
+    std::vector<float> normals = {0.0f, 0.0f, 1.0f, 0.0f, 0.0f, 1.0f};
+
+    EnhancedConverter converter(nullptr);  // CPU path
+    EnhancedConversionConfig cfg;
+    cfg.knn_neighbors = 3;
+    auto result = converter.convertFromMesh(positions, normals, colors, {}, cfg);
+    check(result.success && result.cloud.size() == 8,
+          "short attributes: all points converted");
+    bool finite = true;
+    for (size_t i = 0; i < result.cloud.size(); ++i) {
+        const auto& sp = result.cloud[i];
+        if (!std::isfinite(sp.x) || !std::isfinite(sp.f_dc_0) ||
+            !std::isfinite(sp.scale_0) || !std::isfinite(sp.rot_0))
+            finite = false;
+    }
+    check(finite, "short attributes: all outputs finite");
+    if (result.cloud.size() == 8) {
+        // Points past the color array get the default color (0.5 -> SH DC 0).
+        check(std::abs(result.cloud[5].f_dc_0) < 1e-5f &&
+              std::abs(result.cloud[5].f_dc_1) < 1e-5f,
+              "short attributes: padded points use default color");
+    }
+
+    // Single point with explicit normal: degenerate extent must not crash
+    // and must produce a finite splat.
+    auto single = converter.convertFromMesh({0.f, 0.f, 0.f}, {0.f, 0.f, 1.f},
+                                            {}, {}, cfg);
+    check(single.success && single.cloud.size() == 1 &&
+          std::isfinite(single.cloud[0].scale_0),
+          "single-point input yields one finite splat");
+    return true;
+}
 
 // ---- Test 2: header-driven PLY reader -------------------------------------
 bool test_ply_reader() {
@@ -314,10 +434,12 @@ int main() {
     test_truncated_ply();
     test_ply_reader();
     test_pca_normals();
+    test_enhanced_converter_short_attributes();
 #ifdef MELKOR_HAS_SPZ
     test_spz_quaternion_order();
+    test_spz_sh_channel_order();
 #else
-    printf("[skip] SPZ quaternion test (built without MELKOR_HAS_SPZ)\n");
+    printf("[skip] SPZ tests (built without MELKOR_HAS_SPZ)\n");
 #endif
     printf("\n=== %s (%d failures) ===\n",
            g_failures == 0 ? "ALL TESTS PASSED" : "FAILURES", g_failures);

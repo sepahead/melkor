@@ -62,6 +62,7 @@ void printUsage(const char* program) {
     std::cout << "  --no-metal           Alias for --no-gpu (deprecated)\n";
     std::cout << "  --info               Show GPU info and exit\n";
     std::cout << "  --list-models        List available feedforward models\n";
+    std::cout << "  --version            Show version and exit\n";
     std::cout << "  -h, --help           Show this help\n";
 }
 
@@ -171,6 +172,13 @@ int main(int argc, char* argv[]) {
 
         if (arg == "-h" || arg == "--help") {
             printUsage(argv[0]);
+            return 0;
+        } else if (arg == "--version") {
+#ifdef MELKOR_VERSION
+            std::cout << "melkor " << MELKOR_VERSION << "\n";
+#else
+            std::cout << "melkor (unknown version)\n";
+#endif
             return 0;
         } else if (arg == "--info") {
             show_info = true;
@@ -498,6 +506,13 @@ int main(int argc, char* argv[]) {
         std::cout << "Scene completion: +" << fill_stats.added << " splats in "
                   << fill_stats.passes << " pass(es), median spacing "
                   << fill_stats.median_spacing << "\n";
+    }
+
+    // A conversion that produced nothing is an error, not an empty output
+    // file with exit code 0.
+    if (cloud.empty()) {
+        std::cerr << "Error: no splats produced from input\n";
+        return 1;
     }
 
     // Process with compute backend if available (normalize quaternions)

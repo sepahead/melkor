@@ -1,8 +1,23 @@
 cmake_minimum_required(VERSION 3.20)
-project(melkor VERSION 1.0.0 LANGUAGES CXX)
+project(melkor VERSION 1.2.0 LANGUAGES CXX)
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
+
+# Single-config generators default to an optimized build; an empty
+# CMAKE_BUILD_TYPE silently produces unoptimized binaries.
+if(NOT CMAKE_BUILD_TYPE AND NOT CMAKE_CONFIGURATION_TYPES)
+    set(CMAKE_BUILD_TYPE Release CACHE STRING "Build type" FORCE)
+    set_property(CACHE CMAKE_BUILD_TYPE PROPERTY STRINGS
+                 Debug Release RelWithDebInfo MinSizeRel)
+endif()
+
+# Treat warnings as errors on first-party code (used by CI).
+option(MELKOR_WERROR "Treat compiler warnings as errors" OFF)
+set(MELKOR_WARNING_FLAGS
+    $<$<CXX_COMPILER_ID:GNU,Clang,AppleClang>:-Wall -Wextra -Wpedantic>
+    $<$<AND:$<BOOL:${MELKOR_WERROR}>,$<CXX_COMPILER_ID:GNU,Clang,AppleClang>>:-Werror>
+)
 
 # Detect platform
 if(APPLE)
@@ -99,9 +114,7 @@ if(SPZ_AVAILABLE)
     target_include_directories(melkor_core PUBLIC ${THIRD_PARTY_DIR}/spz/src/cc)
 endif()
 # Enable strict warnings on Melkor's own code (not third-party).
-target_compile_options(melkor_core PRIVATE
-    $<$<CXX_COMPILER_ID:GNU,Clang,AppleClang>:-Wall -Wextra -Wpedantic>
-)
+target_compile_options(melkor_core PRIVATE ${MELKOR_WARNING_FLAGS})
 
 # Platform-specific GPU acceleration
 if(APPLE AND MELKOR_USE_METAL)
@@ -135,7 +148,7 @@ if(APPLE AND MELKOR_USE_METAL)
     # The Objective-C++ sources are written for ARC (no manual
     # retain/release); without -fobjc-arc every newBuffer/newFunction object
     # leaks, growing resident memory on each GPU dispatch.
-    target_compile_options(melkor_metal PRIVATE -fobjc-arc)
+    target_compile_options(melkor_metal PRIVATE -fobjc-arc ${MELKOR_WARNING_FLAGS})
     # melkor_core calls into melkor_metal for GPU-accelerated enhanced
     # conversion and k-NN.  The circular static-library dependency is
     # resolved by the linker re-scanning archives.  Consumers of melkor_core
@@ -166,8 +179,13 @@ if(APPLE AND MELKOR_USE_METAL)
 elseif(MELKOR_PLATFORM STREQUAL "LINUX" AND MELKOR_USE_CUDA AND CUDAToolkit_FOUND)
     message(STATUS "Building with CUDA acceleration")
     
-    # Enable CUDA language
+    # Enable CUDA language. CMAKE_CXX_STANDARD does not apply to .cu files:
+    # without an explicit CUDA standard, nvcc defaults to C++14 on every
+    # CUDA 11.x and the shared headers (std::clamp in gaussian_data.hpp)
+    # fail to compile.
     enable_language(CUDA)
+    set(CMAKE_CUDA_STANDARD 17)
+    set(CMAKE_CUDA_STANDARD_REQUIRED ON)
     
     # CUDA compute library. gaussian_processor.cu holds the __global__
     # kernels that cuda_compute.cpp declares extern; gpu_stub.cpp supplies
@@ -200,8 +218,12 @@ elseif(MELKOR_PLATFORM STREQUAL "LINUX" AND MELKOR_USE_CUDA AND CUDAToolkit_FOUN
     # SM 60 = Pascal (GTX 10xx), SM 70 = Volta (V100), SM 75 = Turing (RTX 20xx)
     # SM 80 = Ampere (A100), SM 86 = Ampere (RTX 30xx), SM 89 = Ada (RTX 40xx)
     # SM 90 = Hopper (H100) - requires CUDA 12.0+
-    if(CUDAToolkit_VERSION VERSION_LESS "11.8")
-        # CUDA < 11.8: basic architectures only
+    if(CUDAToolkit_VERSION VERSION_LESS "11.1")
+        # CUDA 11.0: SM 86 (Ampere consumer) arrived in 11.1
+        set(CUDA_ARCHS "60;70;75;80")
+        message(STATUS "CUDA ${CUDAToolkit_VERSION}: Using architectures ${CUDA_ARCHS}")
+    elseif(CUDAToolkit_VERSION VERSION_LESS "11.8")
+        # CUDA 11.1-11.7: include SM 86
         set(CUDA_ARCHS "60;70;75;80;86")
         message(STATUS "CUDA ${CUDAToolkit_VERSION}: Using architectures ${CUDA_ARCHS}")
     elseif(CUDAToolkit_VERSION VERSION_LESS "12.0")
@@ -259,9 +281,9 @@ add_executable(melkor
 # it again would trigger Apple ld's duplicate-library deduplication, which
 # skips archive re-scans and drops symbols.
 target_link_libraries(melkor PRIVATE melkor_core)
-target_compile_options(melkor PRIVATE
-    $<$<CXX_COMPILER_ID:GNU,Clang,AppleClang>:-Wall -Wextra -Wpedantic>
-)
+target_compile_options(melkor PRIVATE ${MELKOR_WARNING_FLAGS})
+# Single source of truth for the CLI's --version output.
+target_compile_definitions(melkor PRIVATE MELKOR_VERSION="${PROJECT_VERSION}")
 
 # Copy metallib to executable directory (macOS only)
 if(APPLE AND MELKOR_USE_METAL)

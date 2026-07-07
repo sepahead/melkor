@@ -506,7 +506,7 @@ kernel void filter_candidates_grid(
     const int cy = clamp_cell((c.y - gp.origin.y) * inv, gp.dims.y);
     const int cz = clamp_cell((c.z - gp.origin.z) * inv, gp.dims.z);
 
-    float min_dist = 3.4e38f;
+    float min_dist = FLT_MAX;  // matches the CPU sentinel
     bool support = !need_support;
 
     for (int r = 0; r <= r_max; ++r) {

@@ -408,6 +408,12 @@ std::vector<float> GaussianProcessor::knnStatsGrid(
         cell_size <= 0.0f || !impl_->context.isInitialized()) {
         return {};
     }
+    // The kernels index cell arrays by (z*dy + y)*dx + x; mismatched dims
+    // would read past the device buffers.
+    if (static_cast<size_t>(grid_dims[0]) * grid_dims[1] * grid_dims[2] !=
+        cell_starts.size()) {
+        return {};
+    }
 
     DeviceBuffer<float> d_pos(positions.data(), positions.size());
     DeviceBuffer<unsigned int> d_entries(cell_entries.data(), cell_entries.size());
@@ -424,7 +430,12 @@ std::vector<float> GaussianProcessor::knnStatsGrid(
                             k_neighbors, num_points, d_out.get())) {
         return {};
     }
-    if (cudaDeviceSynchronize() != cudaSuccess) return {};
+    cudaError_t sync_err = cudaDeviceSynchronize();
+    if (sync_err != cudaSuccess) {
+        std::cerr << "knnStatsGrid: CUDA sync error: "
+                  << cudaGetErrorString(sync_err) << std::endl;
+        return {};
+    }
 
     std::vector<float> stats(num_points * 4);
     if (!d_out.download(stats.data())) return {};
@@ -450,6 +461,10 @@ std::vector<float> GaussianProcessor::filterCandidatesGrid(
         cell_size <= 0.0f || !impl_->context.isInitialized()) {
         return {};
     }
+    if (static_cast<size_t>(grid_dims[0]) * grid_dims[1] * grid_dims[2] !=
+        cell_starts.size()) {
+        return {};
+    }
 
     DeviceBuffer<float> d_cand(candidates.data(), candidates.size());
     DeviceBuffer<float> d_dir(directions.data(), directions.size());
@@ -470,7 +485,12 @@ std::vector<float> GaussianProcessor::filterCandidatesGrid(
                                     num_points, num_queries, d_out.get())) {
         return {};
     }
-    if (cudaDeviceSynchronize() != cudaSuccess) return {};
+    cudaError_t sync_err = cudaDeviceSynchronize();
+    if (sync_err != cudaSuccess) {
+        std::cerr << "filterCandidatesGrid: CUDA sync error: "
+                  << cudaGetErrorString(sync_err) << std::endl;
+        return {};
+    }
 
     std::vector<float> result(num_queries * 2);
     if (!d_out.download(result.data())) return {};
