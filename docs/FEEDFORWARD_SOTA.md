@@ -23,56 +23,77 @@ venv, and drops a `./<name>-infer` wrapper at the project root.
 > `--accept-*` flag, and it re-prints each repo's actual `LICENSE` at install
 > time so the terms you see are current.
 
-## Two integration shapes
+## Three integration shapes
+
+Entry points and outputs below are verified against each repo's README/docs.
 
 ```
-                       ┌── geometry models ──┐
- images ──► feedforward │  VGGT · MapAnything │──► COLMAP sparse/ ──► pipeline.sh
-                       │  Pi3 · AMB3R        │        (OpenSplat / gsplat / LichtFeld)
-                       └─────────────────────┘
-                       ┌── direct-splat ─────┐
- images ──► feedforward │  YoNoSplat          │──► splats (PLY) ──► viewer / SPZ
-                       │  SPFSplatV2         │
-                       └─────────────────────┘
+                        ┌── COLMAP export ─────┐
+ images ──► feedforward │  VGGT · MapAnything  │──► COLMAP sparse/ ──► pipeline.sh --skip-colmap
+                        └──────────────────────┘        (OpenSplat / gsplat / LichtFeld)
+                        ┌── PLY point cloud ───┐
+ images ──► feedforward │  Pi3 · AMB3R         │──► PLY points ──► viewer / SPZ
+                        └──────────────────────┘
+                        ┌── dataset eval ──────┐
+ dataset+index ──────►  │  YoNoSplat · SPFSplat│──► novel views / splats (research/eval)
+                        └──────────────────────┘
 ```
 
-**Geometry models** predict cameras + point maps and can export a COLMAP
-`sparse/` reconstruction. That is exactly what melkor's training wrappers
-already consume, so they replace the SfM stage:
+**COLMAP-export models** (VGGT `demo_colmap.py`, MapAnything
+`scripts/demo_colmap.py`) predict cameras + point maps and write a COLMAP
+`sparse/` reconstruction — exactly what melkor's training wrappers consume,
+so they replace the SfM stage:
 
 ```bash
-./vggt-infer --scene_dir /path/to/scene          # writes .../scene/sparse/
-./scripts/opensplat_wrapper.sh /path/to/scene --images /path/to/scene/images -o out.ply
-# or the full pipeline, skipping COLMAP:
+# VGGT: put images in SCENE/images/, then
+./vggt-infer --scene_dir=/path/to/scene           # writes /path/to/scene/sparse/
+# MapAnything (add --apache for the Apache-2.0 weights):
+./mapanything-infer --images_dir=/path/to/images --output_dir=/path/to/scene --apache
+# then train, skipping COLMAP:
 ./scripts/pipeline.sh /path/to/scene out --skip-colmap
 ```
 
-**Direct-splat models** output 3D Gaussians in one pass; write them to PLY
-for the viewer ([viewer/README.md](../viewer/README.md)) or convert to SPZ
-with `melkor scene.ply scene.spz`.
+**PLY-point-cloud models** (Pi3 `example_mm.py`, AMB3R `sfm/run.py`) write a
+colored point cloud you can view or compress:
+
+```bash
+./pi3-infer --data_path /path/to/images --save_path scene.ply
+./build/melkor scene.ply scene.spz            # for the viewer
+```
+
+**Dataset-eval models** (YoNoSplat, SPFSplatV2) are **not** folder-of-images
+tools despite outputting splats: they run via Hydra (`python -m src.main
++experiment=… mode=test`) over a pixelSplat-convention dataset plus a JSON
+view-sampler index, for novel-view-synthesis evaluation. Use them for
+research/benchmarking against RE10K/ACID/DL3DV, not in-the-wild capture. The
+`./yonosplat-infer` / `./spfsplatv2-infer` wrappers pass your Hydra args
+straight through; see each repo's `EVALUATION.md` / `DATASETS.md`.
 
 ## Catalog
 
 | Model | Category | License (code / weights) | Notes |
 |-------|----------|--------------------------|-------|
-| **AMB3R** | geometry + SLAM/SfM | **none published** | UCL, CVPR'26 Highlight. The only surveyed model both newer than DA3 and reporting direct wins over it (self-reported protocol). Also does VO/SLAM. Research/eval only until a license ships. |
-| **MapAnything** | universal geometry | Apache-2.0 / Apache-2.0 (`-apache`) or CC-BY-NC (default) | Meta + CMU, 3DV'26. Ingests images + optional intrinsics/poses/depth; >12 tasks. Use `facebook/map-anything-apache` weights for commercial. |
-| **VGGT** | geometry + poses | custom / CC-BY-NC (gated commercial ckpt) | Meta, CVPR'25 Best Paper. **Cleanest COLMAP export** (`demo_colmap.py` → `sparse/`, optional `--use_ba`). Predates DA3 on accuracy but best tooling. |
-| **Pi3 (π³)** | pose-free geometry | BSD-3 / CC-BY-NC | ICLR'26. Permutation-equivariant; order-robust. Pi3X (~1B) recommended. |
-| **YoNoSplat** | direct feedforward 3DGS | **MIT / MIT** | ETH Zurich, ICLR'26. Posed or unposed, calibrated or not; ~100 views in 2.69 s. Released checkpoints are 224×224 (`re10k_224x224_ctx2to32.ckpt`, `dl3dv_224x224_ctx2to32.ckpt`); high-res "coming soon". Strongest permissive direct-splat option. |
-| **SPFSplatV2** | direct feedforward 3DGS | **MIT / MIT** | Imperial College. Self-supervised, pose-free; MASt3R- and VGGT-based variants. |
-| **MoGe-2** | single-image geometry | **MIT / MIT** | Microsoft, NeurIPS'25. Metric points + depth + normals + intrinsics from one image. Complements (does not replace) multi-view models. |
+| Model | Output → melkor | License (code / weights) | Notes |
+|-------|-----------------|--------------------------|-------|
+| **VGGT** | COLMAP `sparse/` | custom / CC-BY-NC (gated commercial ckpt) | Meta, CVPR'25 Best Paper. `demo_colmap.py --scene_dir=DIR` (images in `DIR/images/`), optional `--use_ba`. **Cleanest COLMAP export.** |
+| **MapAnything** | COLMAP `sparse/` (or GLB) | Apache-2.0 / Apache-2.0 (`-apache`) or CC-BY-NC (default) | Meta + CMU, 3DV'26. `scripts/demo_colmap.py --images_dir --output_dir`; add `--apache` for commercial weights. Ingests images + optional intrinsics/poses/depth. |
+| **AMB3R** | PLY point cloud | **none published** | UCL, CVPR'26 Highlight. Only surveyed model both newer than DA3 and reporting wins over it (self-reported). `demo.py`, `sfm/run.py`, `slam/run.py` (VO/SLAM). Research/eval only until a license ships. |
+| **Pi3 (π³)** | PLY point cloud | BSD-3 / CC-BY-NC | ICLR'26. `example_mm.py --data_path --save_path out.ply`. Permutation-equivariant; Pi3X (~1B) recommended. |
+| **MoGe-2** | per-image points/depth/normals | **MIT / MIT** | Microsoft, NeurIPS'25. `moge infer -i IMAGES -o OUT --ply`. Single-image; complements multi-view models. |
+| **YoNoSplat** | novel views (dataset eval) | **MIT / MIT** | ETH Zurich, ICLR'26. Hydra `python -m src.main +experiment=… mode=test` over a pixelSplat dataset + index — **not** a folder-of-images tool. 224×224 checkpoints released. |
+| **SPFSplatV2** | novel views (dataset eval) | **MIT / MIT** | Imperial College. Hydra eval over RE10K/ACID chunked data + JSON index. Self-supervised, pose-free; MASt3R/VGGT variants. |
 
 ## Choosing a model
 
-- **You need a drop-in SfM replacement feeding melkor's trainers** → VGGT
-  (best COLMAP tooling; non-commercial weights) or MapAnything-apache
-  (permissive). AMB3R if you can accept its unlicensed status for research.
-- **You want splats directly, permissively licensed** → YoNoSplat, then
-  SPFSplatV2.
-- **You need the newest accuracy and report it beating DA3** → AMB3R
-  (verify the benchmark protocol and its licensing yourself).
+- **Drop-in SfM replacement feeding melkor's trainers** → VGGT (best COLMAP
+  tooling; non-commercial weights) or MapAnything-`apache` (permissive,
+  commercial). AMB3R if you accept its unlicensed status for research.
+- **A quick colored point cloud from photos** → Pi3 (PLY) or AMB3R.
+- **Newest accuracy that reports beating DA3** → AMB3R (verify the benchmark
+  protocol and its licensing yourself).
 - **Single image → geometry** → MoGe-2.
+- **Benchmarking novel-view synthesis on RE10K/ACID/DL3DV** → YoNoSplat or
+  SPFSplatV2 (dataset-driven; not for in-the-wild capture).
 
 ## Caveats (from the underlying research)
 

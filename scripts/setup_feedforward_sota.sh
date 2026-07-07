@@ -91,13 +91,13 @@ if [ -z "$SELECTION" ]; then usage; exit 1; fi
 # license_class: permissive | noncommercial | unlicensed
 catalog() {
     cat <<'EOF'
-vggt|https://github.com/facebookresearch/vggt|geometry-colmap|noncommercial|Meta, CVPR'25; demo_colmap.py exports sparse/ for melkor training
-mapanything|https://github.com/facebookresearch/map-anything|geometry|permissive|Meta+CMU, 3DV'26; use -apache weights for commercial
-pi3|https://github.com/yyfz/Pi3|geometry|noncommercial|ICLR'26; code BSD-3, weights CC-BY-NC
-amb3r|https://github.com/HengyiWang/amb3r|geometry-colmap|unlicensed|UCL, CVPR'26; reports beating DA3; no LICENSE published
-yonosplat|https://github.com/cvg/YoNoSplat|direct-splat|permissive|ETH Zurich, ICLR'26; MIT; pose-free splats
-spfsplatv2|https://github.com/ranrhuang/SPFSplatV2|direct-splat|permissive|Imperial College; MIT; self-supervised pose-free splats
-moge2|https://github.com/microsoft/MoGe|geometry-mono|permissive|Microsoft; MIT; single-image geometry
+vggt|https://github.com/facebookresearch/vggt|geometry-colmap|noncommercial|Meta, CVPR'25; demo_colmap.py --scene_dir exports sparse/ for melkor training
+mapanything|https://github.com/facebookresearch/map-anything|geometry-colmap|permissive|Meta+CMU, 3DV'26; scripts/demo_colmap.py; --apache flag = Apache weights
+pi3|https://github.com/yyfz/Pi3|geometry-ply|noncommercial|ICLR'26; example_mm.py writes a PLY point cloud; code BSD-3, weights CC-BY-NC
+amb3r|https://github.com/HengyiWang/amb3r|geometry-ply|unlicensed|UCL, CVPR'26; reports beating DA3; sfm/run.py; no LICENSE published
+yonosplat|https://github.com/cvg/YoNoSplat|dataset-eval|permissive|ETH Zurich, ICLR'26; MIT; Hydra/dataset eval, NOT a folder-of-images tool
+spfsplatv2|https://github.com/ranrhuang/SPFSplatV2|dataset-eval|permissive|Imperial College; MIT; Hydra/dataset eval, needs RE10K/ACID format
+moge2|https://github.com/microsoft/MoGe|geometry-mono|permissive|Microsoft; MIT; `moge infer` single-image geometry
 EOF
 }
 
@@ -184,10 +184,15 @@ install_one() {
     source "$venv/bin/activate"
     pip install --upgrade pip >&2
 
+    # Install steps verified against each repo. Torch/CUDA is intentionally
+    # left to the user (must match their CUDA); repos that pin it in
+    # requirements.txt handle it there.
     case "$name" in
         vggt)
-            pip install -e "$dir/repo" >&2 || pip install -r "$dir/repo/requirements.txt" >&2 ;;
-        mapanything)
+            pip install -r "$dir/repo/requirements.txt" >&2 || pip install -e "$dir/repo" >&2 ;;
+        mapanything|moge2)
+            # Both install a package (mapanything: pip install -e .; moge:
+            # provides the `moge` console script).
             pip install -e "$dir/repo" >&2 ;;
         pi3|yonosplat|spfsplatv2)
             if [ -f "$dir/repo/requirements.txt" ]; then
@@ -198,8 +203,6 @@ install_one() {
             if [ -f "$dir/repo/requirements.txt" ]; then
                 pip install -r "$dir/repo/requirements.txt" >&2
             fi ;;
-        moge2)
-            pip install git+file://"$dir/repo" >&2 || pip install -e "$dir/repo" >&2 ;;
     esac
     deactivate || true
 
@@ -212,15 +215,16 @@ install_one() {
 create_wrapper() {
     local name="$1" cat="$2"
     local wrapper="$PROJECT_ROOT/$name-infer"
+    # Entry points verified against each repo's README/docs.
     local entry
     case "$name" in
-        vggt)        entry='python demo_colmap.py "$@"' ;;   # writes sparse/
-        amb3r)       entry='python demo.py "$@"' ;;          # also sfm/run.py, slam/run.py
-        mapanything) entry='python -m mapanything.cli "$@" 2>/dev/null || python demo.py "$@"' ;;
-        pi3)         entry='python example_mm.py "$@"' ;;
-        yonosplat)   entry='python -m yonosplat.infer "$@" 2>/dev/null || python demo.py "$@"' ;;
-        spfsplatv2)  entry='python demo.py "$@"' ;;
-        moge2)       entry='python -m moge.scripts.infer "$@" 2>/dev/null || python scripts/infer.py "$@"' ;;
+        vggt)        entry='python demo_colmap.py "$@"' ;;          # --scene_dir=DIR (images in DIR/images/) -> DIR/sparse/
+        mapanything) entry='python scripts/demo_colmap.py "$@"' ;;  # --images_dir=DIR --output_dir=OUT [--apache] -> COLMAP sparse/
+        pi3)         entry='python example_mm.py "$@"' ;;           # --data_path DIR --save_path out.ply -> PLY point cloud
+        amb3r)       entry='python sfm/run.py "$@"' ;;              # --data_path DIR (also ./demo.py, slam/run.py)
+        moge2)       entry='moge infer "$@"' ;;                     # -i IMAGES -o OUT --ply --glb --maps (console script)
+        yonosplat)   entry='python -m src.main "$@"' ;;            # Hydra: +experiment=... mode=test over a dataset index (see EVALUATION.md)
+        spfsplatv2)  entry='python -m src.main "$@"' ;;            # Hydra: +experiment=... mode=test over RE10K/ACID data (see DATASETS.md)
         *)           entry='python demo.py "$@"' ;;
     esac
     cat > "$wrapper" <<WRAP
@@ -237,11 +241,14 @@ WRAP
     log "Wrapper: $wrapper"
     case "$cat" in
         geometry-colmap)
-            log "  -> exports a COLMAP 'sparse/'; feed it to training:" ;;
-        geometry|geometry-mono)
-            log "  -> outputs point maps / depth; see docs/FEEDFORWARD_SOTA.md" ;;
-        direct-splat)
-            log "  -> outputs Gaussian splats (PLY) for the viewer or training" ;;
+            log "  -> exports a COLMAP 'sparse/'; feed it to pipeline.sh --skip-colmap" ;;
+        geometry-ply)
+            log "  -> writes a PLY point cloud; melkor scene.ply scene.spz for the viewer" ;;
+        geometry-mono)
+            log "  -> per-image geometry (points/depth/normals); see docs/FEEDFORWARD_SOTA.md" ;;
+        dataset-eval)
+            log "  -> research/eval tool (Hydra + a dataset index), NOT folder-of-images;" \
+                "see the repo's EVALUATION.md / DATASETS.md" ;;
     esac
 }
 
