@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 1.2.0 (2026-07-07)
 
 ### Added
 - `viewer/`: a self-contained SparkJS + THREE.js web viewer for Gaussian splats. Ships a curated set of real-world **city/area** scenes covering all four containers SparkJS auto-detects (SPZ, SOG `.zip`, SPLAT, PLY), with scene switcher, named camera feeds, auto-orbit, keyboard/mouse fly controls, dynamic scene-availability probing, and opacity-weighted auto-framing (works around Spark `getBoundingBox()` returning `NaN` for packed scenes).
@@ -12,6 +12,10 @@
 - `ComputeProvider` abstraction (`include/melkor/compute_provider.hpp`) unifying Metal/CUDA/CPU behind one interface with runtime fallback; the CLI no longer `#ifdef`-dispatches per backend. New backend-parity test suite `tests/test_compute_provider.cpp`.
 - Grid-accelerated Metal k-NN (`knn_stats_grid`, `filter_candidates_grid` kernels backed by a host-built uniform grid, `include/melkor/spatial_grid.hpp`): enhanced conversion and scene completion now stay on the GPU for clouds of any size instead of falling back to CPU above 10K points.
 - CUDA parity for the grid kernels: `knnStatsGridKernel` / `filterCandidatesGridKernel` mirror the Metal and CPU implementations cell-for-cell, so scene completion and enhanced-conversion k-NN are GPU-accelerated on Linux/NVIDIA too. `Densifier` gained a backend-agnostic `ComputeProvider` constructor that routes to Metal, CUDA, or CPU automatically; the legacy `namespace metal = cuda` alias in `cuda_compute.hpp` (which collided with the real Metal-stub namespace) is removed.
+- `melkor --version`, single-sourced from the CMake project version (which previously still read 1.0.0).
+- Regression tests for the SPZ SH channel-order fix (verified against the canonical spz decoder, so a symmetric transpose bug cannot hide) and for short colors/normals arrays and single-point input in the enhanced converter.
+- CI: a CUDA compile-only Linux job (catches CUDA build breakage without a GPU), a CPU-only (`-DMELKOR_USE_METAL=OFF`) macOS build+test step covering the stub link topology, and `-DMELKOR_WERROR=ON` on the build jobs. First-party code now compiles warning-clean including the Metal target, which previously had no warning flags at all.
+- Repo hygiene: issue forms and a PR template mirroring the contributor checklist, `.gitattributes` (vendored trees marked for GitHub language stats, LF normalization), `.clang-format` and `.clang-tidy` advisory configs, and rewritten `CONTRIBUTING.md` / `SECURITY.md` policies.
 
 ### Fixed
 - **Cross-platform link topology**: Linux/CUDA and CPU-only builds could not link — `gaussian_processor.cu` had been dropped from the CUDA target, the Metal-API stubs were missing `enhancedConvert`/`computeKnnDistancesMetal`, the CUDA branch linked no Metal stubs at all, and tests never linked the stub library. The platform GPU library is now a PUBLIC dependency of `melkor_core` on every platform.
@@ -28,6 +32,8 @@
 - Viewer: `waitRendered()` no longer resolves on frames of the previous scene during a scene switch; `serve.js` path containment now uses platform-correct path primitives (was 403-ing every request on Windows).
 - Core tests no longer write to a shared hard-coded `/tmp` path.
 - `SpzEncodeConfig::fractional_bits` removed: the spz container fixes position precision at 12 fractional bits and the option was silently ignored.
+- A conversion that produces zero splats (e.g. a GLB whose every primitive fails validation) now exits with an error instead of writing an empty output file with exit code 0; the GLB reader reports failure when no usable vertex data exists.
+- An empty `CMAKE_BUILD_TYPE` now defaults to `Release` instead of silently producing unoptimized binaries.
 
 ## 1.1.0 (2026-06-24)
 

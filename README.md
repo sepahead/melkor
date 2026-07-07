@@ -5,6 +5,7 @@
 **A cross-platform 3D Gaussian Splatting toolkit — conversion, training pipelines, scene completion, and a web viewer.**
 
 [![CI](https://github.com/sepahead/melkor/actions/workflows/ci.yml/badge.svg)](https://github.com/sepahead/melkor/actions/workflows/ci.yml)
+[![Release](https://img.shields.io/github/v/release/sepahead/melkor)](https://github.com/sepahead/melkor/releases)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 ![Platforms](https://img.shields.io/badge/platforms-macOS%20%7C%20Linux-lightgrey.svg)
 ![C++17](https://img.shields.io/badge/C%2B%2B-17-informational.svg)
