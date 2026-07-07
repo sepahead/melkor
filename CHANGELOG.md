@@ -1,5 +1,12 @@
 # Changelog
 
+## 1.2.1 (2026-07-07)
+
+### Fixed
+- **Metal covariance transpose**: the `compute_covariances` Metal kernel built the rotation matrix from row vectors passed to a column-major `float3x3` constructor, computing R^T·S·S^T·R instead of R·S·S^T·R^T — wrong for any anisotropic, non-axis-aligned splat (verified: 3.3 max error vs a numpy reference; now 5e-7). Latent (no pipeline caller yet, and the existing test used only an identity rotation, which hides a transpose), but a public-API defect; now covered by a non-identity covariance case and a CPU/Metal covariance parity test.
+- **PLY higher-order SH silently dropped**: `PlyWriteConfig::include_sh_rest` defaults false and the CLI never set it, so any degree>0 input (e.g. a degree-3 SPZ scene) lost all view-dependent color on PLY output while the SPZ path preserved it. The CLI now enables it when `shDegree > 0`; verified end to end (PLY→SPZ→PLY preserves all coefficients within quantization) and locked by SH round-trip tests for degrees 1/2/3.
+- Curved-surface scene completion behavior is now measured and regression-tested (`test_fills_sphere_cap`): a sphere cap closes within the pass budget with fills bulging outward by at most ~2 median spacings; documented in docs/SCENE_COMPLETION.md.
+
 ## 1.2.0 (2026-07-07)
 
 ### Added

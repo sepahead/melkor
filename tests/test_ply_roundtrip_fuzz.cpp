@@ -115,6 +115,59 @@ int main() {
         check_round_trip(label, c);
     }
 
+    // Higher-order SH round-trip. The reader infers shDegree from the number
+    // of f_rest_* properties; the writer emits them only when
+    // include_sh_rest is set. Verify every coefficient survives and the
+    // degree is recovered, for all three SH degrees.
+    for (int degree : {1, 2, 3}) {
+        const int nrest = degree == 1 ? 9 : (degree == 2 ? 24 : 45);
+        GaussianCloud c;
+        c.setShDegree(degree);
+        for (int i = 0; i < 20; ++i) {
+            GaussianSplat s{}; rand_splat(s);
+            s.sh_rest.resize(nrest);
+            for (int j = 0; j < nrest; ++j) s.sh_rest[j] = shdc(rng);
+            c.addSplat(s);
+        }
+        PlyWriter w;
+        std::vector<uint8_t> buf;
+        PlyWriteConfig cfg;
+        cfg.format = PlyFormat::Binary;
+        cfg.include_sh_rest = true;
+        w.writeToBuffer(buf, c, cfg);
+        PlyReader r;
+        auto rres = r.readFromBuffer(buf.data(), buf.size());
+        bool ok = rres.success && rres.cloud.size() == c.size() &&
+                  rres.cloud.shDegree() == degree;
+        for (size_t i = 0; ok && i < c.size(); ++i) {
+            if (rres.cloud[i].sh_rest.size() != static_cast<size_t>(nrest)) { ok = false; break; }
+            for (int j = 0; j < nrest; ++j) {
+                if (!approx(c[i].sh_rest[j], rres.cloud[i].sh_rest[j])) { ok = false; break; }
+            }
+        }
+        char label[32];
+        std::snprintf(label, sizeof(label), "SH deg=%d (%d coeffs)", degree, nrest);
+        printf(ok ? "  PASS [%s]: all coefficients + degree round-trip\n"
+                  : "  FAIL [%s]: SH round-trip mismatch\n", label);
+        if (!ok) ++failures;
+    }
+
+    // Writer default drops SH (include_sh_rest defaults false); the CLI opts
+    // in when shDegree>0 (src/main.cpp). Lock the default so a regression in
+    // it is visible here.
+    {
+        GaussianCloud c; c.setShDegree(1);
+        GaussianSplat s{}; rand_splat(s); s.sh_rest.assign(9, 1.0f); c.addSplat(s);
+        PlyWriter w; std::vector<uint8_t> buf; PlyWriteConfig cfg;  // default config
+        w.writeToBuffer(buf, c, cfg);
+        PlyReader r;
+        auto rres = r.readFromBuffer(buf.data(), buf.size());
+        bool ok = rres.success && rres.cloud.shDegree() == 0;  // SH omitted by default
+        printf(ok ? "  PASS [SH default]: default config omits f_rest (degree 0)\n"
+                  : "  FAIL [SH default]: default config unexpectedly wrote SH\n");
+        if (!ok) ++failures;
+    }
+
     // ASCII round-trip too (separate path in the reader).
     {
         GaussianCloud c;

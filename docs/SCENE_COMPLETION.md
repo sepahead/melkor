@@ -80,7 +80,12 @@ across runs and across CPU/Metal backends.
   splat spacings wide: the defaults close them.
 - Larger voids (unscanned courtyards, roof gaps in aerial captures) need a
   bigger `--max-hole-size` and more `--fill-iterations`; expect the fill to
-  be a flat continuation of the rim geometry.
+  be a flat continuation of the rim geometry. Measured on a sphere with a
+  cap hole of ~6 median spacings radius: the front closes the cap in 6
+  passes and the fill bulges outward from the true surface by at most ~2
+  median spacings at the cap center (about a third of the hole radius) —
+  the rim is extrapolated, not curved. The curved-surface behavior is
+  locked by `test_fills_sphere_cap` in `tests/test_densifier.cpp`.
 - `--fill-strength` below 1.0 fills more densely than the surrounding
   scene; useful when the fill will later be re-optimized by a trainer.
 

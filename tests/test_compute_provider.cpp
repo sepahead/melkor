@@ -212,6 +212,26 @@ bool test_covariances() {
               std::abs(cov[4]) < 1e-5f,
               "identity rotation yields diag(sx^2, sy^2, sz^2)");
     }
+
+    // Non-identity rotation with anisotropic scale. An identity rotation
+    // (above) hides a transposed rotation matrix, since R^T S S^T R equals
+    // R S S^T R^T only when R = I; this case does not. Reference computed by
+    // hand: 90 deg about +Z maps local x->world y, local y->world -x, so the
+    // world covariance is diag(sy^2, sx^2, sz^2).
+    melkor::GaussianCloud rot;
+    melkor::GaussianSplat rs{};
+    rs.scale_0 = 2.0f; rs.scale_1 = 3.0f; rs.scale_2 = 4.0f;   // LINEAR
+    const float h = std::sqrt(0.5f);
+    rs.rot_0 = h; rs.rot_1 = 0.0f; rs.rot_2 = 0.0f; rs.rot_3 = h;  // 90deg +Z
+    rot.addSplat(rs);
+    auto rcov = p->computeCovariances(rot);
+    check(rcov.size() == 6 &&
+          std::abs(rcov[0] - 9.0f) < 1e-3f &&   // xx = sy^2
+          std::abs(rcov[3] - 4.0f) < 1e-3f &&   // yy = sx^2
+          std::abs(rcov[5] - 16.0f) < 1e-3f &&  // zz = sz^2
+          std::abs(rcov[1]) < 1e-3f && std::abs(rcov[2]) < 1e-3f &&
+          std::abs(rcov[4]) < 1e-3f,
+          "90deg-Z rotation yields diag(sy^2, sx^2, sz^2)");
     return true;
 }
 
@@ -254,6 +274,28 @@ bool test_gpu_cpu_parity() {
         max_err = std::max(max_err, std::abs(a[i].opacity - b[i].opacity));
     }
     check(max_err < 1e-3f, "processCloud parity (positions, colors, opacity)");
+
+    // Covariance parity. computeCovariances expects LINEAR scale, so build a
+    // cloud with positive linear scales and normalized (non-identity)
+    // rotations. A transposed rotation in one backend shows up here.
+    auto ca = makeRandomCloud(256, 79);
+    cpu->normalizeQuaternions(ca);
+    for (size_t i = 0; i < ca.size(); ++i) {
+        ca[i].scale_0 = 0.3f + std::abs(ca[i].scale_0);
+        ca[i].scale_1 = 0.3f + std::abs(ca[i].scale_1);
+        ca[i].scale_2 = 0.3f + std::abs(ca[i].scale_2);
+    }
+    auto gcov = gpu->computeCovariances(ca);
+    auto ccov = cpu->computeCovariances(ca);
+    check(!gcov.empty() && gcov.size() == ccov.size(),
+          "GPU computeCovariances returns data");
+    if (!gcov.empty() && gcov.size() == ccov.size()) {
+        float cov_err = 0.0f;
+        for (size_t i = 0; i < gcov.size(); ++i) {
+            cov_err = std::max(cov_err, std::abs(gcov[i] - ccov[i]));
+        }
+        check(cov_err < 1e-3f, "computeCovariances parity (anisotropic, rotated)");
+    }
     return true;
 }
 

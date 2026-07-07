@@ -199,6 +199,62 @@ bool test_fills_plane_hole() {
     return true;
 }
 
+// ---- Test 3b: hole filling on a curved surface ------------------------------
+// A sphere with a polar cap removed. Locks the measured curved-surface
+// behavior: fills stay in the cap region, hug the surface (the advancing
+// front extrapolates the rim, drifting outward by at most ~2 median
+// spacings at the cap center), the cap closes within the pass budget, and
+// the loop self-terminates.
+bool test_fills_sphere_cap() {
+    printf("[test] hole filling on a sphere cap\n");
+    melkor::GaussianCloud cloud;
+    const int n_target = 4000;
+    const float cap_angle = 0.35f;   // ~6 median spacings radius
+    const double golden = (1.0 + std::sqrt(5.0)) / 2.0;
+    for (int i = 0; i < n_target; ++i) {
+        const double z = 1.0 - 2.0 * (i + 0.5) / n_target;
+        const double r = std::sqrt(std::max(0.0, 1.0 - z * z));
+        const double th = 2.0 * M_PI * i / golden;
+        if (std::acos(std::clamp(z, -1.0, 1.0)) < cap_angle) continue;
+        melkor::GaussianSplat s{};
+        s.x = static_cast<float>(r * std::cos(th));
+        s.y = static_cast<float>(r * std::sin(th));
+        s.z = static_cast<float>(z);
+        s.opacity = 2.0f;
+        s.scale_0 = s.scale_1 = std::log(0.03f);
+        s.scale_2 = std::log(0.008f);
+        s.rot_0 = 1.0f;
+        cloud.addSplat(s);
+    }
+    const size_t n0 = cloud.size();
+
+    melkor::Densifier densifier;  // CPU path (deterministic reference)
+    melkor::DensifyConfig cfg;
+    cfg.max_iterations = 8;
+    auto stats = densifier.fillHoles(cloud, cfg);
+
+    check(stats.added > 0, "sphere cap: splats were added");
+    check(stats.passes < 8, "sphere cap: front converges and self-terminates");
+
+    float max_radial_dev = 0.0f;
+    float min_polar = 10.0f;
+    bool in_cap = true;
+    for (size_t i = n0; i < cloud.size(); ++i) {
+        const auto& s = cloud[i];
+        const float rad = std::sqrt(s.x * s.x + s.y * s.y + s.z * s.z);
+        max_radial_dev = std::max(max_radial_dev, std::abs(rad - 1.0f));
+        const float polar = std::acos(std::clamp(s.z / rad, -1.0f, 1.0f));
+        min_polar = std::min(min_polar, polar);
+        if (polar > cap_angle + 0.05f) in_cap = false;
+    }
+    check(in_cap, "sphere cap: all fills stay inside the cap region");
+    // Median spacing on this sphere is ~0.068; allow 2.5 spacings of
+    // extrapolation drift (measured: ~2.0 at the cap center).
+    check(max_radial_dev < 0.17f, "sphere cap: fills hug the surface");
+    check(min_polar < 0.12f, "sphere cap: the cap center is reached");
+    return true;
+}
+
 // ---- Test 4: no outward growth ---------------------------------------------
 bool test_no_boundary_growth() {
     printf("[test] outer boundary is not extrapolated\n");
@@ -348,6 +404,7 @@ int main() {
     test_grid_build();
     test_knn_stats_vs_bruteforce();
     test_fills_plane_hole();
+    test_fills_sphere_cap();
     test_no_boundary_growth();
     test_degenerate_inputs();
 #ifdef MELKOR_HAS_METAL

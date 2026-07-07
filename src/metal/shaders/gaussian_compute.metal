@@ -178,13 +178,18 @@ kernel void compute_covariances(
     float3 s = gaussians[id].scale.xyz;
     float4 q = gaussians[id].rotation;
     float w = q.x, x = q.y, y = q.z, z = q.w;
-    
-    float3x3 R = float3x3(
+
+    // Metal's float3x3(a, b, c) constructor treats a, b, c as COLUMNS, so
+    // passing the rotation matrix's rows below builds its transpose. Wrap in
+    // transpose() so R is the true rotation and the covariance is
+    // R*S*S^T*R^T (matching the CPU computeCovariances and the 3DGS
+    // definition), not R^T*S*S^T*R.
+    float3x3 R = transpose(float3x3(
         float3(1.0f - 2.0f*(y*y + z*z), 2.0f*(x*y - w*z), 2.0f*(x*z + w*y)),
         float3(2.0f*(x*y + w*z), 1.0f - 2.0f*(x*x + z*z), 2.0f*(y*z - w*x)),
         float3(2.0f*(x*z - w*y), 2.0f*(y*z + w*x), 1.0f - 2.0f*(x*x + y*y))
-    );
-    
+    ));
+
     float3x3 S = float3x3(
         float3(s.x, 0.0f, 0.0f),
         float3(0.0f, s.y, 0.0f),

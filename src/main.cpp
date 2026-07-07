@@ -528,6 +528,10 @@ int main(int argc, char* argv[]) {
         melkor::PlyWriter writer;
         melkor::PlyWriteConfig config;
         config.format = use_binary ? melkor::PlyFormat::Binary : melkor::PlyFormat::Ascii;
+        // Preserve higher-order SH when the cloud carries it, matching the
+        // SPZ path (which encodes up to cloud.shDegree()). Without this a
+        // degree>0 input silently loses all view-dependent color on PLY output.
+        config.include_sh_rest = cloud.shDegree() > 0;
 
         auto result = writer.writeToFile(output_path, cloud, config);
         if (!result.success) {
