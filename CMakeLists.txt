@@ -53,6 +53,25 @@ if(MELKOR_PLATFORM STREQUAL "LINUX")
         if(CUDAToolkit_VERSION VERSION_LESS "11.0")
             message(WARNING "CUDA ${CUDAToolkit_VERSION} detected. CUDA 11.0+ recommended.")
         endif()
+        # Architecture list must be chosen HERE, before any add_library():
+        # CMAKE_CUDA_ARCHITECTURES seeds each target's CUDA_ARCHITECTURES
+        # property at target-creation time, and once the CUDA language is
+        # enabled CMake requires the property on every target participating
+        # in device linking — including CXX-only libraries in the circular
+        # static-library arrangement. Some toolchains (distro-packaged nvcc)
+        # provide no default. SM support per toolkit: 60 Pascal, 70 Volta,
+        # 75 Turing, 80 Ampere DC, 86 Ampere consumer (11.1+), 89 Ada
+        # (11.8+), 90 Hopper (12.0+).
+        if(CUDAToolkit_VERSION VERSION_LESS "11.1")
+            set(CMAKE_CUDA_ARCHITECTURES "60;70;75;80")
+        elseif(CUDAToolkit_VERSION VERSION_LESS "11.8")
+            set(CMAKE_CUDA_ARCHITECTURES "60;70;75;80;86")
+        elseif(CUDAToolkit_VERSION VERSION_LESS "12.0")
+            set(CMAKE_CUDA_ARCHITECTURES "60;70;75;80;86;89")
+        else()
+            set(CMAKE_CUDA_ARCHITECTURES "60;70;75;80;86;89;90")
+        endif()
+        message(STATUS "CUDA architectures: ${CMAKE_CUDA_ARCHITECTURES}")
     elseif(CUDAToolkit_FOUND)
         message(STATUS "CUDA available but not enabled. Use -DMELKOR_USE_CUDA=ON to enable.")
     endif()
@@ -180,24 +199,6 @@ if(APPLE AND MELKOR_USE_METAL)
 elseif(MELKOR_PLATFORM STREQUAL "LINUX" AND MELKOR_USE_CUDA AND CUDAToolkit_FOUND)
     message(STATUS "Building with CUDA acceleration")
     
-    # Architecture list must be chosen BEFORE enable_language(CUDA): with the
-    # CUDA language enabled, CMake requires CUDA_ARCHITECTURES on every
-    # target, and some toolchains (e.g. distro-packaged nvcc) provide no
-    # default. SM support per toolkit:
-    #   SM 60 = Pascal, 70 = Volta, 75 = Turing, 80 = Ampere DC,
-    #   86 = Ampere consumer (needs 11.1+), 89 = Ada (11.8+), 90 = Hopper (12.0+)
-    if(CUDAToolkit_VERSION VERSION_LESS "11.1")
-        set(CUDA_ARCHS "60;70;75;80")
-    elseif(CUDAToolkit_VERSION VERSION_LESS "11.8")
-        set(CUDA_ARCHS "60;70;75;80;86")
-    elseif(CUDAToolkit_VERSION VERSION_LESS "12.0")
-        set(CUDA_ARCHS "60;70;75;80;86;89")
-    else()
-        set(CUDA_ARCHS "60;70;75;80;86;89;90")
-    endif()
-    message(STATUS "CUDA ${CUDAToolkit_VERSION}: Using architectures ${CUDA_ARCHS}")
-    set(CMAKE_CUDA_ARCHITECTURES "${CUDA_ARCHS}")
-
     # Enable CUDA language. CMAKE_CXX_STANDARD does not apply to .cu files:
     # without an explicit CUDA standard, nvcc defaults to C++14 on every
     # CUDA 11.x and the shared headers (std::clamp in gaussian_data.hpp)
