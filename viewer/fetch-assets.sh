@@ -93,4 +93,12 @@ elif [ ! -s "$PLY_OUT" ]; then
   echo "note: build melkor to generate $PLY_OUT and enable the PLY scene (optional)"
 fi
 
+# Optional: generate the synthetic 4D (temporal) demo sequence so the viewer's
+# "Wave · 4D" scene and its temporal player light up. Real 4D content: run
+# 4D-GS export_perframe_3DGS.py and drop time_*.ply + a manifest.json here.
+if command -v node >/dev/null 2>&1 && [ ! -s "public/splats/4d/wave/manifest.json" ]; then
+  echo "== 4D demo sequence =="
+  node make-4d-demo.js && echo "ok     public/splats/4d/wave/ (24 frames)"
+fi
+
 echo "Done. Serve with:  python3 -m http.server 8771 --bind 127.0.0.1  (then open /index.html)"

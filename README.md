@@ -39,7 +39,7 @@ Melkor turns meshes and photo sets into 3D Gaussian splat scenes and gives you t
 - **Feedforward** — DA3 / Depth Anything 3, plus the strongest 2025–2026 SOTA models: MapAnything, VGGT, Pi3, AMB3R (geometry → COLMAP export → training) and YoNoSplat, SPFSplatV2 (direct splats), MoGe-2 (single-image); one installer with per-model license gating ([docs/FEEDFORWARD_SOTA.md](docs/FEEDFORWARD_SOTA.md))
 - **Structure-from-Motion** — COLMAP and GLOMAP (10–100× faster mapping)
 - **Web viewer** — SparkJS + THREE.js viewer for SPZ/SOG/SPLAT/PLY scenes with camera feeds, auto-orbit, fly controls, and **progressive streaming** (renders splats as they download); ships with a Playwright render-test suite and an optional Tauri desktop build ([viewer/README.md](viewer/README.md))
-- **Streaming** — progressive/LOD viewer loading, streamable formats (SPZ, SOG, `.RAD`), and an installable online/streaming **3DGS reconstruction** stage (`setup_streaming.sh`: Gaussian-SLAM, SplaTAM, Splat-SLAM, 3DGStream → PLY → melkor); see [docs/STREAMING.md](docs/STREAMING.md)
+- **Streaming** — progressive/LOD viewer loading, streamable formats (SPZ, SOG, `.RAD`), a **4D temporal player** for volumetric-video sequences (fed by 4D-GS per-frame PLY exports), and an installable online/streaming **3DGS reconstruction** stage (`setup_streaming.sh`: Gaussian-SLAM, SplaTAM, Splat-SLAM, 3DGStream → PLY → melkor); see [docs/STREAMING.md](docs/STREAMING.md)
 
 ## Quick Start
 

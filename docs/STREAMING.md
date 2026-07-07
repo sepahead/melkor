@@ -81,15 +81,45 @@ produce a PLY that `melkor scene.ply scene.spz` turns into a viewer asset.
 per-frame output is a compact NTC-deformation + added-Gaussian delta, not a
 per-frame PLY, and it inherits Inria's non-commercial license.
 
-## 3. Network streaming of dynamic / 4D splats
+## 3. Dynamic / 4D splats — temporal playback (implemented)
 
-Real-time streaming of *moving* (4D) splats for volumetric video and remote
-rendering is still research-stage — no permissively-licensed drop-in was
-found. Track: bandwidth-adaptive 4D decomposition (PD-4DGS), hierarchical
-latent streaming compression (HPC), progressive 3DGS coding (ProGS), and
-thin-client interactive streaming over HTTP/3. melkor's static PLY/SPZ IO and
-the viewer are a foundation, but 4D playback would need a new time-varying
-container and player — out of scope for now, noted for future work.
+Volumetric video is a *sequence* of splat frames over time. A verified survey
+of SOTA 4D methods found that **no web splat renderer (Spark, three.js,
+PlayCanvas) plays temporal sequences natively** — that player was the gap.
+melkor's viewer now has one.
+
+**The drop-in producer** is [4D-GS](https://github.com/hustvl/4DGaussians)
+(hustvl/4DGaussians, Apache-2.0): its `export_perframe_3DGS.py` writes one
+**standard 3DGS-layout PLY per timestamp** (`time_00000.ply`,
+`time_00001.ply`, …) — melkor's existing PLY/SPZ IO consumes these with zero
+translation. (License caveat: 4D-GS transitively depends on Inria's
+non-commercial `diff-gaussian-rasterization`, so commercial use is
+constrained despite the Apache-2.0 top level.)
+
+**The viewer temporal player**: a 4D scene is that per-frame sequence plus a
+`manifest.json` (`{ "fps": 12, "frames": [...] }`). The player loads every
+frame as a `SplatMesh`, keeps them in the scene with only the active frame
+visible, and advances on a timeline (play/pause + scrub), driven by the
+manifest fps. Exposed for automation as `__viewer.play4D/pause4D/seek4D/
+get4DState`. Try it: `node viewer/make-4d-demo.js` generates a synthetic
+sequence, then pick **Wave · 4D** in the viewer. To view real content, drop a
+4D-GS export's `time_*.ply` into `viewer/public/splats/4d/<name>/` with a
+`manifest.json`.
+
+*Limitation:* the player loads the whole sequence up front (fine for short
+clips). Long volumetric video should stream a buffered window of frames ahead
+and evict past ones — the natural next step.
+
+Other 4D methods need converters, not drop-in: 3DGStream (MIT) uses a
+keyframe PLY + per-frame NTC deltas; V3/VideoGS (MIT) packs frames into a
+hardware-codec 2D video; dedicated streaming codecs (4DGCPro H.264 layered,
+GIFStream Apache-2.0) don't use PLY/SPZ and would need a new container path.
+
+### Real-time network streaming
+
+Bandwidth-adaptive 4D streaming (PD-4DGS, HPC, ProGS, thin-client HTTP/3) and
+remote rendering remain research-stage with no permissive PLY/SPZ drop-in —
+tracked as future work.
 
 ## 4. Out-of-core / memory streaming
 
@@ -110,10 +140,14 @@ shrink the working set, and rely on Spark's paging for display.
   (BSD-3) → PLY → melkor. Needs a calibrated dataset config, not raw images.
 - **Streaming free-viewpoint video** → 3DGStream (per-frame 3DGS; NTC deltas;
   non-commercial via Inria submodules).
+- **Play a 4D / volumetric-video sequence** → 4D-GS `export_perframe_3DGS.py`
+  → per-frame PLY + `manifest.json` → the viewer's temporal player (§3).
 - **Huge scene, limited GPU** → SOG + Spark's virtual paging; hierarchical
   LOD authoring is future work.
-- **4D / volumetric video network streaming** → not yet a solved,
-  permissively-licensed integration; tracked as future work.
+- **Play back a 4D / volumetric-video sequence** → the viewer's temporal
+  player, fed by a 4D-GS per-frame PLY export + `manifest.json` (§3).
+- **4D *network* streaming** (bandwidth-adaptive, remote render) → not yet a
+  solved, permissively-licensed integration; tracked as future work.
 
 ## Sources
 
@@ -126,3 +160,8 @@ shrink the working set, and rely on Spark's paging for display.
   [SplaTAM](https://spla-tam.github.io/),
   [MonoGS](https://github.com/muskie82/MonoGS),
   [3DGStream](https://github.com/SJoJoK/3DGStream)
+- 4D / dynamic: [4D-GS](https://github.com/hustvl/4DGaussians),
+  [Spacetime Gaussians](https://github.com/oppo-us-research/SpacetimeGaussians),
+  [V3/VideoGS](https://github.com/AuthorityWang/VideoGS),
+  [GIFStream](https://github.com/XDimLab/GIFStream),
+  [4DGCPro](https://github.com/MediaX-SJTU/4DGCPro)
