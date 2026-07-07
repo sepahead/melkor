@@ -61,6 +61,12 @@ jobs:
       - uses: actions/checkout@v4
       - name: Install dependencies
         run: |
+          # The GitHub Ubuntu runner preinstalls Microsoft/azure-cli apt
+          # sources that intermittently serve a bad InRelease ('NOSPLIT'),
+          # failing apt-get update even though melkor needs none of them.
+          sudo rm -f /etc/apt/sources.list.d/microsoft-prod.list \
+                     /etc/apt/sources.list.d/azure-cli.list \
+                     /etc/apt/sources.list.d/azure-cli.sources || true
           sudo apt-get update && sudo apt-get install -y cmake build-essential
           ./scripts/setup_deps.sh
       - name: Build
@@ -83,6 +89,12 @@ jobs:
       - uses: actions/checkout@v4
       - name: Install dependencies
         run: |
+          # Strip the preinstalled Microsoft/azure-cli apt sources that
+          # intermittently serve a bad InRelease ('NOSPLIT') and fail
+          # apt-get update; melkor's CUDA deps need none of them.
+          sudo rm -f /etc/apt/sources.list.d/microsoft-prod.list \
+                     /etc/apt/sources.list.d/azure-cli.list \
+                     /etc/apt/sources.list.d/azure-cli.sources || true
           sudo apt-get update
           sudo apt-get install -y cmake build-essential nvidia-cuda-toolkit
           ./scripts/setup_deps.sh
