@@ -113,4 +113,32 @@ test.describe("Melkor · SparkJS splat viewer", () => {
     const right = await page.evaluate(() => { window.__viewer.setAngles(180, 12); return window.__viewer.getStats().camera; });
     expect(Math.hypot(left[0] - right[0], left[2] - right[2]), "azimuth sweep moves camera").toBeGreaterThan(1);
   });
+
+  // Progressive streaming: the first load (nothing on screen yet) adds the
+  // mesh to the scene and renders splats as they stream in; a scene switch
+  // (something already showing) keeps the old scene until the new one is
+  // ready, so it is not progressive. Also verifies the mid-stream state:
+  // the mesh is in the scene while still loading.
+  test("first load streams progressively; scene switch does not", async ({ page }) => {
+    await boot(page);
+    // The boot auto-load had no prior mesh -> progressive.
+    await page.waitForFunction(() => window.__viewer?.state?.rendered === true, undefined, { timeout: 60_000 });
+    expect(await page.evaluate(() => window.__viewer.state.progressive),
+      "boot load was progressive").toBe(true);
+
+    // Kick off a switch to a different scene and sample state mid-load: the
+    // previous scene must still be the one displayed (not progressive), and
+    // the previous mesh stays in the scene until the new one is ready.
+    const midLoad = await page.evaluate(async () => {
+      const p = window.__viewer.load("valley");        // do not await
+      // poll until loading flips true, then read the streaming decision
+      for (let i = 0; i < 200 && !window.__viewer.state.loading; i++)
+        await new Promise((r) => setTimeout(r, 5));
+      const snap = { progressive: window.__viewer.state.progressive, loading: window.__viewer.state.loading };
+      await p;
+      return snap;
+    });
+    expect(midLoad.loading, "load actually started").toBe(true);
+    expect(midLoad.progressive, "scene switch keeps old scene (not progressive)").toBe(false);
+  });
 });

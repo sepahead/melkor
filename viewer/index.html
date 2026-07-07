@@ -42,6 +42,10 @@
   #overlay { position: fixed; inset: 0; z-index: 20; display: none; align-items: center; justify-content: center;
         background: rgba(8,9,12,.55); backdrop-filter: blur(2px); }
   #overlay.show { display: flex; }
+  /* Progressive streaming: drop the dim/blur so splats are visible as they
+     stream in, leaving only the floating progress card. */
+  #overlay.streaming { background: transparent; backdrop-filter: none; align-items: flex-end; justify-content: center; }
+  #overlay.streaming .card { margin-bottom: 40px; }
   #overlay .card { background: rgba(16,19,25,.95); border: 1px solid rgba(255,255,255,.12); border-radius: 12px;
         padding: 18px 22px; min-width: 260px; text-align: center; }
   #overlay .title { font-size: 13px; margin-bottom: 10px; color: #e6e6e6; }
@@ -229,8 +233,8 @@ const fill = document.getElementById("fill");
 const pct = document.getElementById("pct");
 
 function showOverlay(title) { ovTitle.textContent = title; ovTitle.className = "title"; fill.style.width = "0%"; pct.textContent = "0%"; overlay.classList.add("show"); }
-function showError(msg) { ovTitle.textContent = msg; ovTitle.className = "title err"; overlay.classList.add("show"); }
-function hideOverlay() { overlay.classList.remove("show"); }
+function showError(msg) { ovTitle.textContent = msg; ovTitle.className = "title err"; overlay.classList.remove("streaming"); overlay.classList.add("show"); }
+function hideOverlay() { overlay.classList.remove("show"); overlay.classList.remove("streaming"); }
 
 function splatCountOf(mesh) {
   try {
@@ -264,9 +268,19 @@ async function loadScene(id) {
   // gsplat scenes are trained Y-down/Z-forward -> 180° about X to bring up-axis into THREE space.
   mesh.quaternion.set(1, 0, 0, 0);
 
+  // Progressive streaming: with nothing currently displayed, add the mesh to
+  // the scene before it finishes loading so Spark renders splats as they
+  // stream in (Spark 2.x parses the download incrementally) instead of a
+  // blank screen until 100%. When a scene is already showing, keep it until
+  // the new one is ready so two different scenes never overlap mid-stream.
+  const progressive = !currentMesh;
+  state.progressive = progressive;
+  if (progressive) { scene.add(mesh); overlay.classList.add("streaming"); }
+
   try {
     await mesh.initialized;
   } catch (err) {
+    if (progressive) { try { scene.remove(mesh); } catch {} }
     try { mesh.dispose(); } catch {}
     if (gen !== loadGen) return null;
     state.loading = false; state.error = String(err);
@@ -275,12 +289,17 @@ async function loadScene(id) {
   }
 
   // A newer load started while this one was downloading: discard it silently.
-  if (gen !== loadGen) { try { mesh.dispose(); } catch {} return null; }
+  if (gen !== loadGen) {
+    if (progressive) { try { scene.remove(mesh); } catch {} }
+    try { mesh.dispose(); } catch {}
+    return null;
+  }
 
-  // Swap the freshly-loaded mesh in for the previous one (no blank gap mid-load).
+  // Swap the freshly-loaded mesh in for the previous one (no blank gap
+  // mid-load). When progressive, the mesh is already in the scene.
   if (currentMesh) { scene.remove(currentMesh); try { currentMesh.dispose(); } catch {} }
   currentMesh = mesh; currentScene = def;
-  scene.add(mesh);
+  if (!progressive) scene.add(mesh);
   frameCountSinceLoad = 0;           // count frames rendered AFTER the swap, not during download
   frameMesh(mesh);
   orbitEnabled = true; manualControl = false; syncOrbitBtn();
@@ -348,6 +367,7 @@ renderer.domElement.addEventListener("wheel", () => { manualControl = true; orbi
 const state = {
   ready: false, loading: false, rendered: false, error: null,
   scene: null, format: null, splatCount: 0, fps: 0,
+  progressive: false,  // true when the last load streamed splats in progressively
 };
 
 let lastT = performance.now();

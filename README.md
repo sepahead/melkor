@@ -38,7 +38,8 @@ Melkor turns meshes and photo sets into 3D Gaussian splat scenes and gives you t
 - **Training** — OpenSplat (multi-GPU), gsplat (CUDA DDP), gsplat-mps (Apple Silicon), LichtFeld-Studio (Linux)
 - **Feedforward** — DA3 / Depth Anything 3, plus the strongest 2025–2026 SOTA models: MapAnything, VGGT, Pi3, AMB3R (geometry → COLMAP export → training) and YoNoSplat, SPFSplatV2 (direct splats), MoGe-2 (single-image); one installer with per-model license gating ([docs/FEEDFORWARD_SOTA.md](docs/FEEDFORWARD_SOTA.md))
 - **Structure-from-Motion** — COLMAP and GLOMAP (10–100× faster mapping)
-- **Web viewer** — SparkJS + THREE.js viewer for SPZ/SOG/SPLAT/PLY scenes with camera feeds, auto-orbit, and fly controls; ships with a Playwright render-test suite and an optional Tauri desktop build ([viewer/README.md](viewer/README.md))
+- **Web viewer** — SparkJS + THREE.js viewer for SPZ/SOG/SPLAT/PLY scenes with camera feeds, auto-orbit, fly controls, and **progressive streaming** (renders splats as they download); ships with a Playwright render-test suite and an optional Tauri desktop build ([viewer/README.md](viewer/README.md))
+- **Streaming** — progressive/LOD viewer loading, streamable formats (SPZ, SOG, `.RAD`), and the online-reconstruction (SLAM) path documented in [docs/STREAMING.md](docs/STREAMING.md)
 
 ## Quick Start
 
@@ -157,6 +158,7 @@ The core library (`melkor_core`) is platform-independent; GPU work goes through 
 | [docs/LICHTFELD_WRAPPER.md](docs/LICHTFELD_WRAPPER.md) | LichtFeld-Studio training wrapper |
 | [docs/DA3_FEEDFORWARD.md](docs/DA3_FEEDFORWARD.md) | Depth Anything 3 feedforward reconstruction |
 | [docs/FEEDFORWARD_SOTA.md](docs/FEEDFORWARD_SOTA.md) | SOTA 2025–2026 feedforward models (MapAnything, VGGT, YoNoSplat, …) |
+| [docs/STREAMING.md](docs/STREAMING.md) | Streaming splats: progressive/LOD viewer loading, SOG format, SLAM |
 | [viewer/README.md](viewer/README.md) | SparkJS web viewer, Tauri shell, render tests |
 
 ## Testing

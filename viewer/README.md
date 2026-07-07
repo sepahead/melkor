@@ -116,6 +116,13 @@ Run `./fetch-assets.sh` first so the scenes are present.
   the more-opaque half of a sample (to ignore atmospheric "haze" and extreme
   floaters), then using a median center + 90th-percentile-distance radius. This
   frames object-centric and immersive 360 captures alike.
+- **Progressive streaming**: on the first load (nothing on screen yet) the `SplatMesh`
+  is added to the scene *before* the download completes, so Spark renders splats as
+  they stream in instead of a blank screen until 100%; the overlay drops its dim/blur
+  to a floating progress card so the build-up is visible. A scene *switch* keeps the
+  current scene until the new one is ready, so two scenes never overlap mid-stream.
+  Spark 2.1 also supports `.RAD` progressive assets, continuous LOD, and virtual splat
+  paging for very large worlds — see [../docs/STREAMING.md](../docs/STREAMING.md).
 - A monotonic **load token** guards `loadScene` so a superseded load (e.g. the boot
   auto-load racing a user click) never clobbers viewer state.
 - `window.__viewer` exposes a small automation API (`load`, `setView`, `setAngles`,
