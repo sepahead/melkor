@@ -64,17 +64,18 @@ option(MELKOR_BUILD_SPZ "Build with SPZ support" ON)
 # Third-party dependencies directory
 set(THIRD_PARTY_DIR ${CMAKE_SOURCE_DIR}/third_party)
 
-# tinygltf (header-only)
+# tinygltf (header-only). SYSTEM: third-party header warnings must not be
+# promoted to errors by MELKOR_WERROR when included from first-party code.
 add_library(tinygltf INTERFACE)
-target_include_directories(tinygltf INTERFACE ${THIRD_PARTY_DIR}/tinygltf)
+target_include_directories(tinygltf SYSTEM INTERFACE ${THIRD_PARTY_DIR}/tinygltf)
 target_compile_definitions(tinygltf INTERFACE
     TINYGLTF_NO_STB_IMAGE_WRITE
     TINYGLTF_NO_EXTERNAL_IMAGE
 )
 
-# stb_image for tinygltf
+# stb_image for tinygltf (SYSTEM for the same reason as tinygltf)
 add_library(stb_image INTERFACE)
-target_include_directories(stb_image INTERFACE ${THIRD_PARTY_DIR}/stb)
+target_include_directories(stb_image SYSTEM INTERFACE ${THIRD_PARTY_DIR}/stb)
 
 # SPZ library (if available)
 if(MELKOR_BUILD_SPZ AND EXISTS ${THIRD_PARTY_DIR}/spz/CMakeLists.txt)
@@ -110,8 +111,8 @@ target_link_libraries(melkor_core PUBLIC
 if(SPZ_AVAILABLE)
     target_link_libraries(melkor_core PUBLIC spz)
     target_compile_definitions(melkor_core PUBLIC MELKOR_HAS_SPZ)
-    # Add SPZ include directories
-    target_include_directories(melkor_core PUBLIC ${THIRD_PARTY_DIR}/spz/src/cc)
+    # Add SPZ include directories (SYSTEM: exempt from MELKOR_WERROR)
+    target_include_directories(melkor_core SYSTEM PUBLIC ${THIRD_PARTY_DIR}/spz/src/cc)
 endif()
 # Enable strict warnings on Melkor's own code (not third-party).
 target_compile_options(melkor_core PRIVATE ${MELKOR_WARNING_FLAGS})
@@ -179,6 +180,24 @@ if(APPLE AND MELKOR_USE_METAL)
 elseif(MELKOR_PLATFORM STREQUAL "LINUX" AND MELKOR_USE_CUDA AND CUDAToolkit_FOUND)
     message(STATUS "Building with CUDA acceleration")
     
+    # Architecture list must be chosen BEFORE enable_language(CUDA): with the
+    # CUDA language enabled, CMake requires CUDA_ARCHITECTURES on every
+    # target, and some toolchains (e.g. distro-packaged nvcc) provide no
+    # default. SM support per toolkit:
+    #   SM 60 = Pascal, 70 = Volta, 75 = Turing, 80 = Ampere DC,
+    #   86 = Ampere consumer (needs 11.1+), 89 = Ada (11.8+), 90 = Hopper (12.0+)
+    if(CUDAToolkit_VERSION VERSION_LESS "11.1")
+        set(CUDA_ARCHS "60;70;75;80")
+    elseif(CUDAToolkit_VERSION VERSION_LESS "11.8")
+        set(CUDA_ARCHS "60;70;75;80;86")
+    elseif(CUDAToolkit_VERSION VERSION_LESS "12.0")
+        set(CUDA_ARCHS "60;70;75;80;86;89")
+    else()
+        set(CUDA_ARCHS "60;70;75;80;86;89;90")
+    endif()
+    message(STATUS "CUDA ${CUDAToolkit_VERSION}: Using architectures ${CUDA_ARCHS}")
+    set(CMAKE_CUDA_ARCHITECTURES "${CUDA_ARCHS}")
+
     # Enable CUDA language. CMAKE_CXX_STANDARD does not apply to .cu files:
     # without an explicit CUDA standard, nvcc defaults to C++14 on every
     # CUDA 11.x and the shared headers (std::clamp in gaussian_data.hpp)
@@ -214,31 +233,10 @@ elseif(MELKOR_PLATFORM STREQUAL "LINUX" AND MELKOR_USE_CUDA AND CUDAToolkit_FOUN
     # symbols via this PUBLIC link.
     target_link_libraries(melkor_core PUBLIC melkor_cuda)
     
-    # Set CUDA architecture (adjust based on your GPU)
-    # SM 60 = Pascal (GTX 10xx), SM 70 = Volta (V100), SM 75 = Turing (RTX 20xx)
-    # SM 80 = Ampere (A100), SM 86 = Ampere (RTX 30xx), SM 89 = Ada (RTX 40xx)
-    # SM 90 = Hopper (H100) - requires CUDA 12.0+
-    if(CUDAToolkit_VERSION VERSION_LESS "11.1")
-        # CUDA 11.0: SM 86 (Ampere consumer) arrived in 11.1
-        set(CUDA_ARCHS "60;70;75;80")
-        message(STATUS "CUDA ${CUDAToolkit_VERSION}: Using architectures ${CUDA_ARCHS}")
-    elseif(CUDAToolkit_VERSION VERSION_LESS "11.8")
-        # CUDA 11.1-11.7: include SM 86
-        set(CUDA_ARCHS "60;70;75;80;86")
-        message(STATUS "CUDA ${CUDAToolkit_VERSION}: Using architectures ${CUDA_ARCHS}")
-    elseif(CUDAToolkit_VERSION VERSION_LESS "12.0")
-        # CUDA 11.8+: include SM 89 (Ada/RTX 40xx)
-        set(CUDA_ARCHS "60;70;75;80;86;89")
-        message(STATUS "CUDA ${CUDAToolkit_VERSION}: Using architectures ${CUDA_ARCHS}")
-    else()
-        # CUDA 12.0+: include SM 89 (Ada) and SM 90 (Hopper)
-        set(CUDA_ARCHS "60;70;75;80;86;89;90")
-        message(STATUS "CUDA ${CUDAToolkit_VERSION}: Using architectures ${CUDA_ARCHS}")
-    endif()
-    
+    # Architectures were selected before enable_language(CUDA) above and
+    # apply globally via CMAKE_CUDA_ARCHITECTURES.
     set_target_properties(melkor_cuda PROPERTIES
         CUDA_SEPARABLE_COMPILATION ON
-        CUDA_ARCHITECTURES "${CUDA_ARCHS}"
     )
     
     set(MELKOR_GPU_LIBRARY melkor_cuda)
