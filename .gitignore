@@ -27,6 +27,25 @@ Makefile
 tools/libtorch/
 tools/OpenSplat/build/
 tools/gsplat-mps/
+# Model/tool clones from setup_feedforward_sota.sh and setup_streaming.sh
+# (multi-GB repos + venvs; the setup scripts and docs stay tracked)
+tools/streaming/
+tools/vggt/
+tools/mapanything/
+tools/pi3/
+tools/amb3r/
+tools/yonosplat/
+tools/spfsplatv2/
+tools/moge2/
+# Auto-generated tool wrappers at repo root
+/vggt-infer
+/mapanything-infer
+/pi3-infer
+/amb3r-infer
+/moge2-infer
+/yonosplat-infer
+/spfsplatv2-infer
+/*-slam
 third_party/spz/samples/
 third_party/spz/build/
 

@@ -44,24 +44,42 @@ open-source tools (both permissive):
 Drop the resulting `meta.json`/`.webp` set (or a `.zip` of it) into
 `viewer/public/splats/` and add a `SCENES` entry.
 
-## 2. Online / incremental reconstruction (SLAM)
+## 2. Online / incremental reconstruction (SLAM + streaming FVV)
 
-Reconstruct a scene *while* capturing a video/image stream, rather than
-running SfM + training offline. These produce a splat cloud (PLY) that feeds
-melkor's viewer and further training. Verified, wrappable options:
+Build the splat scene *incrementally* — from an RGB-D/RGB SLAM sequence, or
+per-frame for free-viewpoint video — instead of offline SfM + training. Their
+3DGS PLY output feeds melkor's viewer / SPZ. Install with:
 
-| Method | Repo | License | Input |
-|--------|------|---------|-------|
-| **Splat-SLAM** | google-research/Splat-SLAM | Apache-2.0 | RGB-only video, globally optimized |
-| **Gaussian-SLAM** | VladimirYugay/Gaussian-SLAM | MIT | RGB-D |
-| **SplaTAM** | spla-tam/SplaTAM | BSD-3-Clause | RGB-D, track & map |
-| **MonoGS** | muskie82/MonoGS | research-only (custom) | monocular, CVPR'24 |
-| **AMB3R** (SLAM mode) | HengyiWang/amb3r | none published | video → poses + points; see [FEEDFORWARD_SOTA.md](FEEDFORWARD_SOTA.md) |
+```bash
+./scripts/setup_streaming.sh list
+./scripts/setup_streaming.sh permissive               # MIT/BSD/Apache
+./scripts/setup_streaming.sh 3dgstream --accept-noncommercial
+```
 
-Integration: run the SLAM method on your capture, export its Gaussian cloud
-to PLY, then `melkor scene.ply scene.spz` for the viewer or feed the poses
-into training. AMB3R's `slam/run.py` also exports a COLMAP-style
-reconstruction that melkor's training path consumes directly.
+> **Reality check (verified against each repo's README):** all are **Linux +
+> NVIDIA CUDA only** (custom CUDA rasterizers, tiny-cuda-nn, lietorch), and
+> **none takes a plain folder of images** — each needs a *calibrated* dataset
+> in a specific SLAM/video format selected via a per-scene config. Their
+> conda/CUDA-submodule environments are tool-specific and can't be installed
+> generically, so `setup_streaming.sh` clones + scaffolds each repo, prints
+> its license and the exact run command, and defers the env build to the
+> repo's README. It does not fake a one-command install.
+
+| Method | Run (verified) | Input | PLY out → melkor | License |
+|--------|----------------|-------|------------------|---------|
+| **Gaussian-SLAM** | `run_slam.py configs/<ds>/<scene>.yaml --input_path … --output_path …` | Replica/TUM/ScanNet(++), RGB-D | **direct** (`save_ply` writes INRIA 3DGS PLY) | **MIT** |
+| **SplaTAM** | `scripts/splatam.py configs/<ds>/splatam.py` then `scripts/export_ply.py` | Replica/TUM/ScanNet(++), RGB-D | via `export_ply.py` | **BSD-3** |
+| **Splat-SLAM** | `run.py configs/<ds>/<scene>.yaml` | Replica/TUM/ScanNet, RGB | non-default `save_gaussians()` | Apache-2.0 (repo archived) |
+| **3DGStream** | `train_frames.py --config_path … -m <frame0> -v <scene>` | N3DV/Meet-Room multi-view video + COLMAP + frame-0 3DGS | frame-0 PLY only; later frames are NTC deltas | Inria **non-commercial** (submodule) |
+| **MonoGS** | `slam.py --config configs/{mono,rgbd}/<ds>/<scene>.yaml` | TUM/Replica/EuRoC | GUI/metrics; PLY not documented | non-commercial (Imperial) |
+| **AMB3R** (SLAM mode) | `slam/run.py --data_path …` | video → poses + points | point cloud; see [FEEDFORWARD_SOTA.md](FEEDFORWARD_SOTA.md) | none published |
+
+**Best fits for melkor:** Gaussian-SLAM (MIT, emits a standard 3DGS PLY
+directly) and SplaTAM (BSD-3, PLY via `export_ply.py`) — both permissive and
+produce a PLY that `melkor scene.ply scene.spz` turns into a viewer asset.
+3DGStream is the canonical *streaming free-viewpoint-video* method but its
+per-frame output is a compact NTC-deformation + added-Gaussian delta, not a
+per-frame PLY, and it inherits Inria's non-commercial license.
 
 ## 3. Network streaming of dynamic / 4D splats
 
@@ -86,13 +104,16 @@ shrink the working set, and rely on Spark's paging for display.
 ## Summary: what to reach for
 
 - **Serve a big scene to the web fast** → convert to SOG (15–20× smaller,
-  GPU-ready) and let the viewer stream it progressively.
-- **Reconstruct live from video** → Splat-SLAM (Apache-2.0) or Gaussian-SLAM
-  (MIT) → PLY → melkor.
+  GPU-ready) and let the viewer stream it progressively (already implemented).
+- **Reconstruct incrementally from an RGB-D/RGB sequence** →
+  `setup_streaming.sh permissive`: Gaussian-SLAM (MIT, direct PLY) or SplaTAM
+  (BSD-3) → PLY → melkor. Needs a calibrated dataset config, not raw images.
+- **Streaming free-viewpoint video** → 3DGStream (per-frame 3DGS; NTC deltas;
+  non-commercial via Inria submodules).
 - **Huge scene, limited GPU** → SOG + Spark's virtual paging; hierarchical
   LOD authoring is future work.
-- **4D / volumetric video streaming** → not yet a solved, permissively-licensed
-  integration; tracked as future work.
+- **4D / volumetric video network streaming** → not yet a solved,
+  permissively-licensed integration; tracked as future work.
 
 ## Sources
 
@@ -100,7 +121,8 @@ shrink the working set, and rely on Spark's paging for display.
   [Spark new features 2.0](https://sparkjs.dev/docs/new-features-2.0/)
 - [PlayCanvas: SOG, the WebP of Gaussian Splatting](https://blog.playcanvas.com/playcanvas-open-sources-sog-format-for-gaussian-splatting/),
   [SOG format spec](https://developer.playcanvas.com/user-manual/gaussian-splatting/formats/sog/)
-- SLAM: [Splat-SLAM](https://github.com/google-research/Splat-SLAM),
+- SLAM / streaming reconstruction: [Splat-SLAM](https://github.com/google-research/Splat-SLAM),
   [Gaussian-SLAM](https://github.com/VladimirYugay/Gaussian-SLAM),
   [SplaTAM](https://spla-tam.github.io/),
-  [MonoGS](https://github.com/muskie82/MonoGS)
+  [MonoGS](https://github.com/muskie82/MonoGS),
+  [3DGStream](https://github.com/SJoJoK/3DGStream)
