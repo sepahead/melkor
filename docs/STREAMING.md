@@ -96,6 +96,24 @@ translation. (License caveat: 4D-GS transitively depends on Inria's
 non-commercial `diff-gaussian-rasterization`, so commercial use is
 constrained despite the Apache-2.0 top level.)
 
+Install it (and the other verified 4D reconstruction methods) via the `4d`
+group of the streaming installer:
+
+```bash
+./scripts/setup_streaming.sh list                    # 4d-gs, videogs, gifstream, ...
+./scripts/setup_streaming.sh 4d-gs --accept-noncommercial
+# train a scene, then export the per-frame PLY sequence:
+./4d-gs-4d python train.py -s data/dnerf/bouncingballs --configs arguments/dnerf/bouncingballs.py --expname dnerf/bouncingballs
+./4d-gs-4d python export_perframe_3DGS.py --iteration 20000 --configs arguments/dnerf/bouncingballs.py --model_path output/dnerf/bouncingballs
+# -> output/dnerf/bouncingballs/gaussian_pertimestamp/time_*.ply
+```
+
+Of the surveyed 4D methods, **only 4D-GS produces a standard per-frame PLY
+export** that feeds `pack-4d.js` cleanly; VideoGS (V3) leaves packable
+per-frame checkpoints, while GIFStream, Spacetime-GS and Ex4DGS use custom
+(non-PLY) formats. The installer catalogues all five with their real
+train/export commands and license class, and gates the non-commercial ones.
+
 **The viewer temporal player**: a 4D scene is that per-frame sequence plus a
 `manifest.json` (`{ "fps": 12, "frames": [...] }`). The player **streams a
 bounded window** of frames around the playhead — it keeps only frames

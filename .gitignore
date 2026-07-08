@@ -46,6 +46,8 @@ tools/moge2/
 /yonosplat-infer
 /spfsplatv2-infer
 /*-slam
+/*-4d
+/*-infer
 third_party/spz/samples/
 third_party/spz/build/
 
