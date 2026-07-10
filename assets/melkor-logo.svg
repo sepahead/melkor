@@ -1,0 +1,73 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 240 240" width="240" height="240" role="img" aria-label="Melkor Gaussian-splat forge: inside an ember-dark hexagon, a cloud of glowing anisotropic splats reconstructs a wireframe peak — 3D Gaussian Splatting: conversion, training, scene completion.">
+  <title>Melkor — Splat Forge (Gaussians completing the scene)</title>
+  <defs>
+    <radialGradient id="ember" cx="50%" cy="44%" r="72%">
+      <stop offset="0%" stop-color="#241407"/>
+      <stop offset="60%" stop-color="#150c06"/>
+      <stop offset="100%" stop-color="#080505"/>
+    </radialGradient>
+    <radialGradient id="splat" cx="50%" cy="50%" r="50%">
+      <stop offset="0%" stop-color="#fdba74" stop-opacity="0.95"/>
+      <stop offset="55%" stop-color="#fb923c" stop-opacity="0.55"/>
+      <stop offset="100%" stop-color="#fb923c" stop-opacity="0"/>
+    </radialGradient>
+    <filter id="glow" x="-60%" y="-60%" width="220%" height="220%">
+      <feGaussianBlur stdDeviation="2.6" result="b"/>
+      <feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge>
+    </filter>
+    <style>
+      .rim{fill:none;stroke:#fb923c;stroke-width:2.4;stroke-linejoin:miter;stroke-opacity:.9}
+      .rimdark{fill:none;stroke:#241206;stroke-width:5.6;stroke-linejoin:miter}
+      .rimglow{fill:none;stroke:#fb923c;stroke-width:7;stroke-linejoin:miter;stroke-opacity:.2;filter:url(#glow)}
+      .vtick{stroke:#fb923c;stroke-width:2.2;stroke-linecap:round;stroke-opacity:.9}
+      .grid{fill:none;stroke:#fb923c;stroke-opacity:.12;stroke-width:1}
+      .wire{fill:none;stroke:#fdba74;stroke-opacity:.4;stroke-width:1.2;stroke-linejoin:round;stroke-dasharray:4 4}
+      .wire-solid{fill:none;stroke:#fdba74;stroke-opacity:.75;stroke-width:1.5;stroke-linejoin:round}
+      .p1{animation:breathe 3.4s ease-in-out infinite}
+      .p2{animation:breathe 3.4s ease-in-out infinite;animation-delay:1.7s}
+      @keyframes breathe{0%,100%{opacity:1}50%{opacity:.5}}
+      @media (prefers-reduced-motion:reduce){.p1,.p2{animation:none}}
+      @media (prefers-color-scheme:light){.rimglow{stroke-opacity:.28}.rim{stroke-opacity:1}.rimdark{stroke:#3a2210}.vtick{stroke-opacity:1}}
+    </style>
+  </defs>
+
+  <!-- hexagonal plate (the cube's isometric shadow, recast) -->
+  <path d="M120 14 L212 67 L212 173 L120 226 L28 173 L28 67 Z" fill="url(#ember)"/>
+
+  <!-- isometric ground grid -->
+  <path class="grid" d="M46 172 L120 130 L194 172"/>
+  <path class="grid" d="M70 186 L120 158 L170 186"/>
+  <path class="grid" d="M94 200 L120 186 L146 200"/>
+
+  <!-- the peak: half reconstructed wireframe, half still to complete -->
+  <path class="wire-solid" d="M62 168 L104 84 L120 118 L142 62 L188 168"/>
+  <path class="wire" d="M104 84 L128 168 M142 62 L118 168 M142 62 L164 118"/>
+
+  <!-- the splat cloud: anisotropic Gaussians coalescing onto the scene -->
+  <g>
+    <ellipse cx="70" cy="150" rx="13" ry="5" transform="rotate(-28 70 150)" fill="url(#splat)" opacity="0.8"/>
+    <ellipse cx="88" cy="120" rx="11" ry="4.4" transform="rotate(-38 88 120)" fill="url(#splat)" opacity="0.9"/>
+    <ellipse class="p1" cx="104" cy="90" rx="9" ry="3.8" transform="rotate(-46 104 90)" fill="url(#splat)"/>
+    <ellipse cx="84" cy="158" rx="12" ry="4.6" transform="rotate(18 84 158)" fill="url(#splat)" opacity="0.7"/>
+    <ellipse cx="112" cy="132" rx="10" ry="4" transform="rotate(-12 112 132)" fill="url(#splat)" opacity="0.85"/>
+    <ellipse cx="126" cy="102" rx="8.5" ry="3.4" transform="rotate(-52 126 102)" fill="url(#splat)" opacity="0.8"/>
+    <ellipse class="p2" cx="141" cy="76" rx="8" ry="3.2" transform="rotate(-30 141 76)" fill="url(#splat)"/>
+    <ellipse cx="118" cy="152" rx="11" ry="4.2" transform="rotate(8 118 152)" fill="url(#splat)" opacity="0.65"/>
+    <ellipse cx="140" cy="128" rx="8" ry="3.2" transform="rotate(-20 140 128)" fill="url(#splat)" opacity="0.55"/>
+    <ellipse cx="156" cy="104" rx="7" ry="2.8" transform="rotate(-40 156 104)" fill="url(#splat)" opacity="0.4"/>
+    <ellipse cx="160" cy="140" rx="7.5" ry="3" transform="rotate(14 160 140)" fill="url(#splat)" opacity="0.3"/>
+    <ellipse cx="174" cy="156" rx="8" ry="3.2" transform="rotate(24 174 156)" fill="url(#splat)" opacity="0.22"/>
+  </g>
+
+  <!-- rim: halo, dark under-stroke, bright core -->
+  <path class="rimglow" d="M120 14 L212 67 L212 173 L120 226 L28 173 L28 67 Z"/>
+  <path class="rimdark" d="M120 14 L212 67 L212 173 L120 226 L28 173 L28 67 Z"/>
+  <path class="rim" d="M120 14 L212 67 L212 173 L120 226 L28 173 L28 67 Z"/>
+  <!-- vertex ticks -->
+  <line class="vtick" x1="120" y1="5" x2="120" y2="11"/>
+  <line class="vtick" x1="120" y1="229" x2="120" y2="235"/>
+  <line class="vtick" x1="218" y1="63.5" x2="223" y2="60.6"/>
+  <line class="vtick" x1="218" y1="176.5" x2="223" y2="179.4"/>
+  <line class="vtick" x1="22" y1="63.5" x2="17" y2="60.6"/>
+  <line class="vtick" x1="22" y1="176.5" x2="17" y2="179.4"/>
+</svg>

@@ -1,5 +1,7 @@
 <div align="center">
 
+<img src="assets/melkor-logo.svg" alt="Melkor splat forge — inside an ember-dark hexagon, a cloud of glowing anisotropic Gaussian splats reconstructs a wireframe peak." width="200" height="200" />
+
 # Melkor
 
 **A cross-platform 3D Gaussian Splatting toolkit — conversion, training pipelines, scene completion, and a web viewer.**
