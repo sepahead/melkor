@@ -5,14 +5,105 @@
 
 #ifdef MELKOR_HAS_SPZ
 
+#include "melkor/cloud_inspector.hpp"
 #include "load-spz.h"
+#include <algorithm>
+#include <cmath>
+#include <cstdio>
 #include <fstream>
+#include <limits>
+#include <new>
+#include <stdexcept>
 
 namespace melkor {
 
 // ============================================================================
 // Helper functions to convert between melkor and spz types
 // ============================================================================
+
+static size_t shRestCountForDegree(int degree) {
+    switch (degree) {
+        case 0: return 0;
+        case 1: return 9;
+        case 2: return 24;
+        case 3: return 45;
+        default: return 0;
+    }
+}
+
+static std::string validateEncodeInput(const GaussianCloud& cloud,
+                                       const SpzEncodeConfig& config) {
+    if (cloud.empty()) return "Cannot encode empty cloud";
+    if (config.sh_degree < 0 || config.sh_degree > 3) {
+        return "Cannot encode SPZ: requested SH degree must be between 0 and 3";
+    }
+    if (cloud.shDegree() < 0 || cloud.shDegree() > 3) {
+        return "Cannot encode SPZ: cloud SH degree must be between 0 and 3";
+    }
+    const int effective_degree = std::min(config.sh_degree, cloud.shDegree());
+    const size_t sh_components = shRestCountForDegree(effective_degree);
+    const size_t largest_signed_multiplier = std::max<size_t>({9, 4, sh_components});
+    const size_t signed_allocation_limit =
+        static_cast<size_t>(std::numeric_limits<int32_t>::max()) /
+        largest_signed_multiplier;
+    if (cloud.size() > signed_allocation_limit) {
+        return "Cannot encode SPZ: point count overflows an upstream signed allocation";
+    }
+    // The canonical decoder rejects larger clouds, even when an individual
+    // encoder-side allocation expression would still fit in int32.
+    constexpr size_t kMaxSpzPoints = 10'000'000;
+    if (cloud.size() > kMaxSpzPoints) {
+        return "Cannot encode SPZ: cloud exceeds the 10-million-point format limit";
+    }
+
+    const CloudInspection inspection = inspectCloud(cloud);
+    if (!inspection.valid) {
+        const auto issue = std::find_if(
+            inspection.issues.begin(), inspection.issues.end(),
+            [](const InspectionIssue& candidate) {
+                return candidate.severity == InspectionSeverity::Error;
+            });
+        std::string message = "Cannot encode invalid cloud";
+        if (issue != inspection.issues.end()) {
+            message += " [" + issue->code + "]: " + issue->message;
+            if (issue->has_index) {
+                message += " First splat: " + std::to_string(issue->first_index) + ".";
+            }
+        }
+        return message;
+    }
+
+    // SPZ stores positions as signed 24-bit fixed point with 12 fractional
+    // bits. Values outside this interval would either overflow the upstream
+    // float-to-int cast or silently wrap when only its low 24 bits are stored.
+    constexpr double kPositionScale = 4096.0;
+    constexpr double kMinFixedPosition = -8388608.0;
+    constexpr double kMaxFixedPosition = 8388607.0;
+    const float min_int_float = static_cast<float>(std::numeric_limits<int32_t>::min());
+    const float max_int_float = static_cast<float>(std::numeric_limits<int32_t>::max());
+    for (size_t index = 0; index < cloud.size(); ++index) {
+        const GaussianSplat& splat = cloud[index];
+        for (const float position : {splat.x, splat.y, splat.z}) {
+            const double fixed = std::round(static_cast<double>(position) * kPositionScale);
+            if (fixed < kMinFixedPosition || fixed > kMaxFixedPosition) {
+                return "Cannot encode SPZ: position at splat " + std::to_string(index) +
+                       " exceeds the signed 24-bit fixed-point range";
+            }
+        }
+        for (const float coefficient : splat.sh_rest) {
+            // Mirror the upstream float expression, but test its range before
+            // the cast. float(INT32_MAX) rounds to 2^31, so that upper bound is
+            // exclusive; INT32_MIN is exactly representable.
+            const float quantized = std::round(coefficient * 128.0f) + 128.0f;
+            if (!std::isfinite(quantized) || quantized < min_int_float ||
+                quantized >= max_int_float) {
+                return "Cannot encode SPZ: SH coefficient at splat " +
+                       std::to_string(index) + " exceeds the safe quantization range";
+            }
+        }
+    }
+    return {};
+}
 
 static spz::GaussianCloud toSpzCloud(const GaussianCloud& cloud, int sh_degree) {
     spz::GaussianCloud spz_cloud;
@@ -59,10 +150,18 @@ static spz::GaussianCloud toSpzCloud(const GaussianCloud& cloud, int sh_degree) 
         // and UnpackedGaussian.rotation = {x, y, z, w}; packQuaternionSmallestThree
         // only ever flips the x/y/z components, never w). Melkor stores rotations
         // as (rot_0=w, rot_1=x, rot_2=y, rot_3=z), so we must reorder here.
-        spz_cloud.rotations.push_back(splat.rot_1);  // x
-        spz_cloud.rotations.push_back(splat.rot_2);  // y
-        spz_cloud.rotations.push_back(splat.rot_3);  // z
-        spz_cloud.rotations.push_back(splat.rot_0);  // w
+        float w = splat.rot_0;
+        float x = splat.rot_1;
+        float y = splat.rot_2;
+        float z = splat.rot_3;
+        // The upstream normalizer squares float components directly and can
+        // overflow for a finite, non-unit quaternion. Melkor's implementation
+        // scales by the largest component first, so normalize safely here.
+        utils::normalizeQuaternion(w, x, y, z);
+        spz_cloud.rotations.push_back(x);
+        spz_cloud.rotations.push_back(y);
+        spz_cloud.rotations.push_back(z);
+        spz_cloud.rotations.push_back(w);
         
         // Alpha (logit space)
         spz_cloud.alphas.push_back(splat.opacity);
@@ -78,12 +177,12 @@ static spz::GaussianCloud toSpzCloud(const GaussianCloud& cloud, int sh_degree) 
         // ... — see splat-types.h). Transpose while copying so external SPZ
         // consumers read each coefficient in the channel it came from.
         const int num_coeffs = sh_rest_count / 3;
+        const int source_num_coeffs =
+            static_cast<int>(shRestCountForDegree(cloud.shDegree()) / 3);
         for (int j = 0; j < num_coeffs; ++j) {
             for (int ch = 0; ch < 3; ++ch) {
-                const int src = ch * num_coeffs + j;
-                spz_cloud.sh.push_back(
-                    (src < static_cast<int>(splat.sh_rest.size()))
-                        ? splat.sh_rest[src] : 0.0f);
+                const int src = ch * source_num_coeffs + j;
+                spz_cloud.sh.push_back(splat.sh_rest[static_cast<size_t>(src)]);
             }
         }
     }
@@ -91,27 +190,32 @@ static spz::GaussianCloud toSpzCloud(const GaussianCloud& cloud, int sh_degree) 
     return spz_cloud;
 }
 
+static std::string validateSpzCloudLayout(const spz::GaussianCloud& cloud) {
+    if (cloud.numPoints < 0) return "SPZ declares a negative point count";
+    if (cloud.shDegree < 0 || cloud.shDegree > 3) return "SPZ declares an unsupported SH degree";
+    const size_t count = static_cast<size_t>(cloud.numPoints);
+    const auto shorterThan = [&](size_t actual, size_t components) {
+        return components != 0 &&
+            (count > std::numeric_limits<size_t>::max() / components ||
+             actual < count * components);
+    };
+    if (shorterThan(cloud.positions.size(), 3) || shorterThan(cloud.scales.size(), 3) ||
+        shorterThan(cloud.rotations.size(), 4) || cloud.alphas.size() < count ||
+        shorterThan(cloud.colors.size(), 3) ||
+        shorterThan(cloud.sh.size(), shRestCountForDegree(cloud.shDegree))) {
+        return "SPZ decoded arrays are shorter than the declared point count";
+    }
+    return {};
+}
+
 static GaussianCloud fromSpzCloud(const spz::GaussianCloud& spz_cloud) {
     GaussianCloud cloud;
     cloud.setShDegree(spz_cloud.shDegree);
     cloud.reserve(spz_cloud.numPoints);
     
-    // Validate array sizes against numPoints to prevent OOB reads on
-    // malformed SPZ files.
-    size_t np = static_cast<size_t>(spz_cloud.numPoints);
-    if (spz_cloud.positions.size() < np * 3 ||
-        spz_cloud.scales.size() < np * 3 ||
-        spz_cloud.rotations.size() < np * 4 ||
-        spz_cloud.alphas.size() < np ||
-        spz_cloud.colors.size() < np * 3) {
-        // Truncated SPZ: only iterate over the points we actually have data for.
-        np = std::min({np,
-                       spz_cloud.positions.size() / 3,
-                       spz_cloud.scales.size() / 3,
-                       spz_cloud.rotations.size() / 4,
-                       spz_cloud.alphas.size(),
-                       spz_cloud.colors.size() / 3});
-    }
+    // Layout is validated before this conversion. Never silently truncate a
+    // declared cloud: that would make a damaged SPZ appear valid.
+    const size_t np = static_cast<size_t>(spz_cloud.numPoints);
     
     for (size_t i = 0; i < np; ++i) {
         GaussianSplat splat;
@@ -181,33 +285,43 @@ SpzEncoder::~SpzEncoder() = default;
 SpzEncodeResult SpzEncoder::encodeToFile(const std::string& filepath,
                                           const GaussianCloud& cloud,
                                           const SpzEncodeConfig& config) {
+    std::vector<uint8_t> buffer;
+    SpzEncodeResult encoded = encodeToBuffer(buffer, cloud, config);
+    if (!encoded.success) return encoded;
+
     SpzEncodeResult result;
-    
-    if (cloud.empty()) {
-        result.error_message = "Cannot encode empty cloud";
-        return result;
-    }
-    
-    // Convert to SPZ cloud
-    spz::GaussianCloud spz_cloud = toSpzCloud(cloud, config.sh_degree);
-    
-    // Set up pack options
-    spz::PackOptions options;
-    options.from = spz::CoordinateSystem::RDF;  // PLY coordinate system
-    
-    // Save to file
-    if (spz::saveSpz(spz_cloud, options, filepath)) {
-        result.success = true;
-        
-        // Get file size
-        std::ifstream file(filepath, std::ios::binary | std::ios::ate);
-        if (file.is_open()) {
-            result.bytes_written = static_cast<size_t>(file.tellg());
+    bool output_opened = false;
+    try {
+        // Encode fully before opening the destination. Validation/allocation
+        // failures therefore preserve an existing file; an I/O failure after
+        // truncation removes the partial replacement below.
+        std::ofstream file(filepath, std::ios::binary | std::ios::trunc);
+        if (!file.is_open()) {
+            result.error_message = "Failed to open SPZ file for writing";
+            return result;
         }
-    } else {
-        result.error_message = "Failed to save SPZ file";
+        output_opened = true;
+        file.write(reinterpret_cast<const char*>(buffer.data()),
+                   static_cast<std::streamsize>(buffer.size()));
+        file.close();
+        if (!file.good()) {
+            std::remove(filepath.c_str());
+            result.error_message = "Failed to write complete SPZ file";
+            return result;
+        }
+        result.success = true;
+        result.bytes_written = buffer.size();
+    } catch (const std::bad_alloc&) {
+        if (output_opened) std::remove(filepath.c_str());
+        result.error_message = "SPZ file output exceeded available memory";
+    } catch (const std::length_error&) {
+        if (output_opened) std::remove(filepath.c_str());
+        result.error_message = "SPZ file output exceeded a container size limit";
+    } catch (const std::exception& error) {
+        if (output_opened) std::remove(filepath.c_str());
+        result.error_message = std::string("Failed to write SPZ: ") + error.what();
     }
-    
+
     return result;
 }
 
@@ -215,27 +329,41 @@ SpzEncodeResult SpzEncoder::encodeToBuffer(std::vector<uint8_t>& buffer,
                                             const GaussianCloud& cloud,
                                             const SpzEncodeConfig& config) {
     SpzEncodeResult result;
-    
-    if (cloud.empty()) {
-        result.error_message = "Cannot encode empty cloud";
+    buffer.clear();
+
+    if (const std::string validation_error = validateEncodeInput(cloud, config);
+        !validation_error.empty()) {
+        result.error_message = validation_error;
         return result;
     }
-    
-    // Convert to SPZ cloud
-    spz::GaussianCloud spz_cloud = toSpzCloud(cloud, config.sh_degree);
-    
-    // Set up pack options
-    spz::PackOptions options;
-    options.from = spz::CoordinateSystem::RDF;  // PLY coordinate system
-    
-    // Save to buffer
-    if (spz::saveSpz(spz_cloud, options, &buffer)) {
-        result.success = true;
-        result.bytes_written = buffer.size();
-    } else {
-        result.error_message = "Failed to encode SPZ data";
+
+    try {
+        // Convert to SPZ cloud
+        spz::GaussianCloud spz_cloud = toSpzCloud(cloud, config.sh_degree);
+
+        // Set up pack options
+        spz::PackOptions options;
+        options.from = spz::CoordinateSystem::RDF;  // PLY coordinate system
+
+        // Save to buffer
+        if (spz::saveSpz(spz_cloud, options, &buffer)) {
+            result.success = true;
+            result.bytes_written = buffer.size();
+        } else {
+            buffer.clear();
+            result.error_message = "Failed to encode SPZ data";
+        }
+    } catch (const std::bad_alloc&) {
+        buffer.clear();
+        result.error_message = "SPZ encoding exceeded available memory";
+    } catch (const std::length_error&) {
+        buffer.clear();
+        result.error_message = "SPZ encoding exceeded a container size limit";
+    } catch (const std::exception& error) {
+        buffer.clear();
+        result.error_message = std::string("Failed to encode SPZ: ") + error.what();
     }
-    
+
     return result;
 }
 
@@ -248,30 +376,45 @@ SpzDecoder::~SpzDecoder() = default;
 
 SpzDecoder::DecodeResult SpzDecoder::decodeFromFile(const std::string& filepath) {
     DecodeResult result;
-    
-    // Set up unpack options
-    spz::UnpackOptions options;
-    options.to = spz::CoordinateSystem::RDF;  // PLY coordinate system
-    
-    try {
-        spz::GaussianCloud spz_cloud = spz::loadSpz(filepath, options);
-        
-        if (spz_cloud.numPoints == 0) {
-            result.error_message = "SPZ file contains no points";
-            return result;
-        }
-        
-        result.cloud = fromSpzCloud(spz_cloud);
-        result.success = true;
-    } catch (const std::exception& e) {
-        result.error_message = std::string("Failed to load SPZ: ") + e.what();
+    std::ifstream stream(filepath, std::ios::binary | std::ios::ate);
+    if (!stream) {
+        result.error_message = "Failed to open SPZ file";
+        return result;
     }
-    
-    return result;
+    const std::streamoff end = stream.tellg();
+    if (end <= 0 || static_cast<uintmax_t>(end) >
+                        static_cast<uintmax_t>(std::numeric_limits<int32_t>::max())) {
+        result.error_message = "SPZ file is empty or exceeds the 2 GiB decoder limit";
+        return result;
+    }
+    std::vector<uint8_t> data;
+    try {
+        data.resize(static_cast<size_t>(end));
+    } catch (const std::bad_alloc&) {
+        result.error_message = "SPZ file exceeds available memory";
+        return result;
+    }
+    stream.seekg(0, std::ios::beg);
+    if (!stream.read(reinterpret_cast<char*>(data.data()), end)) {
+        result.error_message = "Failed to read complete SPZ file";
+        return result;
+    }
+    return decodeFromBuffer(data.data(), data.size());
 }
 
 SpzDecoder::DecodeResult SpzDecoder::decodeFromBuffer(const uint8_t* data, size_t size) {
     DecodeResult result;
+    if (data == nullptr || size == 0 ||
+        size > static_cast<size_t>(std::numeric_limits<int32_t>::max())) {
+        result.error_message = "SPZ input buffer is null, empty, or exceeds the 2 GiB decoder limit";
+        return result;
+    }
+    const int32_t version = spz::getSpzVersion(data, static_cast<int32_t>(size));
+    if (version != 0 && (version < 1 || version > 3)) {
+        result.error_message = "Unsupported SPZ version v" + std::to_string(version) +
+                               "; this build supports SPZ v1-v3";
+        return result;
+    }
     
     // Set up unpack options
     spz::UnpackOptions options;
@@ -284,8 +427,18 @@ SpzDecoder::DecodeResult SpzDecoder::decodeFromBuffer(const uint8_t* data, size_
             result.error_message = "SPZ data contains no points";
             return result;
         }
+
+        result.metadata.declared_points = static_cast<size_t>(spz_cloud.numPoints);
+        result.metadata.sh_degree = spz_cloud.shDegree;
+        result.metadata.antialiased = spz_cloud.antialiased;
+        if (const std::string layout_error = validateSpzCloudLayout(spz_cloud);
+            !layout_error.empty()) {
+            result.error_message = layout_error;
+            return result;
+        }
         
         result.cloud = fromSpzCloud(spz_cloud);
+        result.metadata.decoded_points = result.cloud.size();
         result.success = true;
     } catch (const std::exception& e) {
         result.error_message = std::string("Failed to decode SPZ: ") + e.what();

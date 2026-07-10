@@ -125,17 +125,70 @@ int main() {
     DifferentiableRenderer rdr(ctx);
 
     const int W = 16, H = 16;
-    const float eps = 1e-3f;
-    // 10% relative tolerance for individual checks. This catches sign-flips
-    // and order-of-magnitude errors while allowing for float32 noise.
-    // A few checks may fail due to non-differentiable boundaries (alpha
-    // threshold, pixel coverage edges, FOV clamp), so the test passes if
-    // ≥95% of checks are within tolerance.
+
+    // Non-black background reference: foreground is identical between the
+    // two renders, so white-minus-black must equal final transmittance. This
+    // catches the former `background + foreground` over-brightening bug.
+    {
+        auto cam = make_camera(W, H, 3.0f, 0.0f, 0.0f);
+        PackedGaussian g{};
+        g.position[3] = 2.0f;
+        g.color[0] = utils::rgbToShDc(0.8f);
+        g.color[1] = utils::rgbToShDc(0.3f);
+        g.color[2] = utils::rgbToShDc(0.1f);
+        g.scale[0] = g.scale[1] = g.scale[2] = -1.5f;
+        g.rotation[0] = 1.0f;
+        float black[3] = {0, 0, 0};
+        float white[3] = {1, 1, 1};
+        auto on_black = rdr.forward({g}, cam, black);
+        auto on_white = rdr.forward({g}, cam, white);
+        float max_error = 0.0f;
+        for (size_t pixel = 0; pixel < on_black.alpha.size(); ++pixel) {
+            for (int channel = 0; channel < 3; ++channel) {
+                const float difference = on_white.image[pixel * 3 + channel] -
+                                         on_black.image[pixel * 3 + channel];
+                max_error = std::max(max_error,
+                    std::abs(difference - (1.0f - on_black.alpha[pixel])));
+            }
+        }
+        if (max_error > 1e-5f) {
+            printf("  BACKGROUND COMPOSITING FAILED: max error %.7f\n", max_error);
+            return 1;
+        }
+        printf("  background transmittance reference: PASS\n");
+
+        // Input order must not affect the image: centers are depth-sorted
+        // front-to-back before alpha compositing.
+        PackedGaussian near_g = g, far_g = g;
+        near_g.position[2] = 0.2f;
+        far_g.position[2] = -0.2f;
+        near_g.color[0] = utils::rgbToShDc(1.0f);
+        near_g.color[2] = utils::rgbToShDc(0.0f);
+        far_g.color[0] = utils::rgbToShDc(0.0f);
+        far_g.color[2] = utils::rgbToShDc(1.0f);
+        auto first = rdr.forward({near_g, far_g}, cam, black);
+        auto reversed = rdr.forward({far_g, near_g}, cam, black);
+        float order_error = 0.0f;
+        for (size_t i = 0; i < first.image.size(); ++i) {
+            order_error = std::max(order_error, std::abs(first.image[i] - reversed.image[i]));
+        }
+        if (order_error > 1e-5f) {
+            printf("  DEPTH ORDER FAILED: max error %.7f\n", order_error);
+            return 1;
+        }
+        printf("  depth-sorted compositing reference: PASS\n");
+    }
+
+    const float eps = 2e-3f;
+    // 10% relative tolerance for stable finite-difference checks. Parameters
+    // that cross a discrete coverage/alpha-threshold boundary are identified
+    // by comparing two epsilon scales and reported as non-differentiable,
+    // rather than allowing an arbitrary percentage of wrong gradients.
     const float rel_tol = 0.10f;
-    const float pass_rate = 0.95f;
 
     int total_failures = 0;
     int total_checks = 0;
+    int total_nondifferentiable = 0;
 
     // Run 5 random scenes with 2-3 Gaussians each.
     for (int scene = 0; scene < 5; ++scene) {
@@ -166,9 +219,24 @@ int main() {
             float lp = render_loss_and_grad(rdr, gp, cam, target, nullptr);
             float lm = render_loss_and_grad(rdr, gm, cam, target, nullptr);
             float fd = (lp - lm) / (2 * eps);
+
+            auto gp_half = gs, gm_half = gs;
+            perturb(gp_half, +eps * 0.5f);
+            perturb(gm_half, -eps * 0.5f);
+            const float lp_half = render_loss_and_grad(rdr, gp_half, cam, target, nullptr);
+            const float lm_half = render_loss_and_grad(rdr, gm_half, cam, target, nullptr);
+            const float fd_half = (lp_half - lm_half) / eps;
+            const float stability_denom = std::max({1e-5f, std::abs(fd), std::abs(fd_half)});
+            if (std::abs(fd - fd_half) / stability_denom > 0.15f) {
+                printf("  [scene %d] %s[g=%d,c=%d] non-differentiable boundary "
+                       "fd=%+.6f fd_half=%+.6f SKIP\n",
+                       scene, name, gid, channel, fd, fd_half);
+                ++total_nondifferentiable;
+                return;
+            }
             float denom = std::max({1e-6f, std::abs(fd), std::abs(analytic_val)});
             float rel = std::abs(fd - analytic_val) / denom;
-            bool ok = rel < rel_tol || (std::abs(fd) < 1e-4f && std::abs(analytic_val) < 1e-4f);
+            bool ok = rel <= rel_tol || std::abs(fd - analytic_val) < 2e-5f;
             if (!ok) {
                 printf("  [scene %d] %s[g=%d,c=%d] analytic=%+.6f fd=%+.6f rel=%.4f MISMATCH\n",
                        scene, name, gid, channel, analytic_val, fd, rel);
@@ -217,9 +285,10 @@ int main() {
         total_failures += scene_failures;
     }
 
-    printf("\n  %d/%d checks passed, %d failures\n",
-           total_checks - total_failures, total_checks, total_failures);
-    bool pass = static_cast<float>(total_checks - total_failures) >= pass_rate * total_checks;
+    printf("\n  %d/%d stable checks passed, %d failures, %d boundary skips\n",
+           total_checks - total_failures, total_checks, total_failures,
+           total_nondifferentiable);
+    bool pass = total_checks > 0 && total_failures == 0;
     printf(pass ? "  GRADIENT CHECK PASSED\n" : "  GRADIENT CHECK FAILED\n");
     return pass ? 0 : 1;
 }

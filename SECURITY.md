@@ -28,10 +28,12 @@ treated as security bugs, not ordinary crashes:
 - The viewer's static file server escaping its root directory
 - Model-weight downloads accepting spoofed or tampered payloads
 
-Out of scope: vulnerabilities exclusively in vendored third-party trees
-(`third_party/`, `tools/OpenSplat/`, `ml-sharp/`, `DA3coreml/`) — report
-those upstream — and denial-of-service via absurdly large but well-formed
-inputs.
+Vulnerabilities in third-party or vendored code are in scope when Melkor's
+supported CLI, viewer, installer, or runtime exposes them. Issues that affect
+only an unintegrated research snapshot should also be reported upstream, but
+we still welcome a private report so the snapshot can be quarantined or
+updated. Denial-of-service via absurdly large but otherwise well-formed input
+remains out of scope.
 
 ## Hardening notes for integrators
 

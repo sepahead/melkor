@@ -82,7 +82,8 @@ struct GaussianFitResult {
     float fitting_time_seconds = 0.0f;
 };
 
-// Render-based Gaussian fitter using differentiable rendering
+// Experimental differentiable-renderer surface. Fitting entry points fail
+// closed until an optimizer and triangle target renderer are implemented.
 class GaussianFitter {
 public:
     GaussianFitter();

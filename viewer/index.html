@@ -2,12 +2,22 @@
 <html lang="en">
 <head>
 <meta charset="utf-8" />
-<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
 <title>Melkor · SparkJS Gaussian Splat Viewer</title>
 <style>
-  :root { color-scheme: dark; }
+  :root {
+    color-scheme: dark;
+    --viewer-bg: #0b0c10;
+    --viewer-panel: rgba(18,22,28,.78);
+    --viewer-panel-strong: rgba(16,19,25,.95);
+    --viewer-text: #e6e6e6;
+    --viewer-text-muted: #aab4c3;
+    --viewer-accent: #7fd1ff;
+    --viewer-error: #ff8585;
+    --viewer-border: rgba(255,255,255,.12);
+  }
   * { box-sizing: border-box; }
-  html, body { margin: 0; height: 100%; overflow: hidden; background: #0b0c10; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; color: #e6e6e6; }
+  html, body { margin: 0; height: 100%; overflow: hidden; background: var(--viewer-bg); font-family: ui-monospace, SFMono-Regular, Menlo, monospace; color: var(--viewer-text); }
   #app { position: fixed; inset: 0; }
   canvas { display: block; width: 100%; height: 100%; }
 
@@ -15,25 +25,35 @@
   #hud { position: fixed; top: 12px; left: 12px; z-index: 10; background: rgba(12,14,18,.72);
          border: 1px solid rgba(255,255,255,.10); border-radius: 10px; padding: 10px 12px;
          font-size: 12px; line-height: 1.55; backdrop-filter: blur(8px); max-width: 320px; pointer-events: none; }
-  #hud b { color: #7fd1ff; font-weight: 600; }
+  #hud b { color: var(--viewer-accent); font-weight: 600; }
   #hud .row { white-space: pre; }
-  #hud .dim { color: #8a93a3; }
+  #h-scene { max-width: 296px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  #hud .dim { color: var(--viewer-text-muted); }
+  #hud .num { font-variant-numeric: tabular-nums; }
 
   /* ---- Scene switcher ---- */
   #scenes { position: fixed; top: 12px; right: 12px; z-index: 10; display: flex; flex-direction: column; gap: 6px; }
-  #scenes button { font: inherit; font-size: 12px; text-align: left; cursor: pointer;
-        background: rgba(18,22,28,.78); color: #cfd6e0; border: 1px solid rgba(255,255,255,.10);
-        border-radius: 8px; padding: 7px 10px; min-width: 188px; transition: background .12s, border-color .12s; }
-  #scenes button:hover { background: rgba(36,44,56,.9); }
-  #scenes button.active { border-color: #7fd1ff; color: #fff; background: rgba(20,40,56,.9); }
-  #scenes button .meta { display: block; font-size: 10px; color: #8a93a3; margin-top: 2px; }
+  #scenes button, #localOpen { font: inherit; font-size: 12px; text-align: left; cursor: pointer;
+        background: var(--viewer-panel); color: #cfd6e0; border: 1px solid rgba(255,255,255,.10);
+        border-radius: 8px; padding: 7px 10px; width: 252px; min-height: 40px; transition: background .12s, border-color .12s; }
+  #scenes button:hover, #localOpen:hover { background: rgba(36,44,56,.9); }
+  #scenes button.active { border-color: var(--viewer-accent); color: #fff; background: rgba(20,40,56,.9); }
+  #scenes .scene-title { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  #scenes .meta { display: block; overflow: hidden; color: var(--viewer-text-muted); font-size: 10px;
+        margin-top: 2px; text-overflow: ellipsis; white-space: nowrap; }
+  #localOpen { display: block; border-color: rgba(127,209,255,.42); border-style: dashed; }
+  #localOpen .scene-title { color: var(--viewer-accent); font-weight: 650; }
+  #localOpen:has(input:focus-visible) { outline: 2px solid var(--viewer-accent); outline-offset: 2px; }
+  .visually-hidden { position: absolute !important; width: 1px !important; height: 1px !important;
+        padding: 0 !important; margin: -1px !important; overflow: hidden !important;
+        clip: rect(0,0,0,0) !important; white-space: nowrap !important; border: 0 !important; }
 
   /* ---- Controls bar ---- */
   #bar { position: fixed; bottom: 12px; left: 50%; transform: translateX(-50%); z-index: 10;
          display: flex; gap: 6px; align-items: center; background: rgba(12,14,18,.72);
          border: 1px solid rgba(255,255,255,.10); border-radius: 10px; padding: 7px 9px; backdrop-filter: blur(8px); }
   #bar button { font: inherit; font-size: 12px; cursor: pointer; background: rgba(28,34,44,.9); color: #cfd6e0;
-         border: 1px solid rgba(255,255,255,.12); border-radius: 7px; padding: 6px 10px; }
+         border: 1px solid rgba(255,255,255,.12); border-radius: 7px; padding: 6px 10px; min-height: 40px; }
   #bar button:hover { background: rgba(44,54,68,.95); }
   #bar .sep { width: 1px; height: 18px; background: rgba(255,255,255,.14); margin: 0 3px; }
   #bar .hint { font-size: 11px; color: #8a93a3; padding: 0 4px; }
@@ -43,7 +63,7 @@
         display: flex; align-items: center; gap: 10px; padding: 8px 12px; border-radius: 10px;
         background: rgba(20,24,32,.92); border: 1px solid rgba(255,255,255,.12); }
   #tl[hidden] { display: none; }
-  #tl button { font: inherit; font-size: 13px; width: 32px; cursor: pointer; color: #cfd6e0;
+  #tl button { font: inherit; font-size: 13px; width: 40px; height: 40px; cursor: pointer; color: #cfd6e0;
         background: rgba(28,34,44,.9); border: 1px solid rgba(255,255,255,.14); border-radius: 6px; padding: 4px 0; }
   #tl input[type=range] { width: 240px; accent-color: #6aa6ff; }
   #tl #tlLabel { font-size: 11px; min-width: 56px; text-align: right; }
@@ -56,13 +76,42 @@
      stream in, leaving only the floating progress card. */
   #overlay.streaming { background: transparent; backdrop-filter: none; align-items: flex-end; justify-content: center; }
   #overlay.streaming .card { margin-bottom: 40px; }
-  #overlay .card { background: rgba(16,19,25,.95); border: 1px solid rgba(255,255,255,.12); border-radius: 12px;
+  #overlay .card { background: var(--viewer-panel-strong); border: 1px solid var(--viewer-border); border-radius: 12px;
         padding: 18px 22px; min-width: 260px; text-align: center; }
-  #overlay .title { font-size: 13px; margin-bottom: 10px; color: #e6e6e6; }
-  #overlay .err { color: #ff8585; }
+  #overlay .title { font-size: 13px; margin-bottom: 10px; color: var(--viewer-text); white-space: pre-line; }
+  #overlay .err { color: var(--viewer-error); }
   #track { height: 6px; width: 220px; background: rgba(255,255,255,.10); border-radius: 4px; overflow: hidden; margin: 0 auto; }
   #fill { height: 100%; width: 0%; background: linear-gradient(90deg,#3da9fc,#7fd1ff); transition: width .15s; }
   #pct { font-size: 11px; color: #8a93a3; margin-top: 7px; }
+  #overlay-actions { display: flex; justify-content: center; gap: 8px; margin-top: 14px; }
+  #overlay-actions:has(button:not([hidden])) { display: flex; }
+  #overlay-actions button { min-width: 96px; min-height: 40px; cursor: pointer;
+        color: var(--viewer-text); background: rgba(44,54,68,.95); border: 1px solid rgba(255,255,255,.18); border-radius: 7px; }
+  #overlay-actions button[hidden], #overlay-actions:not(:has(button:not([hidden]))) { display: none; }
+
+  /* ---- Local-file drag target ---- */
+  #dropTarget { position: fixed; inset: 12px; z-index: 30; display: grid; place-items: center;
+        border: 2px dashed var(--viewer-accent); border-radius: 14px; pointer-events: none;
+        background: rgba(11,12,16,.78); backdrop-filter: blur(5px); }
+  #dropTarget[hidden] { display: none; }
+  #dropTarget .card { max-width: min(460px, calc(100vw - 48px)); padding: 24px; text-align: center;
+        border: 1px solid var(--viewer-border); border-radius: 12px; background: var(--viewer-panel-strong); }
+  #dropTarget strong { display: block; margin-bottom: 6px; color: var(--viewer-accent); font-size: 16px; }
+  #dropTarget span { color: var(--viewer-text-muted); font-size: 12px; line-height: 1.55; }
+
+  button:focus-visible, input:focus-visible { outline: 2px solid var(--viewer-accent); outline-offset: 2px; }
+  @media (prefers-reduced-motion: reduce) {
+    *, *::before, *::after { scroll-behavior: auto !important; transition-duration: .01ms !important; }
+  }
+  @media (max-width: 700px) {
+    #hud { top: 8px; left: 8px; max-width: calc(100vw - 16px); }
+    #scenes { top: 176px; left: 8px; right: 8px; flex-direction: row; overflow-x: auto; padding-bottom: 4px; }
+    #scenes button, #localOpen { width: 176px; min-width: 176px; }
+    #bar { left: 8px; right: 8px; bottom: 8px; transform: none; flex-wrap: wrap; justify-content: center; }
+    #bar .hint, #bar .sep { display: none; }
+    #tl { left: 8px; right: 8px; bottom: 100px; transform: none; }
+    #tl input[type=range] { width: auto; min-width: 100px; flex: 1; }
+  }
 </style>
 </head>
 <body>
@@ -72,13 +121,21 @@
   <div class="row"><b>Melkor · SparkJS viewer</b></div>
   <div class="row" id="h-scene">scene: <span class="dim">—</span></div>
   <div class="row" id="h-fmt">format: <span class="dim">—</span></div>
+  <div class="row" id="h-source">source: <span class="dim">—</span></div>
   <div class="row" id="h-splats">splats: <span class="dim">—</span></div>
   <div class="row" id="h-fps">fps: <span class="dim">—</span></div>
   <div class="row" id="h-cam">cam: <span class="dim">—</span></div>
   <div class="row" id="h-mode">mode: <span class="dim">—</span></div>
 </div>
 
-<div id="scenes"></div>
+<div id="scenes" role="group" aria-label="Scene source">
+  <label id="localOpen" for="localFileInput">
+    <span class="scene-title">Open local splat</span>
+    <span class="meta">PLY · SPZ · SPLAT · KSPLAT · SOG/ZIP · stays on device</span>
+    <input id="localFileInput" class="visually-hidden" type="file"
+      accept=".ply,.spz,.splat,.ksplat,.sog,.zip" />
+  </label>
+</div>
 
 <div id="bar">
   <button data-cam="front">Front</button>
@@ -93,16 +150,27 @@
 </div>
 
 <div id="tl" hidden>
-  <button id="tlPlay">▶︎</button>
-  <input id="tlSlider" type="range" min="0" max="0" value="0" step="1" />
+  <button id="tlPlay" type="button" aria-label="Play 4D sequence">▶︎</button>
+  <input id="tlSlider" type="range" min="0" max="0" value="0" step="1" aria-label="4D sequence frame" />
   <span id="tlLabel" class="dim">0 / 0</span>
 </div>
 
-<div id="overlay"><div class="card">
+<div id="overlay" role="status" aria-live="polite"><div class="card">
   <div class="title" id="ov-title">Loading…</div>
   <div id="track"><div id="fill"></div></div>
   <div id="pct">0%</div>
+  <div id="overlay-actions">
+    <button id="ov-retry" type="button" hidden>Retry</button>
+    <button id="ov-dismiss" type="button" hidden>Dismiss</button>
+  </div>
 </div></div>
+
+<div id="dropTarget" role="status" aria-live="polite" hidden>
+  <div class="card">
+    <strong>Drop one splat to open it</strong>
+    <span>PLY, SPZ, SPLAT, KSPLAT, SOG, or ZIP. The file is decoded locally and never uploaded.</span>
+  </div>
+</div>
 
 <script type="importmap">
 {
@@ -116,7 +184,7 @@
 
 <script type="module">
 import * as THREE from "three";
-import { SparkRenderer, SplatMesh, SparkControls } from "@sparkjsdev/spark";
+import { SparkRenderer, SplatFileType, SplatMesh, SparkControls } from "@sparkjsdev/spark";
 
 // ---------------------------------------------------------------------------
 // Scene catalogue: city / area gaussian splats downloaded into public/splats/
@@ -125,7 +193,7 @@ const SCENES = [
   { id: "snow-street",   label: "Snowy Street",   file: "snow-street.spz",   fmt: "SPZ",  note: "urban street · ~982K" },
   { id: "valley",        label: "Valley",         file: "valley.spz",        fmt: "SPZ",  note: "landscape · 500K" },
   { id: "sutro",         label: "Sutro Tower (SF)",file: "sutro.zip",        fmt: "SOG",  note: "cityscape · ~2.0M" },
-  { id: "train",         label: "Rail Yard",      file: "train.splat",       fmt: "SPLAT",note: "outdoor area · ~1.0M" },
+  { id: "wave-static",   label: "Wave Field",     file: "generated/wave.splat", fmt: "SPLAT", note: "project-owned demo · 4K" },
   { id: "distant-igloo", label: "Distant Igloo",  file: "distant-igloo.spz", fmt: "SPZ",  note: "outdoor area · 347K" },
   { id: "igloo-ply",     label: "Igloo · PLY (melkor)", file: "distant-igloo.ply", fmt: "PLY", note: "melkor SPZ→PLY · 347K" },
   // 4D temporal sequence (per-frame PLYs + manifest.json, the shape a 4D-GS
@@ -136,20 +204,54 @@ const SCENES = [
   { id: "wave-4d-spz",   label: "Wave · 4D (SPZ)", manifest: "4d/wave-spz/manifest.json", fmt: "4D-SPZ", temporal: true, optional: true, note: "SPZ-compressed · 24 frames" },
 ];
 const SPLAT_DIR = "./public/splats/";
+const MAX_LOCAL_FILE_BYTES = 2 * 1024 * 1024 * 1024;
+const LOCAL_FILE_TYPES = new Map([
+  ["ply",    { fmt: "PLY",    type: SplatFileType.PLY }],
+  ["spz",    { fmt: "SPZ",    type: SplatFileType.SPZ }],
+  ["splat",  { fmt: "SPLAT",  type: SplatFileType.SPLAT }],
+  ["ksplat", { fmt: "KSPLAT", type: SplatFileType.KSPLAT }],
+  ["sog",    { fmt: "SOG",    type: SplatFileType.PCSOGSZIP }],
+  ["zip",    { fmt: "SOG",    type: SplatFileType.PCSOGSZIP }],
+]);
+
+const countFormatter = new Intl.NumberFormat("en-US", { maximumFractionDigits: 0 });
+function formatCount(value) {
+  return Number.isFinite(value) && value >= 0 ? countFormatter.format(value) : "—";
+}
+function formatBytes(bytes) {
+  if (!Number.isFinite(bytes) || bytes < 0) return "—";
+  if (bytes === 0) return "0 B";
+  const units = ["B", "KiB", "MiB", "GiB"];
+  const index = Math.min(Math.floor(Math.log(bytes) / Math.log(1024)), units.length - 1);
+  const value = bytes / (1024 ** index);
+  const digits = value >= 100 || index === 0 ? 0 : value >= 10 ? 1 : 2;
+  return `${new Intl.NumberFormat("en-US", { maximumFractionDigits: digits }).format(value)} ${units[index]}`;
+}
+function localExtension(name) {
+  const dot = name.lastIndexOf(".");
+  return dot >= 0 ? name.slice(dot + 1).toLowerCase() : "";
+}
 
 // ---------------------------------------------------------------------------
 // Three.js + Spark setup
 // ---------------------------------------------------------------------------
 const appEl = document.getElementById("app");
+const reducedMotion = window.matchMedia("(prefers-reduced-motion: reduce)");
 const scene = new THREE.Scene();
 scene.background = new THREE.Color(0x0b0c10);
 
 const camera = new THREE.PerspectiveCamera(60, window.innerWidth / window.innerHeight, 0.05, 2000);
 camera.position.set(0, 0, 5);
 
-const renderer = new THREE.WebGLRenderer({ antialias: false, preserveDrawingBuffer: true });
+const renderer = new THREE.WebGLRenderer({
+  antialias: false,
+  // Test screenshots/readPixels need a retained buffer; production does not.
+  preserveDrawingBuffer: navigator.webdriver === true,
+});
 renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
 renderer.setSize(window.innerWidth, window.innerHeight);
+renderer.domElement.tabIndex = 0;
+renderer.domElement.setAttribute("aria-label", "Interactive Gaussian splat viewport");
 appEl.appendChild(renderer.domElement);
 
 const spark = new SparkRenderer({ renderer });
@@ -160,7 +262,7 @@ const controls = new SparkControls({ canvas: renderer.domElement });
 // Camera rig: we orbit / frame around `target`.
 const target = new THREE.Vector3(0, 0, 0);
 let orbitRadius = 5;
-let orbitEnabled = true;
+let orbitEnabled = !reducedMotion.matches;
 let orbitAzimuth = Math.PI * 0.25;   // radians
 let orbitElevation = Math.PI * 0.09; // radians (~16deg, low 3/4 aerial)
 const ORBIT_SPEED = 0.18;            // rad/sec
@@ -168,6 +270,8 @@ let manualControl = false;           // user grabbed the camera via SparkControl
 
 let currentMesh = null;
 let currentScene = null;
+let localSceneDef = null;             // one retained File handle; replaced on the next import
+let pendingLocalSceneDef = null;      // candidate retained only while its load is in flight
 let frameCountSinceLoad = 0;
 let loadGen = 0;                     // monotonic token: only the latest load mutates state
 
@@ -253,10 +357,56 @@ const overlay = document.getElementById("overlay");
 const ovTitle = document.getElementById("ov-title");
 const fill = document.getElementById("fill");
 const pct = document.getElementById("pct");
+const ovRetry = document.getElementById("ov-retry");
+const ovDismiss = document.getElementById("ov-dismiss");
+let overlayRetry = null;
+let overlayDismiss = null;
 
-function showOverlay(title) { ovTitle.textContent = title; ovTitle.className = "title"; fill.style.width = "0%"; pct.textContent = "0%"; overlay.classList.add("show"); }
-function showError(msg) { ovTitle.textContent = msg; ovTitle.className = "title err"; overlay.classList.remove("streaming"); overlay.classList.add("show"); }
-function hideOverlay() { overlay.classList.remove("show"); overlay.classList.remove("streaming"); }
+function clearOverlayActions() {
+  overlayRetry = null;
+  overlayDismiss = null;
+  ovRetry.hidden = true;
+  ovRetry.textContent = "Retry";
+  ovDismiss.hidden = true;
+}
+function showOverlay(title) {
+  clearOverlayActions();
+  overlay.setAttribute("role", "status");
+  appEl.setAttribute("aria-busy", "true");
+  ovTitle.textContent = title; ovTitle.className = "title";
+  fill.style.width = "0%"; pct.textContent = "0%"; overlay.classList.add("show");
+}
+function showError(msg, retry = null, retryLabel = "Retry", dismiss = null) {
+  overlay.setAttribute("role", "alert");
+  appEl.setAttribute("aria-busy", "false");
+  ovTitle.textContent = msg; ovTitle.className = "title err";
+  overlay.classList.remove("streaming"); overlay.classList.add("show");
+  overlayRetry = typeof retry === "function" ? retry : null;
+  overlayDismiss = typeof dismiss === "function" ? dismiss : null;
+  ovRetry.hidden = !overlayRetry;
+  ovRetry.textContent = retryLabel;
+  ovDismiss.hidden = !overlayDismiss;
+}
+function hideOverlay() {
+  clearOverlayActions();
+  appEl.setAttribute("aria-busy", "false");
+  overlay.classList.remove("show"); overlay.classList.remove("streaming");
+}
+ovRetry.addEventListener("click", () => {
+  const retry = overlayRetry;
+  retry?.();
+});
+function dismissOverlayError() {
+  const dismiss = overlayDismiss;
+  hideOverlay();
+  dismiss?.();
+}
+ovDismiss.addEventListener("click", dismissOverlayError);
+window.addEventListener("keydown", (event) => {
+  if (event.key === "Escape" && overlay.getAttribute("role") === "alert" && overlayDismiss) {
+    dismissOverlayError();
+  }
+});
 
 function splatCountOf(mesh) {
   try {
@@ -267,25 +417,33 @@ function splatCountOf(mesh) {
   } catch { return 0; }
 }
 
-async function loadScene(id) {
-  const def = SCENES.find((s) => s.id === id);
+async function loadScene(id, candidateDefinition = null) {
+  const def = candidateDefinition
+    ?? (localSceneDef?.id === id ? localSceneDef : SCENES.find((s) => s.id === id));
   if (!def) throw new Error("unknown scene: " + id);
+  if (!candidateDefinition) pendingLocalSceneDef = null;
   if (def.temporal) return load4DSequence(def);   // 4D sequence path
-  clear4d();                                       // leaving 4D mode
   const gen = ++loadGen;             // supersede any in-flight load (e.g. the boot auto-load)
   state.loading = true; state.error = null; state.rendered = false;
   frameCountSinceLoad = 0;
-  showOverlay(`Loading ${def.label}…`);
+  showOverlay(`${def.localFile ? "Opening" : "Loading"} ${def.label}…`);
 
   const mesh = new SplatMesh({
-    url: SPLAT_DIR + def.file,
+    ...(def.localFile ? {
+      stream: def.localFile.stream(),
+      streamLength: def.localFile.size,
+      fileName: def.localFile.name,
+      fileType: def.fileType,
+    } : {
+      url: SPLAT_DIR + def.file,
+    }),
     onProgress: (e) => {
       if (gen !== loadGen) return;    // ignore progress from a superseded load
       if (e && e.lengthComputable && e.total) {
         const p = Math.min(100, (e.loaded / e.total) * 100);
         fill.style.width = p.toFixed(1) + "%"; pct.textContent = p.toFixed(0) + "%";
       } else if (e && e.loaded) {
-        pct.textContent = (e.loaded / 1e6).toFixed(1) + " MB";
+        pct.textContent = formatBytes(e.loaded);
       }
     },
   });
@@ -308,7 +466,21 @@ async function loadScene(id) {
     try { mesh.dispose(); } catch {}
     if (gen !== loadGen) return null;
     state.loading = false; state.error = String(err);
-    showError("Failed to load " + def.label + "\n" + err);
+    console.error("Failed to open " + def.label + ":", err);
+    const canDismiss = Boolean(currentMesh && currentScene);
+    const localCandidateFailed = Boolean(def.localFile && pendingLocalSceneDef === def);
+    if (localCandidateFailed) pendingLocalSceneDef = null;
+    showError("Could not open " + def.label + ". The file may be damaged or use an unsupported layout.",
+      localCandidateFailed
+        ? () => localFileInput.click()
+        : () => loadScene(def.id).catch(console.error),
+      localCandidateFailed ? "Choose another file" : "Retry", canDismiss ? () => {
+        // The active scene was never replaced. Clear only the candidate-load
+        // error so automation and subsequent interactions see the recovered
+        // current scene as healthy.
+        state.error = null;
+        state.inputError = null;
+      } : null);
     throw err;
   }
 
@@ -321,17 +493,31 @@ async function loadScene(id) {
 
   // Swap the freshly-loaded mesh in for the previous one (no blank gap
   // mid-load). When progressive, the mesh is already in the scene.
+  // A 4D cache is cleared only after replacement initialization succeeds;
+  // damaged candidate files therefore cannot destroy the active sequence.
+  if (seq4d) clear4d();
   if (currentMesh) { scene.remove(currentMesh); try { currentMesh.dispose(); } catch {} }
   currentMesh = mesh; currentScene = def;
   if (!progressive) scene.add(mesh);
   frameCountSinceLoad = 0;           // count frames rendered AFTER the swap, not during download
   frameMesh(mesh);
-  orbitEnabled = true; manualControl = false; syncOrbitBtn();
+  orbitEnabled = !reducedMotion.matches; manualControl = false; syncOrbitBtn();
 
   state.loading = false;
   state.scene = def.id;
   state.format = def.fmt;
   state.splatCount = splatCountOf(mesh);
+  state.source = def.localFile ? "local" : "bundled";
+  state.fileBytes = def.localFile?.size ?? null;
+  state.inputError = null;
+  if (def.localFile && pendingLocalSceneDef === def) {
+    // Commit the catalog entry and retained File only after the candidate mesh
+    // has initialized. A damaged replacement can never evict the last good
+    // local file or leave the UI describing a mesh that is not displayed.
+    localSceneDef = def;
+    pendingLocalSceneDef = null;
+    buildSceneButtons();
+  }
   updateHud();
   updateSceneButtons();
   hideOverlay();
@@ -350,6 +536,7 @@ async function loadScene(id) {
 // visible), prefetches ahead as it plays, and evicts frames that fall outside
 // the window. Memory is therefore O(window), not O(sequence length).
 const BUF_AHEAD = 6, BUF_BEHIND = 2, EVICT_MARGIN = 2;
+const MAX_FRAME_RETRIES = 3, FRAME_RETRY_BASE_MS = 250;
 const tl = document.getElementById("tl");
 const tlPlay = document.getElementById("tlPlay");
 const tlSlider = document.getElementById("tlSlider");
@@ -357,11 +544,14 @@ const tlLabel = document.getElementById("tlLabel");
 let seq4d = null;             // { base, frames:[...], count }
 let cache4d = new Map();      // index -> ready SplatMesh (in scene, visible=false except active)
 let loading4d = new Map();    // index -> in-flight Promise<mesh|null> (shared by concurrent callers)
+let failed4d = new Map();     // index -> bounded retry state; prevents request storms on missing frames
 let active4d = 0;
 let playing4d = false;
 let fps4d = 12;
 let acc4d = 0;                // seconds accumulated toward the next frame
-const state4d = { active: 0, count: 0, playing: false, fps: 12, buffered: 0 };
+let seekGen4d = 0;            // only the latest asynchronous scrub may present a frame
+let windowCenter4d = 0;
+const state4d = { active: 0, count: 0, playing: false, fps: 12, buffered: 0, error: null };
 
 function clear4d() {
   playing4d = false;
@@ -371,8 +561,11 @@ function clear4d() {
   for (const m of cache4d.values()) { scene.remove(m); try { m.dispose(); } catch {} }
   cache4d = new Map();
   loading4d = new Map();
+  failed4d = new Map();
+  seekGen4d++;
   seq4d = null; active4d = 0;
-  state4d.active = 0; state4d.count = 0; state4d.playing = false; state4d.buffered = 0;
+  state4d.active = 0; state4d.count = 0; state4d.playing = false;
+  state4d.buffered = 0; state4d.error = null;
   if (disposingCurrent) currentMesh = null;
   tl.hidden = true;
 }
@@ -380,38 +573,81 @@ function clear4d() {
 // Load frame i (idempotent): concurrent callers share one in-flight promise,
 // so it is safe to prefetch a window and await a specific frame at once.
 function loadFrame4d(i, gen) {
-  if (!seq4d || i < 0 || i >= seq4d.count) return Promise.resolve(null);
-  if (cache4d.has(i)) return Promise.resolve(cache4d.get(i));
-  if (loading4d.has(i)) return loading4d.get(i);
-  const mesh = new SplatMesh({ url: seq4d.base + seq4d.frames[i] });
+  const sequence = seq4d;
+  const cache = cache4d;
+  const loading = loading4d;
+  const failures = failed4d;
+  if (!sequence || i < 0 || i >= sequence.count) return Promise.resolve(null);
+  if (cache.has(i)) return Promise.resolve(cache.get(i));
+  if (loading.has(i)) return loading.get(i);
+  const priorFailure = failures.get(i);
+  if (priorFailure?.terminal || (priorFailure && performance.now() < priorFailure.nextRetry)) {
+    return Promise.resolve(null);
+  }
+  const mesh = new SplatMesh({ url: sequence.base + sequence.frames[i] });
   mesh.quaternion.set(1, 0, 0, 0);
   mesh.visible = false;
   const p = mesh.initialized.then(() => {
-    loading4d.delete(i);
-    if (gen !== loadGen || !seq4d) { try { mesh.dispose(); } catch {} return null; }
+    loading.delete(i);
+    if (gen !== loadGen || seq4d !== sequence) { try { mesh.dispose(); } catch {} return null; }
+    const retained = frameWindow4d(
+      windowCenter4d,
+      BUF_BEHIND + EVICT_MARGIN,
+      BUF_AHEAD + EVICT_MARGIN,
+    );
+    if (!retained.has(i)) { try { mesh.dispose(); } catch {} return null; }
+    failures.delete(i);
     scene.add(mesh);
-    cache4d.set(i, mesh);
-    state4d.buffered = cache4d.size;
+    cache.set(i, mesh);
+    state4d.buffered = cache.size;
     return mesh;
   }).catch((err) => {
-    loading4d.delete(i);
+    loading.delete(i);
     try { mesh.dispose(); } catch {}
-    console.error("4D frame " + i + " failed:", err);
+    const attempts = (failures.get(i)?.attempts ?? 0) + 1;
+    const terminal = attempts >= MAX_FRAME_RETRIES;
+    failures.set(i, {
+      attempts,
+      terminal,
+      nextRetry: performance.now() + FRAME_RETRY_BASE_MS * (2 ** (attempts - 1)),
+      error: String(err),
+    });
+    console.error(`4D frame ${i} failed (attempt ${attempts}/${MAX_FRAME_RETRIES}):`, err);
     return null;
   });
-  loading4d.set(i, p);
+  loading.set(i, p);
   return p;
 }
 
-// Ensure the window around `center` is loading; evict frames outside it.
+function wrapFrame4d(i) {
+  if (!seq4d || seq4d.count < 1) return 0;
+  return ((i % seq4d.count) + seq4d.count) % seq4d.count;
+}
+
+function frameWindow4d(center, behind, ahead) {
+  const indices = new Set();
+  if (!seq4d) return indices;
+  for (let offset = -behind; offset <= ahead; offset++) {
+    indices.add(wrapFrame4d(center + offset));
+  }
+  return indices;
+}
+
+// Ensure the circular window around `center` is loading; evict frames outside
+// it. Circularity matters at the sequence boundary: frame 0 must be prefetched
+// while the final frame is active or playback stalls forever instead of looping.
 function ensureWindow4d(center, gen) {
   if (!seq4d) return;
-  const lo = Math.max(0, center - BUF_BEHIND);
-  const hi = Math.min(seq4d.count - 1, center + BUF_AHEAD);
-  for (let i = lo; i <= hi; i++) loadFrame4d(i, gen);
-  const evLo = lo - EVICT_MARGIN, evHi = hi + EVICT_MARGIN;
+  windowCenter4d = wrapFrame4d(center);
+  const wanted = frameWindow4d(center, BUF_BEHIND, BUF_AHEAD);
+  const retained = frameWindow4d(
+    center,
+    BUF_BEHIND + EVICT_MARGIN,
+    BUF_AHEAD + EVICT_MARGIN,
+  );
+  for (const i of wanted) loadFrame4d(i, gen);
   for (const [i, m] of [...cache4d]) {
-    if (i < evLo || i > evHi) {
+    if (!retained.has(i)) {
       if (m === currentMesh) continue;   // never evict the visible frame
       scene.remove(m); try { m.dispose(); } catch {}
       cache4d.delete(i);
@@ -434,63 +670,144 @@ function present4d(i) {
   return true;
 }
 
-function play4d() { if (seq4d && seq4d.count > 1) { playing4d = true; state4d.playing = true; tlPlay.textContent = "❚❚"; } }
-function pause4d() { playing4d = false; state4d.playing = false; tlPlay.textContent = "▶︎"; }
+function play4d() {
+  if (seq4d && seq4d.count > 1 && !state4d.error) {
+    playing4d = true; state4d.playing = true;
+    tlPlay.textContent = "❚❚"; tlPlay.setAttribute("aria-label", "Pause 4D sequence");
+  }
+}
+function pause4d() {
+  playing4d = false; state4d.playing = false;
+  tlPlay.textContent = "▶︎"; tlPlay.setAttribute("aria-label", "Play 4D sequence");
+}
+
+function reportFrameFailure4d(i) {
+  const failure = failed4d.get(i);
+  if (!failure?.terminal || state4d.error) return;
+  pause4d();
+  const message = `Failed to load 4D frame ${i + 1} after ${failure.attempts} attempts.`;
+  state4d.error = message;
+  state.error = message;
+  showError(message, async () => {
+    if (!seq4d) return;
+    failed4d.delete(i);
+    state4d.error = null; state.error = null;
+    hideOverlay();
+    await seek4dAsync(i);
+    if (cache4d.has(i)) play4d();
+  });
+}
 
 // Jump to a frame, awaiting its load if it isn't buffered yet (scrubbing).
 async function seek4dAsync(i) {
   if (!seq4d) return;
   const gen = loadGen;
+  const seek = ++seekGen4d;
   i = ((i % seq4d.count) + seq4d.count) % seq4d.count;
   ensureWindow4d(i, gen);
-  if (!cache4d.has(i)) await loadFrame4d(i, gen);
-  if (gen !== loadGen) return;
-  present4d(i);
+  while (!cache4d.has(i) && gen === loadGen && seek === seekGen4d) {
+    await loadFrame4d(i, gen);
+    if (cache4d.has(i)) break;
+    const failure = failed4d.get(i);
+    if (failure?.terminal) { reportFrameFailure4d(i); return; }
+    const waitMs = Math.max(0, (failure?.nextRetry ?? performance.now()) - performance.now());
+    await new Promise((resolve) => setTimeout(resolve, waitMs));
+  }
+  if (gen !== loadGen || seek !== seekGen4d) return;
+  if (present4d(i)) ensureWindow4d(i, gen);
 }
 
 async function load4DSequence(def) {
   const gen = ++loadGen;
-  clear4d();
-  if (currentMesh) { scene.remove(currentMesh); try { currentMesh.dispose(); } catch {} currentMesh = null; }
   state.loading = true; state.error = null; state.rendered = false;
   frameCountSinceLoad = 0;
   showOverlay(`Loading ${def.label}…`);
 
+  const dismissCandidateError = () => {
+    state.error = null;
+    state.inputError = null;
+  };
+  const candidateDismiss = () => currentMesh && currentScene
+    ? dismissCandidateError
+    : null;
+  const retryCandidate = () => loadScene(def.id).catch(console.error);
+
   const base = SPLAT_DIR + def.manifest.replace(/[^/]+$/, "");
   let manifest;
   try {
-    manifest = await (await fetch(SPLAT_DIR + def.manifest)).json();
+    const response = await fetch(SPLAT_DIR + def.manifest);
+    if (!response.ok) throw new Error(`HTTP ${response.status}`);
+    manifest = await response.json();
   } catch (err) {
+    if (gen !== loadGen) return null;
     state.loading = false; state.error = String(err);
-    showError("Failed to load 4D manifest for " + def.label + "\n" + err);
+    console.error("Failed to load 4D manifest for " + def.label + ":", err);
+    showError("Failed to load the 4D manifest for " + def.label + ".",
+      retryCandidate, "Retry", candidateDismiss());
     throw err;
   }
   if (gen !== loadGen) return null;
-  fps4d = manifest.fps || 12; state4d.fps = fps4d;
-  seq4d = { base, frames: manifest.frames, count: manifest.frames.length };
-  state4d.count = seq4d.count;
-
-  // Load the initial window and present frame 0 before revealing the scene.
-  ensureWindow4d(0, gen);
-  const first = await loadFrame4d(0, gen);
-  if (gen !== loadGen) { clear4d(); return null; }
-  if (!first) {
-    state.loading = false; state.error = "no 4D frames";
-    showError("Failed to load 4D frame 0 of " + def.label);
-    throw new Error("no 4D frames");
+  const frames = manifest?.frames;
+  const manifestFps = Number(manifest?.fps ?? 12);
+  if (!Array.isArray(frames) || frames.length === 0 ||
+      !frames.every((frame) => typeof frame === "string" && frame.length > 0 &&
+        !frame.startsWith("/") && !frame.includes("\\") &&
+        !frame.split("/").includes(".."))) {
+    state.loading = false; state.error = "invalid 4D manifest frames";
+    showError("Invalid 4D manifest for " + def.label,
+      retryCandidate, "Retry", candidateDismiss());
+    throw new Error("invalid 4D manifest frames");
   }
+  if (!Number.isFinite(manifestFps) || manifestFps <= 0 || manifestFps > 240) {
+    state.loading = false; state.error = "invalid 4D manifest fps";
+    showError("Invalid 4D playback rate for " + def.label,
+      retryCandidate, "Retry", candidateDismiss());
+    throw new Error("invalid 4D manifest fps");
+  }
+  // Stage frame zero independently. The active static/4D scene and its cache
+  // remain untouched until the candidate manifest and first frame both pass.
+  const first = new SplatMesh({ url: base + frames[0] });
+  first.quaternion.set(1, 0, 0, 0);
+  first.visible = false;
+  try {
+    await first.initialized;
+  } catch (err) {
+    try { first.dispose(); } catch {}
+    if (gen !== loadGen) return null;
+    state.loading = false; state.error = String(err);
+    console.error("Failed to load the first 4D frame for " + def.label + ":", err);
+    showError("Failed to load the first 4D frame of " + def.label + ".",
+      retryCandidate, "Retry", candidateDismiss());
+    throw err;
+  }
+  if (gen !== loadGen) { try { first.dispose(); } catch {} return null; }
+
+  // Commit the candidate in one swap. clear4d() disposes an old temporal
+  // cache; a normal current mesh is removed immediately afterward.
+  clear4d();
+  if (currentMesh) { scene.remove(currentMesh); try { currentMesh.dispose(); } catch {} }
+  currentMesh = null;
+  fps4d = manifestFps; state4d.fps = fps4d;
+  seq4d = { base, frames: [...frames], count: frames.length };
+  cache4d = new Map([[0, first]]);
+  loading4d = new Map(); failed4d = new Map();
+  state4d.count = seq4d.count; state4d.buffered = 1;
+  scene.add(first);
+  currentScene = def;
+  state.scene = def.id; state.format = def.fmt;
+  state.source = "bundled"; state.fileBytes = null; state.inputError = null;
   present4d(0);
   frameMesh(first);
-  orbitEnabled = true; manualControl = false; syncOrbitBtn();
+  orbitEnabled = !reducedMotion.matches; manualControl = false; syncOrbitBtn();
+  ensureWindow4d(0, gen);
 
   tlSlider.min = "0"; tlSlider.max = String(seq4d.count - 1); tlSlider.value = "0";
   tl.hidden = false;
-  acc4d = 0; play4d();
+  acc4d = 0;
+  if (reducedMotion.matches) pause4d(); else play4d();
 
   state.loading = false;
-  state.scene = def.id; state.format = def.fmt;
   frameCountSinceLoad = 0;
-  currentScene = def;
   updateHud(); updateSceneButtons();
   hideOverlay();
   return seq4d;
@@ -504,39 +821,173 @@ tlSlider.addEventListener("input", () => { pause4d(); seek4dAsync(Number(tlSlide
 // ---------------------------------------------------------------------------
 const hScene = document.getElementById("h-scene");
 const hFmt = document.getElementById("h-fmt");
+const hSource = document.getElementById("h-source");
 const hSplats = document.getElementById("h-splats");
 const hFps = document.getElementById("h-fps");
 const hCam = document.getElementById("h-cam");
 const hMode = document.getElementById("h-mode");
 
+function setHudValue(element, label, value, { strong = true, numeric = false } = {}) {
+  const valueElement = document.createElement(strong ? "b" : "span");
+  valueElement.className = `${strong ? "" : "dim"}${numeric ? " num" : ""}`.trim();
+  valueElement.textContent = value;
+  element.replaceChildren(document.createTextNode(label + ": "), valueElement);
+}
 function updateHud() {
-  hScene.innerHTML = "scene: <b>" + (currentScene ? currentScene.label : "—") + "</b>";
-  hFmt.innerHTML = "format: <b>" + (currentScene ? currentScene.fmt : "—") + "</b>";
-  hSplats.innerHTML = "splats: <b>" + (state.splatCount ? state.splatCount.toLocaleString() : "—") + "</b>";
+  setHudValue(hScene, "scene", currentScene?.label ?? "—");
+  hScene.title = currentScene?.label ?? "";
+  setHudValue(hFmt, "format", currentScene?.fmt ?? "—");
+  const source = state.source === "local"
+    ? `local · ${formatBytes(state.fileBytes)}`
+    : state.source ?? "—";
+  setHudValue(hSource, "source", source, { numeric: state.source === "local" });
+  setHudValue(hSplats, "splats", state.splatCount > 0 ? formatCount(state.splatCount) : "—",
+    { numeric: true });
 }
 function updateCamHud() {
-  hFps.innerHTML = "fps: <b>" + state.fps.toFixed(0) + "</b>";
-  hCam.innerHTML = "cam: <span class='dim'>" +
-    camera.position.x.toFixed(2) + ", " + camera.position.y.toFixed(2) + ", " + camera.position.z.toFixed(2) + "</span>";
-  hMode.innerHTML = "mode: <b>" + (manualControl ? "manual" : orbitEnabled ? "orbit" : "static") + "</b>";
+  setHudValue(hFps, "fps", Number.isFinite(state.fps) ? state.fps.toFixed(0) : "—", { numeric: true });
+  const position = [camera.position.x, camera.position.y, camera.position.z]
+    .map((value) => Number.isFinite(value) ? value.toFixed(2) : "—")
+    .join(", ");
+  setHudValue(hCam, "cam", position, { strong: false, numeric: true });
+  setHudValue(hMode, "mode", manualControl ? "manual" : orbitEnabled ? "orbit" : "static");
 }
 
 const scenesEl = document.getElementById("scenes");
+function visibleSceneDefinitions() {
+  return localSceneDef ? [localSceneDef, ...SCENES] : SCENES;
+}
 function buildSceneButtons() {
-  scenesEl.innerHTML = "";
-  for (const s of SCENES) {
+  for (const button of scenesEl.querySelectorAll("button[data-scene]")) button.remove();
+  for (const s of visibleSceneDefinitions()) {
     const b = document.createElement("button");
+    b.type = "button";
     b.dataset.scene = s.id;
-    b.innerHTML = s.label + "<span class='meta'>" + s.fmt + " · " + s.note + "</span>";
+    b.title = s.label;
+    const title = document.createElement("span");
+    title.className = "scene-title";
+    title.textContent = s.label;
+    b.append(title);
+    const meta = document.createElement("span");
+    meta.className = "meta";
+    meta.textContent = `${s.fmt} · ${s.note}`;
+    b.append(meta);
     b.addEventListener("click", () => loadScene(s.id).catch((e) => console.error(e)));
     scenesEl.appendChild(b);
   }
 }
 function updateSceneButtons() {
-  for (const b of scenesEl.children) b.classList.toggle("active", b.dataset.scene === (currentScene && currentScene.id));
+  for (const b of scenesEl.children) {
+    const active = b.dataset.scene === (currentScene && currentScene.id);
+    b.classList.toggle("active", active);
+    b.setAttribute("aria-pressed", String(active));
+  }
 }
 
-function syncOrbitBtn() { document.getElementById("orbitBtn").textContent = "Orbit: " + (orbitEnabled ? "on" : "off"); }
+// ---------------------------------------------------------------------------
+// Local-first open workflow. File bytes stay in the browser/webview: Spark
+// decodes a fresh File stream directly, with no blob URL, upload, or filesystem
+// permission. Retain only the newest File so switching scenes does not pin an
+// unbounded history of user data in memory.
+// ---------------------------------------------------------------------------
+const localFileInput = document.getElementById("localFileInput");
+const dropTarget = document.getElementById("dropTarget");
+let dragDepth = 0;
+
+function validateLocalFile(file) {
+  if (!(file instanceof File)) throw new Error("Choose one local splat file.");
+  if (file.size <= 0) throw new Error("That file is empty. Choose a non-empty splat file.");
+  if (file.size > MAX_LOCAL_FILE_BYTES) {
+    throw new Error(`That file is ${formatBytes(file.size)}. Local files are limited to ${formatBytes(MAX_LOCAL_FILE_BYTES)}.`);
+  }
+  const descriptor = LOCAL_FILE_TYPES.get(localExtension(file.name));
+  if (!descriptor) {
+    throw new Error("Unsupported file type. Choose PLY, SPZ, SPLAT, KSPLAT, SOG, or ZIP.");
+  }
+  return descriptor;
+}
+
+function showLocalFileError(message) {
+  state.inputError = message;
+  showError(message, () => localFileInput.click(), "Choose another file", () => {
+    state.inputError = null;
+  });
+}
+
+async function openLocalFile(file) {
+  let descriptor;
+  try {
+    descriptor = validateLocalFile(file);
+  } catch (error) {
+    showLocalFileError(error instanceof Error ? error.message : String(error));
+    return null;
+  }
+
+  const candidate = {
+    id: "local-file",
+    label: file.name,
+    fmt: descriptor.fmt,
+    note: `${formatBytes(file.size)} · local only`,
+    localFile: file,
+    fileType: descriptor.type,
+  };
+  pendingLocalSceneDef = candidate;
+  return loadScene(candidate.id, candidate);
+}
+
+localFileInput.addEventListener("change", () => {
+  const file = localFileInput.files?.[0] ?? null;
+  localFileInput.value = ""; // allow selecting the same file again
+  if (file) openLocalFile(file).catch((error) => console.error(error));
+});
+
+function dragHasFiles(event) {
+  return Array.from(event.dataTransfer?.types ?? []).includes("Files");
+}
+function setDropTargetVisible(visible) {
+  dropTarget.hidden = !visible;
+}
+window.addEventListener("dragenter", (event) => {
+  if (!dragHasFiles(event)) return;
+  event.preventDefault();
+  dragDepth++;
+  setDropTargetVisible(true);
+});
+window.addEventListener("dragover", (event) => {
+  if (!dragHasFiles(event)) return;
+  event.preventDefault();
+  if (event.dataTransfer) event.dataTransfer.dropEffect = "copy";
+});
+window.addEventListener("dragleave", (event) => {
+  if (dragDepth === 0) return;
+  event.preventDefault();
+  dragDepth = Math.max(0, dragDepth - 1);
+  if (dragDepth === 0) setDropTargetVisible(false);
+});
+window.addEventListener("drop", (event) => {
+  if (!dragHasFiles(event)) return;
+  event.preventDefault();
+  dragDepth = 0;
+  setDropTargetVisible(false);
+  const files = Array.from(event.dataTransfer?.files ?? []);
+  if (files.length !== 1) {
+    showLocalFileError("Drop one splat file at a time.");
+    return;
+  }
+  openLocalFile(files[0]).catch((error) => console.error(error));
+});
+window.addEventListener("keydown", (event) => {
+  if (event.key === "Escape" && !dropTarget.hidden) {
+    dragDepth = 0;
+    setDropTargetVisible(false);
+  }
+});
+
+function syncOrbitBtn() {
+  const button = document.getElementById("orbitBtn");
+  button.textContent = "Orbit: " + (orbitEnabled ? "on" : "off");
+  button.setAttribute("aria-pressed", String(orbitEnabled));
+}
 
 document.querySelectorAll("#bar [data-cam]").forEach((b) => b.addEventListener("click", () => setView(b.dataset.cam)));
 document.getElementById("orbitBtn").addEventListener("click", () => { orbitEnabled = !orbitEnabled; manualControl = false; syncOrbitBtn(); });
@@ -545,19 +996,40 @@ document.getElementById("resetBtn").addEventListener("click", () => { if (curren
 // Any direct interaction on the canvas switches to manual (SparkControls) navigation.
 renderer.domElement.addEventListener("pointerdown", () => { manualControl = true; orbitEnabled = false; syncOrbitBtn(); });
 renderer.domElement.addEventListener("wheel", () => { manualControl = true; orbitEnabled = false; syncOrbitBtn(); }, { passive: true });
+renderer.domElement.addEventListener("keydown", (event) => {
+  if (["ArrowUp", "ArrowDown", "ArrowLeft", "ArrowRight", "w", "a", "s", "d", "W", "A", "S", "D"].includes(event.key)) {
+    manualControl = true; orbitEnabled = false; syncOrbitBtn();
+  }
+});
+renderer.domElement.addEventListener("webglcontextlost", (event) => {
+  event.preventDefault();
+  pause4d();
+  state.error = "WebGL context lost";
+  showError("Rendering stopped because the WebGL context was lost.", () => location.reload());
+});
+renderer.domElement.addEventListener("webglcontextrestored", () => location.reload());
+reducedMotion.addEventListener("change", (event) => {
+  if (event.matches) {
+    orbitEnabled = false;
+    pause4d();
+    syncOrbitBtn();
+  }
+});
 
 // ---------------------------------------------------------------------------
 // Render loop
 // ---------------------------------------------------------------------------
 const state = {
   ready: false, loading: false, rendered: false, error: null,
-  scene: null, format: null, splatCount: 0, fps: 0,
+  scene: null, format: null, source: null, fileBytes: null,
+  splatCount: 0, fps: 0, inputError: null,
   progressive: false,  // true when the last load streamed splats in progressively
 };
 
 let lastT = performance.now();
 let fpsAccum = 0, fpsFrames = 0;
 const clock = new THREE.Clock();
+const cameraDirection = new THREE.Vector3();
 
 renderer.setAnimationLoop(() => {
   const now = performance.now();
@@ -565,7 +1037,7 @@ renderer.setAnimationLoop(() => {
 
   if (manualControl) {
     controls.update(camera);
-    target.copy(camera.position).add(camera.getWorldDirection(new THREE.Vector3()).multiplyScalar(orbitRadius));
+    target.copy(camera.position).add(camera.getWorldDirection(cameraDirection).multiplyScalar(orbitRadius));
   } else if (orbitEnabled) {
     orbitAzimuth += ORBIT_SPEED * dt;
     applyOrbit();
@@ -578,9 +1050,12 @@ renderer.setAnimationLoop(() => {
     const step = 1 / fps4d;
     if (acc4d >= step) {
       const next = (active4d + 1) % seq4d.count;
-      ensureWindow4d(active4d, loadGen);   // prefetch ahead of the playhead
+      ensureWindow4d(active4d, loadGen);   // circular prefetch around the playhead
       if (cache4d.has(next)) { acc4d %= step; present4d(next); }
-      else { acc4d = step; }               // hold at threshold until buffered
+      else {
+        acc4d = step;                       // hold at threshold until buffered
+        reportFrameFailure4d(next);
+      }
     }
   }
 
@@ -612,8 +1087,9 @@ syncOrbitBtn();
 window.__viewer = {
   THREE, scene, camera, renderer, spark,
   state,
-  get scenes() { return SCENES.map((s) => ({ id: s.id, label: s.label, file: s.file, fmt: s.fmt, temporal: !!s.temporal })); },
+  get scenes() { return visibleSceneDefinitions().map((s) => ({ id: s.id, label: s.label, file: s.file, fmt: s.fmt, temporal: !!s.temporal, local: !!s.localFile })); },
   async load(id) { return loadScene(id); },
+  async openFile(file) { return openLocalFile(file); },
   // 4D temporal player controls (no-ops when not in a 4D scene).
   play4D() { play4d(); },
   pause4D() { pause4d(); },
@@ -631,7 +1107,8 @@ window.__viewer = {
   getStats() {
     return {
       ready: state.ready, loading: state.loading, rendered: state.rendered, error: state.error,
-      scene: state.scene, format: state.format, splatCount: state.splatCount, fps: state.fps,
+      inputError: state.inputError, scene: state.scene, format: state.format, source: state.source,
+      fileBytes: state.fileBytes, splatCount: state.splatCount, fps: state.fps,
       camera: camera.position.toArray().map((n) => +n.toFixed(3)),
       target: target.toArray().map((n) => +n.toFixed(3)),
     };

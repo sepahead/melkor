@@ -52,6 +52,7 @@ public:
         normalizeQuatPipeline = createPipeline(@"normalize_quaternions");
         scalePosPipeline = createPipeline(@"scale_positions");
         rgbToShPipeline = createPipeline(@"rgb_to_sh_dc");
+        opacityToLogitPipeline = createPipeline(@"opacity_to_logit");
         processAllPipeline = createPipeline(@"process_all");
         enhancedConvertPipeline = createPipeline(@"enhanced_convert_points");
         knnDistancesPipeline = createPipeline(@"compute_knn_distances");
@@ -252,9 +253,10 @@ bool GaussianProcessor::sortByDistance(GaussianCloud& cloud,
         distances[i] = {dx*dx + dy*dy + dz*dz, i};
     }
     
-    // Sort by distance (back to front for alpha blending)
+    // ComputeProvider defines near-to-far ordering for front-to-back
+    // compositing; keep backend semantics identical.
     std::sort(distances.begin(), distances.end(), 
-              [](const auto& a, const auto& b) { return a.first > b.first; });
+              [](const auto& a, const auto& b) { return a.first < b.first; });
     
     // Reorder splats
     std::vector<GaussianSplat> sorted;
@@ -499,13 +501,13 @@ std::vector<float> GaussianProcessor::computeKnnDistancesMetal(
     int k_neighbors) {
 
     size_t num_points = positions.size() / 3;
-    std::vector<float> distances(num_points, 0.0f);
-    if (num_points == 0) return distances;
+    if (num_points == 0) return {};
 
-    if (!impl_->knnDistancesPipeline) return distances;
+    if (!impl_->knnDistancesPipeline) return {};
 
     id<MTLDevice> device = (__bridge id<MTLDevice>)impl_->context.getDevice();
     id<MTLCommandQueue> queue = (__bridge id<MTLCommandQueue>)impl_->context.getCommandQueue();
+    if (!device || !queue) return {};
 
     id<MTLBuffer> posBuffer = [device newBufferWithBytes:positions.data()
                                                   length:positions.size() * sizeof(float)
@@ -523,9 +525,11 @@ std::vector<float> GaussianProcessor::computeKnnDistancesMetal(
     id<MTLBuffer> kBuffer = [device newBufferWithBytes:&k
                                                 length:sizeof(k)
                                                options:MTLResourceStorageModeShared];
+    if (!posBuffer || !outBuffer || !npBuffer || !kBuffer) return {};
 
     id<MTLCommandBuffer> cmdBuffer = [queue commandBuffer];
     id<MTLComputeCommandEncoder> encoder = [cmdBuffer computeCommandEncoder];
+    if (!cmdBuffer || !encoder) return {};
 
     [encoder setComputePipelineState:impl_->knnDistancesPipeline];
     [encoder setBuffer:posBuffer offset:0 atIndex:0];
@@ -542,10 +546,10 @@ std::vector<float> GaussianProcessor::computeKnnDistancesMetal(
     [cmdBuffer commit];
     [cmdBuffer waitUntilCompleted];
 
-    if ([cmdBuffer status] == MTLCommandBufferStatusCompleted) {
-        memcpy(distances.data(), [outBuffer contents], num_points * sizeof(float));
-    }
+    if ([cmdBuffer status] != MTLCommandBufferStatusCompleted) return {};
 
+    std::vector<float> distances(num_points);
+    memcpy(distances.data(), [outBuffer contents], num_points * sizeof(float));
     return distances;
 }
 

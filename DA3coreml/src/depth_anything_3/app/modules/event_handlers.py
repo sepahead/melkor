@@ -318,7 +318,7 @@ class EventHandlers:
             )
             return gr.update(), error_message
 
-        loaded = np.load(predictions_path, allow_pickle=True)
+        loaded = np.load(predictions_path, allow_pickle=False)
         predictions = {key: loaded[key] for key in loaded.keys()}  # noqa: F841
 
         return (
@@ -389,7 +389,7 @@ class EventHandlers:
             if os.path.exists(predictions_path):
                 try:
                     # Load predictions from cache
-                    loaded = np.load(predictions_path, allow_pickle=True)
+                    loaded = np.load(predictions_path, allow_pickle=False)
                     predictions = {key: loaded[key] for key in loaded.keys()}
 
                     # Reconstruct processed_data structure

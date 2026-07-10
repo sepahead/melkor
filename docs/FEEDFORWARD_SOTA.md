@@ -1,9 +1,11 @@
-# SOTA Feedforward Reconstruction Models
+# Curated Feedforward Reconstruction Catalog
 
 Melkor's feedforward stage turns images into geometry or splats in a single
 forward pass — no COLMAP/GLOMAP, no per-scene optimization. Depth-Anything-3
 ([docs/DA3_FEEDFORWARD.md](DA3_FEEDFORWARD.md)) was the first integration;
-`scripts/setup_feedforward_sota.sh` adds the strongest 2025–2026 alternatives.
+`scripts/setup_feedforward_sota.sh` provides a reviewed snapshot of useful
+alternatives as of **2026-07-10**. This is an integration catalog, not a claim
+that every listed model is the current state of the art on every benchmark.
 
 Install one, a group, or list the catalog:
 
@@ -14,14 +16,15 @@ Install one, a group, or list the catalog:
 ./scripts/setup_feedforward_sota.sh amb3r --accept-unlicensed
 ```
 
-Each install clones the upstream repo into `tools/<name>/repo`, builds a
+Each install checks out a reviewed commit into `tools/<name>/repo`, builds a
 venv, and drops a `./<name>-infer` wrapper at the project root.
 
 > These models need **Linux + NVIDIA CUDA** and download multi-GB weights.
 > They do not run on the macOS/Metal build. Melkor itself is MIT; the setup
-> script refuses non-permissive weights unless you pass the matching
-> `--accept-*` flag, and it re-prints each repo's actual `LICENSE` at install
-> time so the terms you see are current.
+> script refuses known non-permissive or unspecified weights unless you pass
+> the matching `--accept-*` flag. It prints the pinned repository's code
+> license at install time; checkpoint terms are a separate artifact and remain
+> gated when their model card is non-commercial or unspecified.
 
 ## Three integration shapes
 
@@ -71,8 +74,6 @@ straight through; see each repo's `EVALUATION.md` / `DATASETS.md`.
 
 ## Catalog
 
-| Model | Category | License (code / weights) | Notes |
-|-------|----------|--------------------------|-------|
 | Model | Output → melkor | License (code / weights) | Notes |
 |-------|-----------------|--------------------------|-------|
 | **VGGT** | COLMAP `sparse/` | custom / CC-BY-NC (gated commercial ckpt) | Meta, CVPR'25 Best Paper. `demo_colmap.py --scene_dir=DIR` (images in `DIR/images/`), optional `--use_ba`. **Cleanest COLMAP export.** |
@@ -81,7 +82,20 @@ straight through; see each repo's `EVALUATION.md` / `DATASETS.md`.
 | **Pi3 (π³)** | PLY point cloud | BSD-3 / CC-BY-NC | ICLR'26. `example_mm.py --data_path --save_path out.ply`. Permutation-equivariant; Pi3X (~1B) recommended. |
 | **MoGe-2** | per-image points/depth/normals | **MIT / MIT** | Microsoft, NeurIPS'25. `moge infer -i IMAGES -o OUT --ply`. Single-image; complements multi-view models. |
 | **YoNoSplat** | novel views (dataset eval) | **MIT / MIT** | ETH Zurich, ICLR'26. Hydra `python -m src.main +experiment=… mode=test` over a pixelSplat dataset + index — **not** a folder-of-images tool. 224×224 checkpoints released. |
-| **SPFSplatV2** | novel views (dataset eval) | **MIT / MIT** | Imperial College. Hydra eval over RE10K/ACID chunked data + JSON index. Self-supervised, pose-free; MASt3R/VGGT variants. |
+| **SPFSplatV2** | novel views (dataset eval) | **MIT / unspecified** | Imperial College. The repository code is MIT, but the published Hugging Face checkpoint has no declared model-card license; installation is gated as unlicensed. |
+
+## Newer systems tracked but not yet integrated
+
+- **[VGGT-Omega](https://github.com/facebookresearch/vggt-omega)** (Meta, May
+  2026) extends VGGT to much longer sequences and is
+  the most important successor missing from the executable catalog. Its
+  integration should wait for a pinned checkpoint/license review and a tested
+  COLMAP or Gaussian export adapter.
+- **[Déjà View](https://github.com/nv-tlabs/dvlt)** (NVIDIA Research) is also
+  tracked for long-horizon visual
+  geometry. It is not presented as a drop-in Melkor backend until its public
+  interface, checkpoint terms, and output-frame conventions have an end-to-end
+  adapter test.
 
 ## Choosing a model
 
@@ -101,10 +115,9 @@ straight through; see each repo's `EVALUATION.md` / `DATASETS.md`.
   evaluation protocol** and not independently audited; DA3's native-protocol
   numbers differ from the figures competitors quote against it. Treat the
   ranking as indicative, not settled.
-- SPFSplatV2's headline RE10K PSNR (26.157) did not survive independent
-  verification — the method and its MIT release are solid, that specific
-  number is not.
-- This is a fast-moving area (the survey window is mid-2025 to mid-2026);
+- SPFSplatV2 reports 26.157 PSNR with evaluation-time pose alignment; Melkor
+  has not independently reproduced that result.
+- This is a fast-moving area;
   newer releases will exist. Re-run `setup_feedforward_sota.sh list` and
   check upstream for updates.
 

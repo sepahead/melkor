@@ -42,3 +42,4 @@ viewer/vendor/** linguist-vendored
 # Lockfiles
 viewer/package-lock.json linguist-generated
 viewer/src-tauri/Cargo.lock linguist-generated
+viewer/RUST_THIRD_PARTY_LICENSES.html -whitespace linguist-generated

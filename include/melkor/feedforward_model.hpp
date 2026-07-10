@@ -61,7 +61,8 @@ struct FeedforwardResult {
     int model_memory_mb = 0;
 };
 
-// Feedforward model for single-view or multi-view 3D Gaussian Splatting
+// Retired native facade retained for source compatibility. It fails closed;
+// supported neural reconstruction is provided by the da3-infer Python CLI.
 class FeedforwardModel {
 public:
     FeedforwardModel();

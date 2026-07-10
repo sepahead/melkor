@@ -1,6 +1,6 @@
-#!/bin/bash
+#!/usr/bin/env bash
 
-# Setup for SOTA feedforward reconstruction models (late 2025 - 2026).
+# Setup for a dated, reviewed feedforward reconstruction catalog.
 #
 # These supplement Depth-Anything-3 (setup_da3.sh) with newer pose-free
 # geometry models and direct feedforward Gaussian-splatting models. Two
@@ -17,26 +17,25 @@
 #
 # LICENSING (this matters — melkor itself is MIT):
 #   permissive : MapAnything (code Apache-2.0, `-apache` weights Apache-2.0),
-#                YoNoSplat (MIT), SPFSplatV2 (MIT), MoGe-2 (MIT)
+#                YoNoSplat (MIT), MoGe-2 (MIT)
 #   non-commercial weights : Pi3 (code BSD-3, weights CC-BY-NC-4.0),
 #                VGGT (weights CC-BY-NC-4.0; a gated commercial checkpoint
 #                exists), MapAnything `facebook/map-anything` (CC-BY-NC-4.0)
-#   unlicensed : AMB3R has NO LICENSE file at time of writing (all rights
-#                reserved by default) — research/evaluation only until the
-#                authors publish terms.
+#   unlicensed : AMB3R has no code license; SPFSplatV2's published checkpoint
+#                has no model-card license. Treat both as all-rights-reserved.
 #
 # Non-permissive models are refused unless you pass the matching flag,
 # acknowledging you have verified the terms for your use:
 #   --accept-noncommercial   allow CC-BY-NC weights (Pi3, VGGT, MapAnything-nc)
 #   --accept-unlicensed      allow AMB3R (no license published)
 #
-# Each install re-reads and prints the cloned repo's actual LICENSE so the
-# terms shown are always current, not what this script assumed.
+# Each install prints the pinned repo's code LICENSE. Checkpoint terms are
+# separate and remain gated when non-commercial or unspecified.
 #
 # NOTE: these models require Linux + NVIDIA CUDA + a recent PyTorch and
 # download multi-GB weights; they do not run on the macOS/Metal build.
 
-set -e
+set -euo pipefail
 
 # ---- logging (to stderr so any captured stdout stays clean) ---------------
 log()  { echo "$@" >&2; }
@@ -61,12 +60,12 @@ Models:
   pi3           Pose-free permutation-equivariant geometry           (weights NC)
   amb3r         Metric geometry + SLAM/SfM; reports beating DA3       (UNLICENSED)
   yonosplat     Pose-free feedforward 3DGS -> splats directly         (MIT)
-  spfsplatv2    Self-supervised pose-free feedforward 3DGS            (MIT)
+  spfsplatv2    Self-supervised pose-free feedforward 3DGS      (weights unverified)
   moge2         Single-image geometry (points/depth/normals)          (MIT)
 
 Groups:
   permissive    Install all permissively-licensed models
-                (mapanything-apache, yonosplat, spfsplatv2, moge2)
+                (mapanything-apache, yonosplat, moge2)
   list          Print the catalog and exit
   all           Everything (requires both --accept-* flags)
 
@@ -96,13 +95,13 @@ mapanything|https://github.com/facebookresearch/map-anything|geometry-colmap|per
 pi3|https://github.com/yyfz/Pi3|geometry-ply|noncommercial|ICLR'26; example_mm.py writes a PLY point cloud; code BSD-3, weights CC-BY-NC
 amb3r|https://github.com/HengyiWang/amb3r|geometry-ply|unlicensed|UCL, CVPR'26; reports beating DA3; sfm/run.py; no LICENSE published
 yonosplat|https://github.com/cvg/YoNoSplat|dataset-eval|permissive|ETH Zurich, ICLR'26; MIT; Hydra/dataset eval, NOT a folder-of-images tool
-spfsplatv2|https://github.com/ranrhuang/SPFSplatV2|dataset-eval|permissive|Imperial College; MIT; Hydra/dataset eval, needs RE10K/ACID format
+spfsplatv2|https://github.com/ranrhuang/SPFSplatV2|dataset-eval|unlicensed|Imperial College; MIT code, checkpoint license unspecified; Hydra/dataset eval
 moge2|https://github.com/microsoft/MoGe|geometry-mono|permissive|Microsoft; MIT; `moge infer` single-image geometry
 EOF
 }
 
 if [ "$SELECTION" = "list" ]; then
-    log "SOTA feedforward models (see docs/FEEDFORWARD_SOTA.md):"
+    log "Reviewed feedforward catalog (see docs/FEEDFORWARD_SOTA.md):"
     catalog | while IFS='|' read -r name repo cat lic note; do
         printf '  %-12s %-14s %-14s %s\n' "$name" "$cat" "$lic" "$note" >&2
     done
@@ -135,6 +134,19 @@ fi
 
 mkdir -p "$TOOLS_DIR"
 
+pinned_ref() {
+    case "$1" in
+        vggt) echo "a288dd0f14786c93483e45524328726ab7b1b4ce" ;;
+        mapanything) echo "c845b8f4f6cde0c20aecd87573656c3f69f5b2b0" ;;
+        pi3) echo "9fa3ddb3f8d53041f8b2738df404f62223bbaa7b" ;;
+        amb3r) echo "92c4081f910f98e683503092b85301861519175e" ;;
+        yonosplat) echo "8bbbfa861cabf0e815b06acf560d491aa81031f7" ;;
+        spfsplatv2) echo "14baff7ac8b4e3de59e76f23a74f92b327e76c07" ;;
+        moge2) echo "07444410f1e33f402353b99d6ccd26bd31e469e8" ;;
+        *) return 1 ;;
+    esac
+}
+
 install_one() {
     local name="$1" repo="$2" cat="$3" lic="$4" note="$5"
 
@@ -150,18 +162,22 @@ install_one() {
         return 0
     fi
 
-    local dir="$TOOLS_DIR/$name"
+    local dir="$TOOLS_DIR/$name" ref
+    ref="$(pinned_ref "$name")"
     log ""
     log "=== $name  [$cat, $lic] ==="
     log "$note"
 
     if [ -d "$dir/repo/.git" ]; then
-        log "Updating $repo ..."
-        git -C "$dir/repo" pull --ff-only >&2 || warn "pull failed; keeping existing checkout"
+        log "Selecting reviewed revision $ref from $repo ..."
+        git -C "$dir/repo" fetch --depth 1 origin "$ref" >&2
+        git -C "$dir/repo" checkout --detach FETCH_HEAD >&2
     else
         mkdir -p "$dir"
-        log "Cloning $repo ..."
-        git clone --depth 1 "$repo" "$dir/repo" >&2
+        log "Cloning $repo at reviewed revision $ref ..."
+        git clone --filter=blob:none --no-checkout "$repo" "$dir/repo" >&2
+        git -C "$dir/repo" fetch --depth 1 origin "$ref" >&2
+        git -C "$dir/repo" checkout --detach FETCH_HEAD >&2
     fi
 
     # Surface the ACTUAL license from the checkout.
@@ -190,7 +206,9 @@ install_one() {
     case "$name" in
         vggt)
             pip install -r "$dir/repo/requirements.txt" >&2 || pip install -e "$dir/repo" >&2 ;;
-        mapanything|moge2)
+        mapanything)
+            pip install -e "$dir/repo[colmap]" >&2 ;;
+        moge2)
             # Both install a package (mapanything: pip install -e .; moge:
             # provides the `moge` console script).
             pip install -e "$dir/repo" >&2 ;;
@@ -198,7 +216,9 @@ install_one() {
             if [ -f "$dir/repo/requirements.txt" ]; then
                 pip install -r "$dir/repo/requirements.txt" >&2
             fi
-            pip install -e "$dir/repo" >&2 || true ;;
+            if [ -f "$dir/repo/pyproject.toml" ] || [ -f "$dir/repo/setup.py" ]; then
+                pip install -e "$dir/repo" >&2
+            fi ;;
         amb3r)
             if [ -f "$dir/repo/requirements.txt" ]; then
                 pip install -r "$dir/repo/requirements.txt" >&2
@@ -219,7 +239,7 @@ create_wrapper() {
     local entry
     case "$name" in
         vggt)        entry='python demo_colmap.py "$@"' ;;          # --scene_dir=DIR (images in DIR/images/) -> DIR/sparse/
-        mapanything) entry='python scripts/demo_colmap.py "$@"' ;;  # --images_dir=DIR --output_dir=OUT [--apache] -> COLMAP sparse/
+        mapanything) entry='python scripts/demo_colmap.py --apache "$@"' ;;  # permissive Apache checkpoint -> COLMAP sparse/
         pi3)         entry='python example_mm.py "$@"' ;;           # --data_path DIR --save_path out.ply -> PLY point cloud
         amb3r)       entry='python sfm/run.py "$@"' ;;              # --data_path DIR (also ./demo.py, slam/run.py)
         moge2)       entry='moge infer "$@"' ;;                     # -i IMAGES -o OUT --ply --glb --maps (console script)
@@ -228,11 +248,16 @@ create_wrapper() {
         *)           entry='python demo.py "$@"' ;;
     esac
     cat > "$wrapper" <<WRAP
-#!/bin/bash
+#!/usr/bin/env bash
+set -euo pipefail
 # Auto-generated by setup_feedforward_sota.sh — runs $name.
 SCRIPT_DIR="\$(cd "\$(dirname "\${BASH_SOURCE[0]}")" && pwd)"
 DIR="\$SCRIPT_DIR/tools/$name"
 # shellcheck disable=SC1091
+if [ ! -f "\$DIR/venv/bin/activate" ]; then
+    echo "Error: missing $name environment; rerun setup_feedforward_sota.sh" >&2
+    exit 1
+fi
 source "\$DIR/venv/bin/activate"
 cd "\$DIR/repo"
 $entry

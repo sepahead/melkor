@@ -99,7 +99,7 @@ def load_pretrained_weights(model, model_path: str, is_metric: bool = False) -> 
     Returns:
         Tuple of (missed_keys, unexpected_keys)
     """
-    state_dict = torch.load(model_path, map_location="cpu")
+    state_dict = torch.load(model_path, map_location="cpu", weights_only=True)
 
     if is_metric:
         state_dict = convert_metric_state_dict(state_dict)
@@ -128,12 +128,12 @@ def load_pretrained_nested_weights(
         Tuple of (missed_keys, unexpected_keys)
     """
     # Load main model weights
-    state_dict0 = torch.load(main_model_path, map_location="cpu")
+    state_dict0 = torch.load(main_model_path, map_location="cpu", weights_only=True)
     state_dict0 = convert_general_state_dict(state_dict0)
     state_dict0 = {k.replace("model.", "model.da3."): v for k, v in state_dict0.items()}
 
     # Load metric model weights
-    state_dict1 = torch.load(metric_model_path, map_location="cpu")
+    state_dict1 = torch.load(metric_model_path, map_location="cpu", weights_only=True)
     state_dict1 = convert_metric_state_dict(state_dict1)
     state_dict1 = {k.replace("model.", "model.da3_metric."): v for k, v in state_dict1.items()}
 

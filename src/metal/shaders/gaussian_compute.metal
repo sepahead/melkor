@@ -50,10 +50,11 @@ kernel void normalize_quaternions(
     if (id >= grid_size) return;
     
     float4 q = gaussians[id].rotation;
-    float len = length(q);
+    float max_component = max(max(abs(q.x), abs(q.y)), max(abs(q.z), abs(q.w)));
     
-    if (len > 0.0f) {
-        q /= len;
+    if (isfinite(max_component) && max_component > 0.0f) {
+        q /= max_component;
+        q /= length(q);
     } else {
         q = float4(1.0f, 0.0f, 0.0f, 0.0f);
     }
@@ -109,7 +110,7 @@ kernel void opacity_to_logit(
 ) {
     if (id >= grid_size) return;
     
-    float opacity = clamp(gaussians[id].position.w, 0.001f, 0.999f);
+    float opacity = clamp(gaussians[id].position.w, 1e-6f, 1.0f - 1e-6f);
     gaussians[id].position.w = log(opacity / (1.0f - opacity));
 }
 
@@ -175,7 +176,7 @@ kernel void compute_covariances(
 ) {
     if (id >= grid_size) return;
     
-    float3 s = gaussians[id].scale.xyz;
+    float3 s = exp(gaussians[id].scale.xyz);
     float4 q = gaussians[id].rotation;
     float w = q.x, x = q.y, y = q.z, z = q.w;
 
@@ -219,9 +220,10 @@ kernel void process_all(
     
     if (flags & 0x1) {
         float4 q = gaussians[id].rotation;
-        float len = length(q);
-        if (len > 0.0f) {
-            q /= len;
+        float max_component = max(max(abs(q.x), abs(q.y)), max(abs(q.z), abs(q.w)));
+        if (isfinite(max_component) && max_component > 0.0f) {
+            q /= max_component;
+            q /= length(q);
         } else {
             q = float4(1.0f, 0.0f, 0.0f, 0.0f);
         }
@@ -235,7 +237,7 @@ kernel void process_all(
     }
     
     if (flags & 0x4) {
-        float opacity = clamp(gaussians[id].position.w, 0.001f, 0.999f);
+        float opacity = clamp(gaussians[id].position.w, 1e-6f, 1.0f - 1e-6f);
         gaussians[id].position.w = log(opacity / (1.0f - opacity));
     }
     
@@ -326,7 +328,8 @@ kernel void enhanced_convert_points(
     }
     float3 sh_dc = (color - 0.5f) / SH_C0;
 
-    float opacity_logit = log(cfg.default_opacity / (1.0f - cfg.default_opacity));
+    float opacity = clamp(cfg.default_opacity, 1e-6f, 1.0f - 1e-6f);
+    float opacity_logit = log(opacity / (1.0f - opacity));
 
     float base_scale = adaptive_scales[id] * cfg.scale_factor;
     base_scale = clamp(base_scale, cfg.min_scale, cfg.max_scale);

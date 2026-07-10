@@ -3,14 +3,53 @@ name: CI
 on:
   push:
     branches: [main]
+    tags: ["v*-rc.*"]
   pull_request:
     branches: [main]
 
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
+  secrets-scan:
+    name: Full-history secret scan
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Scan committed history
+        uses: gitleaks/gitleaks-action@e0c47f4f8be36e29cdc102c57e68cb5cbf0e8d1e # v3.0.0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  dependency-review:
+    name: Dependency review
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+        with:
+          persist-credentials: false
+      - name: Review dependency changes
+        uses: actions/dependency-review-action@a1d282b36b6f3519aa1f3fc636f609c47dddb294 # v5.0.0
+        with:
+          fail-on-severity: high
+
   build-macos:
     runs-on: macos-14
+    timeout-minutes: 45
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+        with:
+          persist-credentials: false
       - name: Install dependencies
         run: |
           brew install cmake
@@ -24,9 +63,13 @@ jobs:
           # Run the real correctness test suite (SPZ quaternion order + SH
           # channel order, PLY parsing, PCA normals, provider parity, scene
           # completion) plus the smoke checks.
-          cd build && ctest --output-on-failure
-          ./melkor --info
-          ./melkor --version
+          ctest --test-dir build --output-on-failure --no-tests=error
+          ./build/melkor --info
+          ./build/melkor --version
+          cmake --install build --prefix "$RUNNER_TEMP/melkor-install"
+          test -s "$RUNNER_TEMP/melkor-install/share/melkor/LICENSE"
+          test -s "$RUNNER_TEMP/melkor-install/share/melkor/NOTICE"
+          test -s "$RUNNER_TEMP/melkor-install/share/melkor/THIRD_PARTY_LICENSES.md"
       - name: Build CPU-only (stub link topology)
         run: |
           # Same link shape as Linux CPU builds; catches missing Metal-stub
@@ -34,11 +77,25 @@ jobs:
           cmake -B build-cpu -DMELKOR_USE_METAL=OFF -DMELKOR_WERROR=ON
           cmake --build build-cpu -j$(sysctl -n hw.ncpu)
           cd build-cpu && ctest --output-on-failure
+      - name: Build and test quarantined CoreML surface
+        working-directory: DA3coreml/coreml
+        run: |
+          swift package resolve
+          git diff --exit-code -- Package.resolved
+          swift build -c release
+          swift test --parallel
+          help="$(.build/release/da3-coreml --help)"
+          grep -q 'infer' <<<"$help"
+          grep -q 'benchmark' <<<"$help"
+          ! grep -Eq 'fuse|stream|convert|to-3dgs' <<<"$help"
 
   sanitize-macos:
     runs-on: macos-14
+    timeout-minutes: 45
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+        with:
+          persist-credentials: false
       - name: Install dependencies
         run: |
           brew install cmake
@@ -57,8 +114,11 @@ jobs:
 
   build-linux:
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+        with:
+          persist-credentials: false
       - name: Install dependencies
         run: |
           # The GitHub Ubuntu runner preinstalls Microsoft/azure-cli apt
@@ -85,8 +145,11 @@ jobs:
   # Metal-only development machine cannot see. Tests are skipped: no device.
   build-linux-cuda:
     runs-on: ubuntu-latest
+    timeout-minutes: 45
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+        with:
+          persist-credentials: false
       - name: Install dependencies
         run: |
           # Strip the preinstalled Microsoft/azure-cli apt sources that
@@ -105,18 +168,113 @@ jobs:
           cmake --build build -j$(nproc)
 
   lint-python:
+    name: Python and shell checks
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6.3.0
         with:
           python-version: "3.11"
-      - name: Lint
+      - name: Install test tooling
+        run: python -m pip install --disable-pip-version-check numpy ruff==0.15.18
+      - name: Lint maintained Python
         run: |
-          pip install ruff
           # Lint Melkor-authored Python only. The root pyproject.toml excludes
           # vendored upstream snapshots (DA3coreml/src is ByteDance code with its
           # own .flake8; ml-sharp is Apple research code). Running ruff with no
           # explicit paths makes it pick up the root config and respect those
           # excludes.
           ruff check . --no-unsafe-fixes
+      - name: Test DA3 synthetic Gaussian conversion
+        run: |
+          python -c "import numpy; print(f'NumPy {numpy.__version__}')"
+          python tests/test_gaussians_from_prediction.py
+      - name: Check Bash syntax
+        run: git ls-files -z -- '*.sh' | xargs -0 -n 1 bash -n --
+
+  viewer-tests:
+    name: Viewer / Playwright (Chromium)
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+        with:
+          persist-credentials: false
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+        with:
+          bun-version: 1.3.14
+      - name: Install viewer dependencies from lockfile
+        working-directory: viewer
+        run: |
+          npm ci --ignore-scripts
+          npm audit --audit-level=high
+      - name: Install Playwright Chromium
+        working-directory: viewer
+        run: npx playwright install --with-deps chromium
+      - name: Fetch integrity-checked viewer assets
+        working-directory: viewer
+        run: ./fetch-assets.sh
+      - name: Run viewer tests
+        working-directory: viewer
+        run: bun run test -- --project=chromium
+
+  tauri-check:
+    name: Tauri / Rust 1.88
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+        with:
+          persist-credentials: false
+      - name: Install Tauri system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libwebkit2gtk-4.1-dev \
+            libayatana-appindicator3-dev \
+            librsvg2-dev
+      - name: Install Rust 1.88
+        run: |
+          rustup toolchain install 1.88.0 --profile minimal --component rustfmt clippy
+          rustup run 1.88.0 rustc --version
+          rustup run 1.88.0 cargo --version
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+        with:
+          bun-version: 1.3.14
+      - name: Fetch digest-pinned desktop runtime
+        working-directory: viewer
+        run: ./fetch-assets.sh --runtime-only
+      - name: Format, lint, and check locked Tauri dependency graph
+        working-directory: viewer/src-tauri
+        run: |
+          rustup run 1.88.0 cargo fmt --check
+          rustup run 1.88.0 cargo clippy --locked --all-targets -- -D warnings
+          rustup run 1.88.0 cargo check --locked
+      - name: Audit Rust dependencies
+        run: |
+          cargo install cargo-deny --version 0.19.9 --locked
+          cargo deny --manifest-path viewer/src-tauri/Cargo.toml check \
+            --config viewer/src-tauri/deny.toml advisories bans licenses sources
+      - name: Verify generated Rust license inventory
+        working-directory: viewer/src-tauri
+        run: |
+          cargo install cargo-about --version 0.9.1 --locked --features cli
+          for target in \
+            aarch64-apple-darwin \
+            x86_64-apple-darwin \
+            x86_64-unknown-linux-gnu \
+            aarch64-unknown-linux-gnu \
+            x86_64-pc-windows-msvc; do
+            cargo fetch --locked --target "$target"
+          done
+          cargo about generate --frozen --fail \
+            -o ../RUST_THIRD_PARTY_LICENSES.html about.hbs
+          git diff --exit-code -- ../RUST_THIRD_PARTY_LICENSES.html
+      - name: Build the staged desktop application
+        working-directory: viewer
+        run: |
+          cargo install tauri-cli --version 2.9.6 --locked
+          rustup run 1.88.0 cargo tauri build --no-bundle

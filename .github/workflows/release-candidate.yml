@@ -1,0 +1,80 @@
+name: Release candidate evidence
+
+on:
+  push:
+    tags: ["v*-rc.*"]
+  workflow_dispatch:
+    inputs:
+      ref:
+        description: Exact commit or annotated tag to package
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-candidate-${{ inputs.ref || github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  source-evidence:
+    name: Deterministic source evidence
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+          ref: ${{ inputs.ref || github.ref }}
+      - name: Resolve packaged source commit
+        id: source
+        run: echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+      - name: Validate evidence contract
+        run: |
+          python3 tests/test_release_metadata.py
+          python3 tests/test_release_evidence.py
+      - name: Build and self-verify source evidence
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          INPUT_REF: ${{ inputs.ref }}
+          REF_NAME: ${{ github.ref_name }}
+        run: |
+          ref="${INPUT_REF:-HEAD}"
+          release_tag=""
+          if [[ "$EVENT_NAME" == "push" ]]; then
+            ref="$REF_NAME"
+            release_tag="$REF_NAME"
+          else
+            candidate="${ref#refs/tags/}"
+            if git show-ref --verify --quiet "refs/tags/$candidate"; then
+              ref="$candidate"
+              release_tag="$candidate"
+            fi
+          fi
+          selected_commit="$(git rev-parse --verify --end-of-options "${ref}^{commit}")"
+          checked_out_commit="$(git rev-parse HEAD)"
+          if [[ "$selected_commit" != "$checked_out_commit" ]]; then
+            echo "selected ref moved after checkout" >&2
+            exit 1
+          fi
+          args=(
+            build
+            --ref "$ref"
+            --output "$RUNNER_TEMP/melkor-release-evidence"
+          )
+          if [[ -n "$release_tag" ]]; then
+            args+=(--release-tag "$release_tag")
+          fi
+          python3 scripts/build_release_evidence.py "${args[@]}"
+          python3 scripts/build_release_evidence.py verify \
+            "$RUNNER_TEMP/melkor-release-evidence"
+      - name: Upload review evidence
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: melkor-release-evidence-${{ steps.source.outputs.sha }}
+          path: ${{ runner.temp }}/melkor-release-evidence/
+          if-no-files-found: error
+          retention-days: 30
+          compression-level: 0

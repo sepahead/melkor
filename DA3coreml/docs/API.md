@@ -463,3 +463,5 @@ if hasattr(prediction, 'intrinsics'):
 if hasattr(prediction, 'aux') and 'feat_layer_0' in prediction.aux:
     features = prediction.aux['feat_layer_0']
 ```
+> **Vendored snapshot:** this API reference describes the captured upstream DA3
+> tree, not Melkor's supported bridge. See `../../docs/DA3_FEEDFORWARD.md`.

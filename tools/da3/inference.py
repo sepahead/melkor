@@ -5,8 +5,10 @@ Converts images to 3D Gaussian Splats using DA3's depth-ray representation.
 
 Usage:
     python inference.py --input images/ --output output.ply
-    python inference.py --input image.jpg --output output.ply --model DA3-LARGE
+    python inference.py --input image.jpg --output output.ply --model da3-large-1.1
 """
+
+from __future__ import annotations
 
 import argparse
 import json
@@ -74,21 +76,41 @@ class DA3GaussianGenerator:
     MODEL_NAME_MAP = {
         'da3-small': 'DA3-SMALL',
         'da3-base': 'DA3-BASE',
-        'da3-large': 'DA3-LARGE',
-        'da3-giant': 'DA3-GIANT',
+        'da3-large': 'DA3-LARGE-1.1',
+        'da3-large-1.1': 'DA3-LARGE-1.1',
+        'da3-giant': 'DA3-GIANT-1.1',
+        'da3-giant-1.1': 'DA3-GIANT-1.1',
         'da3mono-large': 'DA3MONO-LARGE',
         'da3metric-large': 'DA3METRIC-LARGE',
-        'da3nested-giant-large': 'DA3NESTED-GIANT-LARGE',
+        'da3nested-giant-large': 'DA3NESTED-GIANT-LARGE-1.1',
+        'da3nested-giant-large-1.1': 'DA3NESTED-GIANT-LARGE-1.1',
     }
     
     # Models that support multi-view input
-    MULTI_VIEW_MODELS = {'DA3-SMALL', 'DA3-BASE', 'DA3-LARGE', 'DA3-GIANT', 'DA3NESTED-GIANT-LARGE'}
+    MULTI_VIEW_MODELS = {
+        'DA3-SMALL', 'DA3-BASE', 'DA3-LARGE-1.1', 'DA3-GIANT-1.1',
+        'DA3NESTED-GIANT-LARGE-1.1'
+    }
     
     # Models that output metric depth (in meters)
-    METRIC_MODELS = {'DA3METRIC-LARGE', 'DA3NESTED-GIANT-LARGE'}
+    METRIC_MODELS = {'DA3METRIC-LARGE', 'DA3NESTED-GIANT-LARGE-1.1'}
     
     # Models optimized for monocular (single-view) input
     MONOCULAR_MODELS = {'DA3MONO-LARGE', 'DA3METRIC-LARGE'}
+
+    # Upstream exposes the learned Gaussian head only for these checkpoints.
+    # Passing infer_gs=True to the smaller depth-only models is not supported.
+    GAUSSIAN_MODELS = {'DA3-GIANT-1.1', 'DA3NESTED-GIANT-LARGE-1.1'}
+
+    # Must match scripts/setup_da3.sh. Inference only consumes a local,
+    # revision-marked snapshot; it never falls back to a mutable Hub branch.
+    MODEL_REVISIONS = {
+        'DA3-SMALL': 'e08cab65ca0ec38e7826075418411ab90cab4da3',
+        'DA3-BASE': 'f4a6c9b3c95e41c82048423d3493a81ec3fa810e',
+        'DA3-LARGE-1.1': '0e109ae307c5982f319a67cf6f9f99ccdc0ec97c',
+        'DA3-GIANT-1.1': '72ee9f89ce4e50d704e9d55ee9c646ec8dc25a19',
+        'DA3NESTED-GIANT-LARGE-1.1': 'b2359bdf726fb44ef62acca04d629dcf158053e7',
+    }
     
     def __init__(
         self,
@@ -109,6 +131,12 @@ class DA3GaussianGenerator:
         # Gaussian parameters (means/scales/rotations/SH/opacity) instead of
         # re-deriving them from depth x ray. Set in predict_depth_rays().
         self.last_prediction = None
+        # Per-view world-space camera origins for the depth fallback. DA3 depth
+        # is camera-Z depth, so reconstructing world points requires both the
+        # camera origin and the unnormalized K^-1 pixel vector.
+        self.last_ray_origins: List[np.ndarray] = []
+        self.last_confidences: List[Optional[np.ndarray]] = []
+        self.last_sky_masks: List[Optional[np.ndarray]] = []
         # When the DA3 model is unavailable, the intensity-based depth fallback
         # is gated behind this explicit opt-in. The fallback output is
         # preview-only and must never flow into a reconstruction pipeline
@@ -131,28 +159,42 @@ class DA3GaussianGenerator:
             # Try to load from local path first
             model_path = self.model_dir / self.model_name
             
-            if model_path.exists():
-                from depth_anything_3.api import DepthAnything3
-                self.model = DepthAnything3.from_pretrained(str(model_path))
-            else:
-                # Try loading from HuggingFace
-                from depth_anything_3.api import DepthAnything3
-                # Handle special model name formats for HuggingFace
-                hf_model_id = f"depth-anything/{self.model_name}"
-                print(f"Model not found locally, loading from HuggingFace: {hf_model_id}")
-                self.model = DepthAnything3.from_pretrained(hf_model_id)
+            if not model_path.is_dir():
+                raise FileNotFoundError(
+                    f"verified local model not found at {model_path}; "
+                    "run scripts/setup_da3.sh"
+                )
+            expected_revision = self.MODEL_REVISIONS.get(self.model_name)
+            marker_path = model_path / '.melkor-revision'
+            actual_revision = marker_path.read_text(encoding='utf-8').strip() \
+                if marker_path.is_file() else None
+            if expected_revision is None or actual_revision != expected_revision:
+                raise RuntimeError(
+                    f"unverified model snapshot at {model_path}; expected revision "
+                    f"{expected_revision or 'none'}, found {actual_revision or 'no marker'}"
+                )
+            from depth_anything_3.api import DepthAnything3
+            self.model = DepthAnything3.from_pretrained(str(model_path))
             
-            self.model = self.model.to(device=self.device, dtype=self.dtype)
+            # Let upstream choose BF16/FP16 autocast on capable CUDA devices.
+            # Casting the entire checkpoint to FP16 here overrides that policy
+            # and loses BF16's wider exponent range. --fp32 remains an explicit
+            # diagnostic/CPU path.
+            if self.dtype == torch.float32:
+                self.model = self.model.to(device=self.device, dtype=torch.float32)
+            else:
+                self.model = self.model.to(device=self.device)
             self.model.eval()
             print(f"Model loaded on {self.device}")
             
-        except ImportError as e:
-            print(f"Warning: depth_anything_3 not found ({e}). Using fallback depth estimation.")
-            self.model = None
         except Exception as e:
-            print(f"Warning: Could not load DA3 model: {e}")
-            print("Using fallback depth estimation.")
             self.model = None
+            if not self.allow_fallback_depth:
+                raise RuntimeError(
+                    "DA3 model loading failed and preview fallback is disabled"
+                ) from e
+            print(f"Warning: DA3 model unavailable ({e}).")
+            print("Using explicit preview-only intensity depth fallback.")
     
     def predict_depth_rays(
         self,
@@ -174,6 +216,18 @@ class DA3GaussianGenerator:
         depths: List[np.ndarray] = []
         rays: List[np.ndarray] = []
         colors: List[np.ndarray] = []
+        self.last_ray_origins = []
+        self.last_confidences = []
+        self.last_sky_masks = []
+
+        if self.is_monocular:
+            raise RuntimeError(
+                f"{self.model_name} is a depth-only checkpoint without multi-view "
+                "camera poses/intrinsics, so it cannot produce a world-space splat "
+                "scene. Use the upstream DA3 depth exporter, or choose DA3-BASE, "
+                "DA3-SMALL, DA3-LARGE-1.1, DA3-GIANT-1.1, or "
+                "DA3NESTED-GIANT-LARGE-1.1."
+            )
 
         # Warn (not fail) on dimension mismatch; DA3 resizes internally but the
         # caller should ideally pre-normalize inputs.
@@ -195,14 +249,14 @@ class DA3GaussianGenerator:
         if self.model is not None:
             # Single multi-view call: inference() takes the list of image paths
             # (or arrays) and returns a Prediction whose arrays are indexed by
-            # view, i.e. depth has shape (N, H, W). infer_gs=True enables the
-            # Gaussian branch; it also forces depth/extrinsics/intrinsics to be
-            # populated consistently across views.
+            # view, i.e. depth has shape (N, H, W). The learned Gaussian branch
+            # is requested only for the two checkpoints that upstream documents
+            # as supporting it; other models use camera-aware depth unprojection.
             try:
                 with torch.no_grad():
                     prediction = self.model.inference(
                         [str(p) for p in image_paths],
-                        infer_gs=True,
+                        infer_gs=self.model_name in self.GAUSSIAN_MODELS,
                     )
                 # Stash the Prediction so callers can use the model's directly
                 # estimated Gaussians (means, scales, rotations, SH, opacity)
@@ -236,6 +290,9 @@ class DA3GaussianGenerator:
                     depth = self._fallback_depth(img_batch)
                     depths.append(depth)
                     rays.append(self._compute_rays(*depth.shape))
+                    self.last_ray_origins.append(np.zeros(3, dtype=np.float32))
+                    self.last_confidences.append(None)
+                    self.last_sky_masks.append(None)
                     colors.append(img_tensor.permute(1, 2, 0).numpy())
             return depths, rays, colors
 
@@ -243,13 +300,28 @@ class DA3GaussianGenerator:
         n_views = depth_stack.shape[0]
         ext_np = np.asarray(prediction.extrinsics) if getattr(prediction, "extrinsics", None) is not None else None
         ixt_np = np.asarray(prediction.intrinsics) if getattr(prediction, "intrinsics", None) is not None else None
+        if (ext_np is None or ixt_np is None) and not self.allow_fallback_depth:
+            raise RuntimeError(
+                "DA3 returned depth without camera extrinsics/intrinsics. Refusing "
+                "to invent a 60-degree camera and origin because that would not be "
+                "a valid world-space reconstruction."
+            )
         for view_idx in range(n_views):
             depth = depth_stack[view_idx]
             depths.append(depth)
 
             h, w = depth.shape
-            ray = self._ray_map_for_view(view_idx, h, w, ext_np, ixt_np)
+            origin, ray = self._ray_geometry_for_view(view_idx, h, w, ext_np, ixt_np)
+            self.last_ray_origins.append(origin)
             rays.append(ray)
+            pred_conf = getattr(prediction, "conf", None)
+            pred_sky = getattr(prediction, "sky", None)
+            self.last_confidences.append(
+                np.asarray(pred_conf[view_idx]) if pred_conf is not None else None
+            )
+            self.last_sky_masks.append(
+                np.asarray(pred_sky[view_idx]) if pred_sky is not None else None
+            )
 
             # Recover the (possibly resized) color image. The model's processed
             # images are the ground truth for what the network actually saw.
@@ -265,6 +337,62 @@ class DA3GaussianGenerator:
 
         return depths, rays, colors
 
+    def _ray_geometry_for_view(
+        self,
+        view_idx: int,
+        h: int,
+        w: int,
+        extrinsics: "np.ndarray | None",
+        intrinsics: "np.ndarray | None",
+    ) -> Tuple[np.ndarray, np.ndarray]:
+        """Build a camera origin and per-pixel world-space depth vectors.
+
+        When DA3 provides camera extrinsics (w2c, (4,4)) and intrinsics (3,3)
+        we back-project K^-1 [u,v,1] and rotate it into world space. The vector
+        is deliberately NOT normalized: Prediction.depth is camera-Z depth,
+        not Euclidean ray distance. World points are therefore
+        ``camera_origin + depth * depth_vector``. If camera parameters are
+        unavailable, retain the old origin-zero/FOV approximation for the
+        explicitly opted-in preview fallback.
+        """
+        if extrinsics is not None and intrinsics is not None:
+            try:
+                ext = extrinsics[view_idx] if extrinsics.ndim >= 3 else extrinsics
+                ixt = intrinsics[view_idx] if intrinsics.ndim >= 3 else intrinsics
+                if ext.shape not in ((3, 4), (4, 4)) or ixt.shape != (3, 3):
+                    raise ValueError(
+                        f"expected extrinsics (3,4)/(4,4) and intrinsics (3,3), "
+                        f"got {ext.shape} and {ixt.shape}"
+                    )
+                if not np.isfinite(ext).all() or not np.isfinite(ixt).all():
+                    raise ValueError("camera arrays contain NaN/Inf")
+                w2c = np.eye(4, dtype=np.float64)
+                w2c[: ext.shape[0], : ext.shape[1]] = ext
+                c2w = np.linalg.inv(w2c)
+                fx, fy = float(ixt[0, 0]), float(ixt[1, 1])
+                cx, cy = float(ixt[0, 2]), float(ixt[1, 2])
+                if fx <= 0.0 or fy <= 0.0:
+                    raise ValueError(f"invalid focal lengths fx={fx}, fy={fy}")
+                u = np.arange(w, dtype=np.float64)
+                v = np.arange(h, dtype=np.float64)
+                uu, vv = np.meshgrid(u, v)
+                # Camera-space vector for one unit of camera-Z depth.
+                dir_cam = np.stack(
+                    [(uu - cx) / fx, (vv - cy) / fy, np.ones_like(uu)], axis=-1
+                )
+                r_c2w = c2w[:3, :3].astype(np.float64)
+                dir_world = dir_cam @ r_c2w.T
+                origin = c2w[:3, 3].astype(np.float32)
+                return origin, dir_world.astype(np.float32)
+            except Exception as e:
+                if not self.allow_fallback_depth:
+                    raise RuntimeError(
+                        "DA3 returned malformed camera parameters; refusing to invent "
+                        "preview geometry for a world-space reconstruction."
+                    ) from e
+                print(f"Warning: ray derivation from camera params failed ({e}); using FOV fallback.")
+        return np.zeros(3, dtype=np.float32), self._compute_rays(h, w)
+
     def _ray_map_for_view(
         self,
         view_idx: int,
@@ -273,40 +401,8 @@ class DA3GaussianGenerator:
         extrinsics: "np.ndarray | None",
         intrinsics: "np.ndarray | None",
     ) -> np.ndarray:
-        """Build a per-pixel world-space ray direction map for one view.
-
-        When DA3 provides camera extrinsics (w2c, (4,4)) and intrinsics (3,3)
-        we back out the ray directions from the pinhole model and rotate them
-        into world space -- this is the geometrically correct ray and replaces
-        the old FOV-guessed _compute_rays fallback. If either is missing we
-        keep the FOV-based approximation so single-image/metric-only models
-        still produce output.
-        """
-        if extrinsics is not None and intrinsics is not None:
-            try:
-                ext = extrinsics[view_idx] if extrinsics.ndim >= 3 else extrinsics
-                ixt = intrinsics[view_idx] if intrinsics.ndim >= 3 else intrinsics
-                w2c = np.eye(4, dtype=np.float64)
-                w2c[: ext.shape[0], : ext.shape[1]] = ext
-                c2w = np.linalg.inv(w2c)
-                fx, fy = float(ixt[0, 0]), float(ixt[1, 1])
-                cx, cy = float(ixt[0, 2]), float(ixt[1, 2])
-                u = np.arange(w, dtype=np.float64)
-                v = np.arange(h, dtype=np.float64)
-                uu, vv = np.meshgrid(u, v)
-                # Camera-space ray (before normalization).
-                dir_cam = np.stack(
-                    [(uu - cx) / fx, (vv - cy) / fy, np.ones_like(uu)], axis=-1
-                )
-                dir_cam /= np.linalg.norm(dir_cam, axis=-1, keepdims=True)
-                # Rotate into world space (extrinsics translate too, but ray
-                # directions are translation-invariant).
-                r_c2w = c2w[:3, :3].astype(np.float64)
-                dir_world = dir_cam @ r_c2w.T
-                return dir_world.astype(np.float32)
-            except Exception as e:
-                print(f"Warning: ray derivation from camera params failed ({e}); using FOV fallback.")
-        return self._compute_rays(h, w)
+        """Compatibility wrapper returning only the per-pixel depth vectors."""
+        return self._ray_geometry_for_view(view_idx, h, w, extrinsics, intrinsics)[1]
 
     def _fallback_depth(self, img_batch: torch.Tensor) -> np.ndarray:
         """Preview-only intensity-based depth estimation.
@@ -374,7 +470,8 @@ class DA3GaussianGenerator:
         scale_factor: float = 0.01,
         min_depth: float = 0.1,
         max_depth: float = 100.0,
-        subsample: int = 1
+        subsample: int = 1,
+        confidence_percentile: float = 40.0,
     ) -> dict:
         """Convert depth-ray predictions to 3D Gaussian splats.
         
@@ -396,21 +493,53 @@ class DA3GaussianGenerator:
         all_rotations = []
         all_opacities = []
         
-        for depth, ray, color in zip(depths, rays, colors, strict=True):
+        for view_idx, (depth, ray, color) in enumerate(
+            zip(depths, rays, colors, strict=True)
+        ):
             h, w = depth.shape
+            confidence = (
+                np.asarray(self.last_confidences[view_idx], dtype=np.float32)
+                if view_idx < len(self.last_confidences)
+                and self.last_confidences[view_idx] is not None
+                else None
+            )
+            sky = (
+                np.asarray(self.last_sky_masks[view_idx])
+                if view_idx < len(self.last_sky_masks)
+                and self.last_sky_masks[view_idx] is not None
+                else None
+            )
             
             # Subsample if requested
             if subsample > 1:
                 depth = depth[::subsample, ::subsample]
                 ray = ray[::subsample, ::subsample]
                 color = color[::subsample, ::subsample]
+                if confidence is not None:
+                    confidence = confidence[::subsample, ::subsample]
+                if sky is not None:
+                    sky = sky[::subsample, ::subsample]
                 h, w = depth.shape
             
             # Create mask for valid depths
             valid_mask = (depth > min_depth) & (depth < max_depth) & np.isfinite(depth)
+            if sky is not None and sky.shape == depth.shape:
+                valid_mask &= sky < 0.5
+            if confidence is not None:
+                finite_conf = confidence[np.isfinite(confidence)]
+                if confidence.shape == depth.shape and finite_conf.size:
+                    threshold = np.percentile(finite_conf, confidence_percentile)
+                    valid_mask &= np.isfinite(confidence) & (confidence >= threshold)
             
-            # Compute 3D positions: P = depth * ray
-            positions = depth[..., np.newaxis] * ray
+            # Camera-aware world unprojection. In the primary path
+            # prediction.gaussians is used directly; this fallback still needs
+            # to respect each view's camera translation.
+            origin = (
+                self.last_ray_origins[view_idx]
+                if view_idx < len(self.last_ray_origins)
+                else np.zeros(3, dtype=np.float32)
+            )
+            positions = origin.reshape(1, 1, 3) + depth[..., np.newaxis] * ray
             
             # Flatten and filter
             positions_flat = positions[valid_mask]
@@ -468,7 +597,7 @@ class DA3GaussianGenerator:
             'opacities': opacities
         }
 
-    def gaussians_from_prediction(self) -> Optional[dict]:
+    def gaussians_from_prediction(self, subsample: int = 1) -> Optional[dict]:
         """Extract the model's directly-estimated Gaussians as a dict.
 
         When DA3 runs with infer_gs=True, the model emits a full Gaussian
@@ -497,6 +626,12 @@ class DA3GaussianGenerator:
             return None
         g = pred.gaussians
         try:
+            depth = np.asarray(pred.depth)
+            if depth.ndim == 2:
+                depth = depth[None]
+            if depth.ndim != 3:
+                raise ValueError(f"expected prediction.depth (V,H,W), got {depth.shape}")
+            views, height, width = depth.shape
             means = g.means.detach().cpu().reshape(-1, 3).contiguous().numpy()
             # harmonics: (b, N, 3, d_sh). DC band is index 0 of the last dim.
             dc = g.harmonics.detach().cpu()[..., 0].reshape(-1, 3).contiguous().numpy()
@@ -504,11 +639,45 @@ class DA3GaussianGenerator:
             # rotations are wxyz per the Gaussians dataclass.
             rots = g.rotations.detach().cpu().reshape(-1, 4).contiguous().numpy()
             opac = g.opacities.detach().cpu().reshape(-1).contiguous().numpy()
+            expected = views * height * width
+            if not all(array.shape[0] == expected for array in (means, dc, scales, rots, opac)):
+                raise ValueError(
+                    f"Gaussian grid has inconsistent size; expected {expected} "
+                    f"from depth but got {means.shape[0]}"
+                )
         except Exception as e:
             print(f"Warning: failed to extract prediction.gaussians ({e}); "
                   "falling back to depth x ray.")
             return None
 
+        if means.shape[0] == 0:
+            return None
+
+        # Match the official DA3 GS PLY exporter: remove low-quality image
+        # borders and the farthest 10% of depths independently per view. Keep
+        # the (V,H,W) layout until after 2-D pixel subsampling so --subsample N
+        # consistently retains roughly 1/N^2 pixels on both reconstruction paths.
+        mask = np.isfinite(depth) & (depth > 0.0)
+        trim_h = int(8 / 256 * height)
+        trim_w = int(8 / 256 * width)
+        if trim_h > 0:
+            mask[:, :trim_h, :] = False
+            mask[:, -trim_h:, :] = False
+        if trim_w > 0:
+            mask[:, :, :trim_w] = False
+            mask[:, :, -trim_w:] = False
+        for view_idx in range(views):
+            valid_depth = depth[view_idx][np.isfinite(depth[view_idx])]
+            if valid_depth.size:
+                mask[view_idx] &= depth[view_idx] <= np.quantile(valid_depth, 0.9)
+        if subsample > 1:
+            sampled = np.zeros_like(mask)
+            sampled[:, ::subsample, ::subsample] = True
+            mask &= sampled
+        selected = mask.reshape(-1)
+        means, dc, scales, rots, opac = (
+            array[selected] for array in (means, dc, scales, rots, opac)
+        )
         if means.shape[0] == 0:
             return None
 
@@ -685,12 +854,15 @@ end_header
 
 def save_json(gaussians: dict, output_path: str):
     """Save Gaussians to JSON format for debugging."""
+    included = min(len(gaussians['positions']), 1000)
     output = {
         'num_gaussians': len(gaussians['positions']),
+        'included_gaussians': included,
+        'truncated': included < len(gaussians['positions']),
         'gaussians': []
     }
     
-    for i in range(min(len(gaussians['positions']), 1000)):  # Limit for JSON size
+    for i in range(included):  # Keep the debugging representation bounded.
         output['gaussians'].append({
             'position': gaussians['positions'][i].tolist(),
             'color': gaussians['colors'][i].tolist(),
@@ -702,7 +874,10 @@ def save_json(gaussians: dict, output_path: str):
     with open(output_path, 'w') as f:
         json.dump(output, f, indent=2)
     
-    print(f"Saved {output['num_gaussians']} Gaussians to {output_path}")
+    print(
+        f"Saved JSON preview with {included}/{output['num_gaussians']} "
+        f"Gaussians to {output_path}"
+    )
 
 
 def save_npz(gaussians: dict, output_path: str):
@@ -732,12 +907,10 @@ def save_glb(gaussians: dict, output_path: str):
         # Export as GLB
         cloud.export(output_path, file_type='glb')
         print(f"Saved {len(gaussians['positions'])} points to {output_path}")
-    except ImportError:
-        print("Error: trimesh not installed. Install with: pip install trimesh")
-        # Fallback to PLY
-        ply_path = output_path.replace('.glb', '.ply')
-        save_ply(gaussians, ply_path)
-        print(f"Saved as PLY instead: {ply_path}")
+    except ImportError as exc:
+        raise RuntimeError(
+            "GLB output requires trimesh; install it or request .ply explicitly"
+        ) from exc
 
 
 def main():
@@ -753,7 +926,7 @@ Examples:
   python inference.py --input images/ --output scene.ply
   
   # With specific model
-  python inference.py --model DA3-LARGE --input images/ --output scene.ply
+  python inference.py --model da3-large-1.1 --input images/ --output scene.ply
   
   # Adjust Gaussian scale
   python inference.py --input images/ --output scene.ply --scale 0.005
@@ -766,30 +939,29 @@ Examples:
     parser.add_argument('--input', '-i', required=True,
                        help='Input image or directory of images')
     parser.add_argument('--output', '-o', required=True,
-                       help='Output file (.ply or .json)')
+                       help='Output file (.ply, .json, .npz, or .glb)')
     parser.add_argument('--model', '-m', default=DEFAULT_MODEL,
-                       choices=['DA3-SMALL', 'DA3-BASE', 'DA3-LARGE', 'DA3-GIANT', 
-                                'DA3MONO-LARGE', 'DA3METRIC-LARGE', 'DA3NESTED-GIANT-LARGE',
-                                'da3-small', 'da3-base', 'da3-large', 'da3-giant',
-                                'da3mono-large', 'da3metric-large', 'da3nested-giant-large'],
+                       choices=['DA3-SMALL', 'DA3-BASE', 'DA3-LARGE-1.1',
+                                'DA3-GIANT-1.1', 'DA3NESTED-GIANT-LARGE-1.1',
+                                'da3-small', 'da3-base', 'da3-large',
+                                'da3-large-1.1', 'da3-giant', 'da3-giant-1.1',
+                                'da3nested-giant-large', 'da3nested-giant-large-1.1'],
                        help=f'DA3 model to use (default: {DEFAULT_MODEL})')
     parser.add_argument('--model-dir', default=DEFAULT_MODEL_DIR,
                        help='Directory containing model weights')
-    parser.add_argument('--device', default='cuda',
+    parser.add_argument('--device', default='cuda', choices=['cuda', 'cpu'],
                        help='Device to use (cuda, cpu)')
     parser.add_argument('--scale', type=float, default=0.01,
                        help='Base scale for Gaussians (default: 0.01)')
     parser.add_argument('--subsample', type=int, default=1,
                        help='Pixel subsampling factor (default: 1, use all pixels)')
+    parser.add_argument('--confidence-percentile', type=float, default=40.0,
+                       help='Discard depth pixels below this confidence percentile '
+                            '(default: 40; depth-derived splats only)')
     parser.add_argument('--min-depth', type=float, default=0.1,
                        help='Minimum valid depth (default: 0.1)')
     parser.add_argument('--max-depth', type=float, default=100.0,
                        help='Maximum valid depth (default: 100.0)')
-    parser.add_argument('--voxel-size', type=float, default=0.05,
-                       help='Voxel size for multi-view fusion (default: 0.05)')
-    parser.add_argument('--export-format', default='ply',
-                       choices=['ply', 'glb', 'npz'],
-                       help='Output format (default: ply)')
     parser.add_argument('--fp32', action='store_true',
                        help='Use FP32 instead of FP16')
     parser.add_argument('--verbose', '-v', action='store_true',
@@ -801,11 +973,34 @@ Examples:
                             'disabled by default to prevent silent low-quality results.')
 
     args = parser.parse_args()
+
+    if not np.isfinite(args.scale) or args.scale <= 0:
+        parser.error('--scale must be a finite value > 0')
+    if args.subsample < 1:
+        parser.error('--subsample must be >= 1')
+    if not np.isfinite(args.confidence_percentile) or not 0 <= args.confidence_percentile <= 100:
+        parser.error('--confidence-percentile must be finite and in [0, 100]')
+    if (
+        not np.isfinite(args.min_depth)
+        or not np.isfinite(args.max_depth)
+        or args.min_depth < 0
+        or args.max_depth <= args.min_depth
+    ):
+        parser.error('--min-depth and --max-depth must be finite, with 0 <= min < max')
+
+    output_path = Path(args.output)
+    supported_suffixes = {'.ply', '.json', '.npz', '.glb'}
+    if output_path.suffix.lower() not in supported_suffixes:
+        parser.error(
+            'unsupported output extension; choose .ply, .json, .npz, or .glb. '
+            'For SPZ, write .ply first and run: melkor scene.ply scene.spz'
+        )
     
     # Check CUDA availability
     if args.device == 'cuda' and not torch.cuda.is_available():
         print("Warning: CUDA not available, falling back to CPU")
         args.device = 'cpu'
+        args.fp32 = True
     
     if args.device == 'cuda':
         print(f"Using GPU: {torch.cuda.get_device_name(0)}")
@@ -850,28 +1045,27 @@ Examples:
     # from depth x ray. Fall back to the depth path only when the direct
     # Gaussians are unavailable (model absent, or infer_gs didn't populate).
     start_time = time.time()
-    gaussians = generator.gaussians_from_prediction()
+    gaussians = generator.gaussians_from_prediction(subsample=args.subsample)
     if gaussians is not None:
         print("Using model-direct Gaussians (infer_gs branch).")
-        # Honor --subsample on the direct path too, so users can bound point
-        # count for huge scenes. Take a uniform strided sample.
-        if args.subsample > 1 and len(gaussians['positions']) > 0:
-            sel = slice(None, None, args.subsample)
-            gaussians = {k: v[sel] for k, v in gaussians.items()}
     else:
         gaussians = generator.depth_rays_to_gaussians(
             depths, rays, colors,
             scale_factor=args.scale,
             min_depth=args.min_depth,
             max_depth=args.max_depth,
-            subsample=args.subsample
+            subsample=args.subsample,
+            confidence_percentile=args.confidence_percentile,
         )
     convert_time = time.time() - start_time
     print(f"Gaussian conversion: {convert_time:.2f}s")
     print(f"Generated {len(gaussians['positions'])} Gaussians")
+    if len(gaussians['positions']) == 0:
+        raise RuntimeError(
+            'DA3 produced no valid Gaussians; refusing to write an empty output'
+        )
     
     # Save output
-    output_path = Path(args.output)
     output_path.parent.mkdir(parents=True, exist_ok=True)
     
     suffix = output_path.suffix.lower()
@@ -881,7 +1075,7 @@ Examples:
         save_npz(gaussians, str(output_path))
     elif suffix == '.glb':
         save_glb(gaussians, str(output_path))
-    else:
+    elif suffix == '.ply':
         save_ply(gaussians, str(output_path))
     
     print(f"\nTotal time: {depth_time + convert_time:.2f}s")

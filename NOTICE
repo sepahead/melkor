@@ -8,7 +8,7 @@ This product includes software developed by the following third parties:
 Depth Anything 3 (DA3)
 Copyright 2025 The Depth Anything 3 Team
 Licensed under the Apache License, Version 2.0
-https://github.com/DepthAnything/Depth-Anything-V3
+https://github.com/ByteDance-Seed/Depth-Anything-3
 
 ---
 
@@ -35,15 +35,28 @@ https://github.com/nianticlabs/spz
 ---
 
 tinygltf
-Copyright (c) 2017-2024 Syoyo Fujita and contributors
+Copyright (c) 2015-Present Syoyo Fujita, Aurélien Chatelain and contributors
 Licensed under the MIT License
 https://github.com/syoyo/tinygltf
 
 ---
 
+JSON for Modern C++ (embedded by tinygltf)
+Copyright (c) 2013-2019 Niels Lohmann
+Licensed under the MIT License
+https://github.com/nlohmann/json
+
+---
+
+René Nyffenegger base64 codec and dlib URI decoder (embedded by tinygltf)
+Copyright (C) 2004-2008 René Nyffenegger; Copyright (C) 2003 Davis E. King
+Licensed under their in-source notice and Boost Software License 1.0
+
+---
+
 stb_image
-Copyright (c) 2017-2024 Sean Barrett and contributors
-Public domain / MIT License
+Copyright (c) 2017 Sean Barrett
+MIT License (selected from the upstream MIT / public-domain dual license)
 https://github.com/nothings/stb
 
 ---

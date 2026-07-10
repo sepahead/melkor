@@ -387,7 +387,9 @@ class DualDPTCoreMLExporter:
             if self.checkpoint_path.endswith('.safetensors'):
                 state_dict = load_safetensors(self.checkpoint_path)
             else:
-                checkpoint = torch.load(self.checkpoint_path, map_location="cpu")
+                checkpoint = torch.load(
+                    self.checkpoint_path, map_location="cpu", weights_only=True
+                )
                 state_dict = checkpoint.get('state_dict', checkpoint.get('model', checkpoint))
 
             # Auto-detect dim_in from checkpoint if possible

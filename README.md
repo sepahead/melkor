@@ -23,30 +23,31 @@
 
 ---
 
-Melkor turns meshes and photo sets into 3D Gaussian splat scenes and gives you the tools to refine, compress, complete, and view them. A single CLI covers GLB/PLY/SPZ conversion with four quality tiers, densification-based scene completion, and GPU acceleration on Metal (macOS) and CUDA (Linux) with a bit-consistent CPU fallback. Around the core sit curated training pipelines (OpenSplat, gsplat, LichtFeld-Studio), feedforward reconstruction (Depth Anything 3), and a SparkJS web viewer with a Tauri desktop shell.
+Melkor turns meshes and photo sets into 3D Gaussian splat scenes and gives you the tools to refine, compress, complete, and view them. The native CLI covers GLB/PLY/SPZ conversion, densification-based scene completion, and GPU acceleration on Metal (macOS) and CUDA (Linux), with a behaviorally consistent CPU fallback. Around the core sit curated training pipelines (OpenSplat, gsplat, LichtFeld-Studio), a reviewed Depth Anything 3 bridge, and a SparkJS web viewer with a Tauri desktop shell.
 
 ## Features
 
 **Core CLI**
-- **Four conversion modes** — Basic (fast vertex-to-splat), Enhanced (k-NN adaptive scale + surface alignment), Fit (differentiable-rendering optimization on Metal), Feedforward (pretrained networks)
-- **Format support** — GLB/glTF → PLY/SPZ, PLY ↔ SPZ (SPZ compresses ~90% vs PLY, including spherical-harmonics data)
+- **Two honest conversion modes** — Basic (fast vertex-to-splat) and Enhanced (k-NN adaptive scale + surface alignment). Trained fitting and neural reconstruction use the dedicated OpenSplat/DA3 pipelines; the native facades were retired because they did not implement those contracts.
+- **Deterministic inspection** — `melkor inspect INPUT [--json] [--strict]` validates metadata, counts, bounds, field provenance, and numeric hazards without initializing a GPU or changing the source ([docs/INSPECT.md](docs/INSPECT.md))
+- **Format support** — GLB/glTF 2.0 → PLY/SPZ, PLY ↔ SPZ v1-v3 (SPZ compresses ~90% vs PLY, including spherical-harmonics data)
 - **Scene completion** — densification-based hole filling, the 3DGS counterpart of inpainting: bridges occlusion voids and densifies sparse regions deterministically, with no learned prior ([docs/SCENE_COMPLETION.md](docs/SCENE_COMPLETION.md))
 
 **Acceleration**
-- **Unified compute backends** — one `ComputeProvider` interface dispatches to Metal, CUDA, or CPU at runtime; all three implementations are kept operation-for-operation consistent and are locked together by parity tests
+- **Unified compute backends** — one `ComputeProvider` interface dispatches to Metal, CUDA, or CPU at runtime; CPU/Metal behavior is locked by runtime parity tests, while CUDA is compile-gated in hosted CI and shares the same reference semantics
 - **Grid-accelerated k-NN** — uniform-grid neighbor search kernels (Metal + CUDA, with an identical CPU reference) keep enhanced conversion and scene completion on the GPU for clouds of any size
 
 **Pipelines & viewing**
 - **Training** — OpenSplat (multi-GPU), gsplat (CUDA DDP), gsplat-mps (Apple Silicon), LichtFeld-Studio (Linux)
-- **Feedforward** — DA3 / Depth Anything 3, plus the strongest 2025–2026 SOTA models: MapAnything, VGGT, Pi3, AMB3R (geometry → COLMAP export → training) and YoNoSplat, SPFSplatV2 (direct splats), MoGe-2 (single-image); one installer with per-model license gating ([docs/FEEDFORWARD_SOTA.md](docs/FEEDFORWARD_SOTA.md))
+- **Feedforward** — a pinned DA3 / Depth Anything 3 bridge plus a dated, license-aware catalog of MapAnything, VGGT, Pi3, AMB3R, YoNoSplat, SPFSplatV2, and MoGe-2 integrations ([docs/FEEDFORWARD_SOTA.md](docs/FEEDFORWARD_SOTA.md))
 - **Structure-from-Motion** — COLMAP and GLOMAP (10–100× faster mapping)
-- **Web viewer** — SparkJS + THREE.js viewer for SPZ/SOG/SPLAT/PLY scenes with camera feeds, auto-orbit, fly controls, and **progressive streaming** (renders splats as they download); ships with a Playwright render-test suite and an optional Tauri desktop build ([viewer/README.md](viewer/README.md))
+- **Web viewer** — SparkJS + THREE.js viewer for SPZ/SOG/SPLAT/PLY scenes with private offline local-file opening, drag-and-drop, camera feeds, auto-orbit, fly controls, and **progressive streaming** (renders splats as they download); ships with a Playwright render-test suite and an optional Tauri desktop build ([viewer/README.md](viewer/README.md))
 - **Streaming** — progressive/LOD viewer loading, streamable formats (SPZ, SOG, `.RAD`), a **4D temporal player** for volumetric-video sequences (fed by 4D-GS per-frame PLY exports), and an installable online/streaming **3DGS reconstruction** stage (`setup_streaming.sh`: Gaussian-SLAM, SplaTAM, Splat-SLAM, 3DGStream → PLY → melkor); see [docs/STREAMING.md](docs/STREAMING.md)
 
 ## Quick Start
 
 ```bash
-# Fetch pinned third-party deps and build (Metal is enabled automatically on macOS)
+# Verify vendored third-party snapshots and build (Metal is automatic on macOS)
 ./scripts/setup_deps.sh
 cmake -B build -DCMAKE_BUILD_TYPE=Release
 cmake --build build -j
@@ -56,6 +57,9 @@ cmake --build build -j
 
 # Convert a mesh to splats
 ./build/melkor input.glb output.ply
+
+# Validate before converting or publishing
+./build/melkor inspect output.ply --json --strict
 ```
 
 **Training from photos** (full pipeline: SfM → training → output):
@@ -65,7 +69,7 @@ cmake --build build -j
 ./scripts/train_from_images.sh ~/Photos/my_scene ~/output/my_scene
 ```
 
-**Feedforward reconstruction** (no COLMAP, seconds):
+**Feedforward reconstruction** (no COLMAP, typically seconds to minutes):
 
 ```bash
 ./scripts/setup_da3.sh
@@ -81,10 +85,25 @@ See [docs/QUICKSTART.md](docs/QUICKSTART.md) for the complete walkthrough.
 ```bash
 ./build/melkor model.glb output.ply                            # Basic (default)
 ./build/melkor model.glb output.ply --enhanced                 # Adaptive scale + surface alignment
-./build/melkor model.glb output.ply --fit --iterations 5000    # Differentiable-rendering fit (Metal)
 ./build/melkor scene.ply scene.spz                             # Compress to SPZ
 ./build/melkor scene.spz scene.ply                             # Decompress back to PLY
 ```
+
+For trained fitting, use OpenSplat through `scripts/opensplat_wrapper.sh`. For
+neural reconstruction, use `da3-infer`; the native `--fit` and
+`--feedforward` switches deliberately fail closed.
+
+### Validate or inventory an asset
+
+```bash
+./build/melkor inspect scene.ply
+./build/melkor inspect scene.spz --json --strict
+./build/melkor inspect model.glb --json
+```
+
+Exit `0` means no errors, exit `1` means invalid (or warnings under `--strict`),
+and exit `2` means invalid command usage. See [docs/INSPECT.md](docs/INSPECT.md)
+for the deterministic `melkor.inspect.v1` JSON contract and format limits.
 
 ### Scene completion (hole filling / densification)
 
@@ -115,6 +134,9 @@ bun run serve              # http://127.0.0.1:8771
 bun run test               # headless render tests
 ```
 
+Use **Open local splat** or drop a PLY/SPZ/SPLAT/KSPLAT/SOG/ZIP file onto the
+viewer. Bytes remain inside the browser/webview and work without a network.
+
 ## Architecture
 
 ```mermaid
@@ -124,8 +146,8 @@ flowchart LR
         M[GLB / glTF mesh]
     end
     SfM --> T[Training<br/>OpenSplat · gsplat · LichtFeld]
-    P --> FF[Feedforward<br/>DA3 · Splatter-Image]
-    M --> C[melkor CLI<br/>basic · enhanced · fit]
+    P --> FF[Feedforward<br/>DA3 · reviewed adapters]
+    M --> C[melkor CLI<br/>basic · enhanced]
     T --> S[(Splat cloud)]
     FF --> S
     C --> S
@@ -141,7 +163,7 @@ The core library (`melkor_core`) is platform-independent; GPU work goes through 
 
 | Platform | Backend | Enable | Notes |
 |----------|---------|--------|-------|
-| macOS (Apple Silicon) | Metal | default | compute kernels + differentiable rasterizer (`--fit`) |
+| macOS (Apple Silicon) | Metal | default | compute kernels + reference differentiable rasterizer API |
 | Linux (NVIDIA) | CUDA | `-DMELKOR_USE_CUDA=ON` | SM 60–90; grid k-NN and cloud processing on-device |
 | Any | CPU | automatic fallback | bit-consistent reference implementation |
 
@@ -152,6 +174,7 @@ The core library (`melkor_core`) is platform-independent; GPU work goes through 
 | Document | Contents |
 |----------|----------|
 | [docs/QUICKSTART.md](docs/QUICKSTART.md) | End-to-end setup and first conversion/training run |
+| [docs/INSPECT.md](docs/INSPECT.md) | Deterministic asset validation and JSON automation contract |
 | [docs/PIPELINE.md](docs/PIPELINE.md) | The `pipeline.sh` photos-to-splats orchestrator |
 | [docs/SCENE_COMPLETION.md](docs/SCENE_COMPLETION.md) | Hole filling / densification: algorithm, parameters, limits |
 | [docs/OPENSPLAT_WRAPPER.md](docs/OPENSPLAT_WRAPPER.md) | Multi-GPU OpenSplat training wrapper |
@@ -159,8 +182,9 @@ The core library (`melkor_core`) is platform-independent; GPU work goes through 
 | [docs/GSPLAT_CUDA.md](docs/GSPLAT_CUDA.md) | gsplat with CUDA and distributed training |
 | [docs/LICHTFELD_WRAPPER.md](docs/LICHTFELD_WRAPPER.md) | LichtFeld-Studio training wrapper |
 | [docs/DA3_FEEDFORWARD.md](docs/DA3_FEEDFORWARD.md) | Depth Anything 3 feedforward reconstruction |
-| [docs/FEEDFORWARD_SOTA.md](docs/FEEDFORWARD_SOTA.md) | SOTA 2025–2026 feedforward models (MapAnything, VGGT, YoNoSplat, …) |
+| [docs/FEEDFORWARD_SOTA.md](docs/FEEDFORWARD_SOTA.md) | Dated feedforward integration catalog (MapAnything, VGGT, YoNoSplat, …) |
 | [docs/STREAMING.md](docs/STREAMING.md) | Streaming splats: progressive/LOD viewer loading, SOG format, SLAM |
+| [docs/RELEASE.md](docs/RELEASE.md) | Reproducible source checks and signed-distribution release gates |
 | [viewer/README.md](viewer/README.md) | SparkJS web viewer, Tauri shell, render tests |
 
 ## Testing
@@ -169,7 +193,7 @@ The core library (`melkor_core`) is platform-independent; GPU work goes through 
 cd build && ctest --output-on-failure
 ```
 
-Seven suites cover the core: format round-trip fuzzing (PLY, SPZ quaternions against the canonical spz decoder), compute-provider backend parity, scene-completion behavior (hole closure, boundary containment, CPU/GPU parity), differentiable-renderer gradient checks against finite differences, and the DA3 extraction path. CI builds macOS (Metal), macOS with AddressSanitizer, and Linux (CPU) on every push; the viewer has its own Playwright suite (`cd viewer && bun run test`).
+The test suites cover format round trips and hostile input, deterministic inspection, release evidence, scene-graph transforms, compute-provider parity, scene completion, differentiable-renderer gradients, strict CLI parsing, and the DA3 extraction path. CI builds macOS (Metal), macOS with AddressSanitizer, Linux (CPU), and Linux CUDA compile-only targets; it also runs Python/shell checks, dependency review, Rust policy checks, and the viewer's Playwright suite.
 
 When touching backend code, verify both configurations locally:
 
@@ -210,6 +234,6 @@ MIT for the core Melkor code — see [LICENSE](LICENSE). Bundled third-party com
 - [3D Gaussian Splatting](https://github.com/graphdeco-inria/gaussian-splatting) — the original technique and reference implementation
 - [OpenSplat](https://github.com/pierotofy/OpenSplat), [gsplat](https://github.com/nerfstudio-project/gsplat), [LichtFeld-Studio](https://github.com/MrNeRF/LichtFeld-Studio) — training backends
 - [SPZ](https://scaniverse.com/news/spz-gaussian-splat-open-source-file-format) — compressed splat container by Niantic Scaniverse
-- [Depth Anything 3](https://github.com/ByteDance-Seed/Depth-Anything-3) ([paper](https://arxiv.org/abs/2511.10647)) and [ml-sharp](https://github.com/apple/ml-sharp) — feedforward reconstruction
+- [Depth Anything 3](https://github.com/ByteDance-Seed/Depth-Anything-3) ([paper](https://arxiv.org/abs/2511.10647)) — feedforward reconstruction; the vendored ml-sharp research snapshot is quarantined pending an upstream refresh
 - [COLMAP](https://colmap.github.io/) and [GLOMAP](https://github.com/colmap/glomap) — structure-from-motion
 - [Spark](https://sparkjs.dev/) — WebGL Gaussian-splat renderer used by the viewer

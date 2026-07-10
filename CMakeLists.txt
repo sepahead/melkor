@@ -1,5 +1,8 @@
 cmake_minimum_required(VERSION 3.20)
-project(melkor VERSION 1.2.1 LANGUAGES CXX)
+project(melkor VERSION 2.0.0 LANGUAGES CXX)
+set(MELKOR_PRERELEASE "rc.1")
+set(MELKOR_VERSION "${PROJECT_VERSION}-${MELKOR_PRERELEASE}")
+include(GNUInstallDirs)
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -26,6 +29,10 @@ if(APPLE)
     set(CMAKE_OBJCXX_STANDARD 17)
     set(CMAKE_OBJCXX_STANDARD_REQUIRED ON)
     set(CMAKE_OSX_DEPLOYMENT_TARGET "13.0" CACHE STRING "Minimum macOS deployment version")
+    # CMake deliberately repeats mutually dependent static archives so ld64
+    # rescans them. Xcode 15+ diagnoses the required repetition even though it
+    # is correct; suppress only that linker diagnostic, not compiler warnings.
+    add_link_options("LINKER:-no_warn_duplicate_libraries")
 elseif(UNIX AND NOT APPLE)
     set(MELKOR_PLATFORM "LINUX")
 else()
@@ -110,6 +117,7 @@ add_library(melkor_core STATIC
     src/glb_reader.cpp
     src/ply_writer.cpp
     src/gaussian_data.cpp
+    src/cloud_inspector.cpp
     src/enhanced_converter.cpp
     src/feedforward_model.cpp
     src/spz_encoder.cpp
@@ -273,6 +281,7 @@ endif()
 # Main CLI executable
 add_executable(melkor
     src/main.cpp
+    src/inspect_command.cpp
 )
 
 # The platform GPU library (melkor_metal / melkor_cuda / melkor_gpu_stub) is
@@ -282,7 +291,7 @@ add_executable(melkor
 target_link_libraries(melkor PRIVATE melkor_core)
 target_compile_options(melkor PRIVATE ${MELKOR_WARNING_FLAGS})
 # Single source of truth for the CLI's --version output.
-target_compile_definitions(melkor PRIVATE MELKOR_VERSION="${PROJECT_VERSION}")
+target_compile_definitions(melkor PRIVATE MELKOR_VERSION="${MELKOR_VERSION}")
 
 # Copy metallib to executable directory (macOS only)
 if(APPLE AND MELKOR_USE_METAL)
@@ -296,6 +305,12 @@ install(TARGETS melkor RUNTIME DESTINATION bin)
 if(APPLE AND MELKOR_USE_METAL)
     install(FILES ${METAL_LIBRARY_OUTPUT} DESTINATION bin)
 endif()
+install(FILES
+    ${CMAKE_SOURCE_DIR}/LICENSE
+    ${CMAKE_SOURCE_DIR}/NOTICE
+    ${CMAKE_SOURCE_DIR}/THIRD_PARTY_LICENSES.md
+    DESTINATION ${CMAKE_INSTALL_DATADIR}/melkor
+)
 
 # Print configuration summary
 message(STATUS "")
@@ -318,7 +333,6 @@ enable_testing()
 add_executable(test_melkor_core tests/test_melkor_core.cpp)
 target_link_libraries(test_melkor_core PRIVATE melkor_core)
 if(SPZ_AVAILABLE)
-    target_link_libraries(test_melkor_core PRIVATE spz)
     target_compile_definitions(test_melkor_core PRIVATE MELKOR_HAS_SPZ)
 endif()
 set_target_properties(test_melkor_core PROPERTIES
@@ -326,12 +340,27 @@ set_target_properties(test_melkor_core PROPERTIES
 )
 add_test(NAME melkor_core_tests COMMAND test_melkor_core)
 
+add_executable(test_cloud_inspector tests/test_cloud_inspector.cpp)
+target_link_libraries(test_cloud_inspector PRIVATE melkor_core)
+set_target_properties(test_cloud_inspector PROPERTIES
+    RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}
+)
+add_test(NAME cloud_inspector_tests COMMAND test_cloud_inspector)
+
+# Compile the public no-SPZ facade without inheriting melkor_core's
+# MELKOR_HAS_SPZ definition. Both feature branches must expose the same result
+# metadata contract to downstream code.
+add_executable(test_spz_stub_api tests/test_spz_stub_api.cpp)
+target_include_directories(test_spz_stub_api PRIVATE ${CMAKE_SOURCE_DIR}/include)
+target_compile_options(test_spz_stub_api PRIVATE ${MELKOR_WARNING_FLAGS})
+add_test(NAME spz_stub_api_tests COMMAND test_spz_stub_api)
+
 # Fuzz test for SPZ quaternion rotation preservation across the full rotation
 # space (random + edge cases). Decodes with spz's own loader so a symmetric
 # double-bug cannot hide; compares rotation matrices since q/-q are equivalent.
 if(SPZ_AVAILABLE)
     add_executable(test_spz_quaternion_fuzz tests/test_spz_quaternion_fuzz.cpp)
-    target_link_libraries(test_spz_quaternion_fuzz PRIVATE melkor_core spz)
+    target_link_libraries(test_spz_quaternion_fuzz PRIVATE melkor_core)
     target_compile_definitions(test_spz_quaternion_fuzz PRIVATE MELKOR_HAS_SPZ)
     set_target_properties(test_spz_quaternion_fuzz PROPERTIES
         RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}
@@ -369,6 +398,12 @@ set_target_properties(test_densifier PROPERTIES
 )
 add_test(NAME densifier_tests COMMAND test_densifier)
 
+# Public CLI contract: numeric tokens are fully consumed/finite, unknown and
+# conflicting options fail, and retired fake fit/feedforward surfaces fail
+# closed with actionable guidance.
+add_test(NAME cli_validation
+         COMMAND bash ${CMAKE_SOURCE_DIR}/tests/test_cli.sh $<TARGET_FILE:melkor>)
+
 # Gradient-check test for the differentiable rasterizer (macOS/Metal only).
 # Compares the analytic backward gradients against central finite differences
 # for color and opacity -- the correctness bar for any backward pass. Gated
@@ -392,4 +427,14 @@ if(Python3_Interpreter_FOUND)
     add_test(NAME gaussians_from_prediction_tests
              COMMAND ${Python3_EXECUTABLE}
                      ${CMAKE_SOURCE_DIR}/tests/test_gaussians_from_prediction.py)
+    add_test(NAME release_metadata_tests
+             COMMAND ${Python3_EXECUTABLE}
+                     ${CMAKE_SOURCE_DIR}/tests/test_release_metadata.py)
+    add_test(NAME release_evidence_tests
+             COMMAND ${Python3_EXECUTABLE}
+                     ${CMAKE_SOURCE_DIR}/tests/test_release_evidence.py)
+    add_test(NAME inspect_cli_tests
+             COMMAND ${Python3_EXECUTABLE}
+                     ${CMAKE_SOURCE_DIR}/tests/test_inspect_cli.py
+                     $<TARGET_FILE:melkor>)
 endif()

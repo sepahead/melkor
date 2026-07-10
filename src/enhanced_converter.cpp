@@ -8,6 +8,8 @@
 #include <array>
 #include <cmath>
 #include <algorithm>
+#include <cstring>
+#include <limits>
 #include <numeric>
 #include <random>
 
@@ -19,6 +21,8 @@
 #define TINYGLTF_NO_EXTERNAL_IMAGE
 #endif
 #include "tiny_gltf.h"
+#include "gltf_scene_utils.hpp"
+#include "safe_gltf_fs.hpp"
 
 namespace melkor {
 
@@ -115,33 +119,174 @@ void smallestEigenvector3x3(
     nx = v0[0]; ny = v0[1]; nz = v0[2];
 }
 
+// A validated, alignment-agnostic view over one glTF accessor. glTF files are
+// untrusted input: every index, byte range, stride, and multiplication must be
+// checked before a pointer is formed. Keeping this decoder here also prevents
+// the enhanced path from silently becoming less safe than GlbReader.
+struct AccessorView {
+    const uint8_t* data = nullptr;
+    size_t stride = 0;
+    size_t count = 0;
+    size_t component_size = 0;
+    int component_type = 0;
+    int type = 0;
+    int components = 0;
+    bool normalized = false;
+};
+
+bool resolveAccessor(const tinygltf::Model& model, int accessor_index,
+                     AccessorView& out) {
+    if (accessor_index < 0 ||
+        static_cast<size_t>(accessor_index) >= model.accessors.size()) {
+        return false;
+    }
+    const auto& accessor = model.accessors[static_cast<size_t>(accessor_index)];
+    // A sparse accessor can have a normal base bufferView. Decoding that view
+    // without applying the sparse values is silent data loss, so both glTF
+    // conversion paths fail closed until sparse overlays are supported.
+    if (accessor.sparse.isSparse) {
+        return false;
+    }
+    if (accessor.bufferView < 0 ||
+        static_cast<size_t>(accessor.bufferView) >= model.bufferViews.size()) {
+        // Sparse/implicit accessors are legal glTF, but are not supported by
+        // this converter. Reject them cleanly instead of dereferencing -1.
+        return false;
+    }
+    const auto& view = model.bufferViews[static_cast<size_t>(accessor.bufferView)];
+    if (view.buffer < 0 || static_cast<size_t>(view.buffer) >= model.buffers.size()) {
+        return false;
+    }
+    const auto& buffer = model.buffers[static_cast<size_t>(view.buffer)];
+    if (view.byteOffset > buffer.data.size() ||
+        view.byteLength > buffer.data.size() - view.byteOffset) {
+        return false;
+    }
+
+    const int component_size_i = tinygltf::GetComponentSizeInBytes(
+        static_cast<uint32_t>(accessor.componentType));
+    const int components = tinygltf::GetNumComponentsInType(
+        static_cast<uint32_t>(accessor.type));
+    const int stride_i = accessor.ByteStride(view);
+    if (component_size_i <= 0 || components <= 0 || stride_i <= 0) {
+        return false;
+    }
+    const size_t component_size = static_cast<size_t>(component_size_i);
+    const size_t component_count = static_cast<size_t>(components);
+    if (component_count > std::numeric_limits<size_t>::max() / component_size) {
+        return false;
+    }
+    const size_t element_size = component_count * component_size;
+    const size_t stride = static_cast<size_t>(stride_i);
+    if (stride < element_size || accessor.byteOffset > view.byteLength) {
+        return false;
+    }
+
+    const size_t available = view.byteLength - accessor.byteOffset;
+    if (accessor.count > 0 &&
+        (element_size > available ||
+         accessor.count - 1 > (available - element_size) / stride)) {
+        return false;
+    }
+
+    out.data = buffer.data.data() + view.byteOffset + accessor.byteOffset;
+    out.stride = stride;
+    out.count = accessor.count;
+    out.component_size = component_size;
+    out.component_type = accessor.componentType;
+    out.type = accessor.type;
+    out.components = components;
+    out.normalized = accessor.normalized;
+    return true;
+}
+
+template <typename T>
+T readUnaligned(const uint8_t* data) {
+    T value{};
+    std::memcpy(&value, data, sizeof(value));
+    return value;
+}
+
+bool readFloatVec3(const AccessorView& view, size_t index, float out[3]) {
+    if (view.component_type != TINYGLTF_COMPONENT_TYPE_FLOAT ||
+        view.type != TINYGLTF_TYPE_VEC3 || index >= view.count) {
+        return false;
+    }
+    const uint8_t* p = view.data + index * view.stride;
+    for (int c = 0; c < 3; ++c) {
+        out[c] = readUnaligned<float>(p + static_cast<size_t>(c) * sizeof(float));
+        if (!std::isfinite(out[c])) return false;
+    }
+    return true;
+}
+
+bool readColor(const AccessorView& view, size_t index, float out[3]) {
+    if ((view.type != TINYGLTF_TYPE_VEC3 && view.type != TINYGLTF_TYPE_VEC4) ||
+        index >= view.count) {
+        return false;
+    }
+    const uint8_t* p = view.data + index * view.stride;
+    for (int c = 0; c < 3; ++c) {
+        const uint8_t* component = p + static_cast<size_t>(c) * view.component_size;
+        switch (view.component_type) {
+            case TINYGLTF_COMPONENT_TYPE_UNSIGNED_BYTE:
+                out[c] = static_cast<float>(*component) / 255.0f;
+                break;
+            case TINYGLTF_COMPONENT_TYPE_UNSIGNED_SHORT:
+                out[c] = static_cast<float>(readUnaligned<uint16_t>(component)) / 65535.0f;
+                break;
+            case TINYGLTF_COMPONENT_TYPE_FLOAT:
+                out[c] = readUnaligned<float>(component);
+                break;
+            default:
+                return false;
+        }
+        if (!std::isfinite(out[c])) return false;
+        out[c] = std::clamp(out[c], 0.0f, 1.0f);
+    }
+    return true;
+}
+
 }  // namespace
 
 // Simple spatial hash for k-NN queries
 class SpatialHash {
 public:
-    SpatialHash(const std::vector<float>& positions, float cell_size)
-        : inv_cell_size_(1.0f / cell_size) {
-        size_t num_points = positions.size() / 3;
+    SpatialHash(const std::vector<float>& positions, double cell_size)
+        : inv_cell_size_(1.0 / cell_size) {
+        const size_t num_points = positions.size() / 3;
+        if (num_points > 0) {
+            origin_[0] = static_cast<double>(positions[0]);
+            origin_[1] = static_cast<double>(positions[1]);
+            origin_[2] = static_cast<double>(positions[2]);
+            for (size_t i = 1; i < num_points; ++i) {
+                origin_[0] = std::min(origin_[0], static_cast<double>(positions[i * 3 + 0]));
+                origin_[1] = std::min(origin_[1], static_cast<double>(positions[i * 3 + 1]));
+                origin_[2] = std::min(origin_[2], static_cast<double>(positions[i * 3 + 2]));
+            }
+        }
         for (size_t i = 0; i < num_points; ++i) {
-            int cx = static_cast<int>(std::floor(positions[i*3+0] * inv_cell_size_));
-            int cy = static_cast<int>(std::floor(positions[i*3+1] * inv_cell_size_));
-            int cz = static_cast<int>(std::floor(positions[i*3+2] * inv_cell_size_));
-            uint64_t key = hashCell(cx, cy, cz);
+            const int64_t cx = cellCoordinate(positions[i * 3 + 0], origin_[0]);
+            const int64_t cy = cellCoordinate(positions[i * 3 + 1], origin_[1]);
+            const int64_t cz = cellCoordinate(positions[i * 3 + 2], origin_[2]);
+            const uint64_t key = hashCell(cx, cy, cz);
             cells_[key].push_back(i);
         }
     }
     
     std::vector<size_t> queryNeighbors(float x, float y, float z, int radius = 1) const {
         std::vector<size_t> result;
-        int cx = static_cast<int>(std::floor(x * inv_cell_size_));
-        int cy = static_cast<int>(std::floor(y * inv_cell_size_));
-        int cz = static_cast<int>(std::floor(z * inv_cell_size_));
+        const int64_t cx = cellCoordinate(x, origin_[0]);
+        const int64_t cy = cellCoordinate(y, origin_[1]);
+        const int64_t cz = cellCoordinate(z, origin_[2]);
         
         for (int dx = -radius; dx <= radius; ++dx) {
             for (int dy = -radius; dy <= radius; ++dy) {
                 for (int dz = -radius; dz <= radius; ++dz) {
-                    uint64_t key = hashCell(cx + dx, cy + dy, cz + dz);
+                    const uint64_t key = hashCell(
+                        cx + static_cast<int64_t>(dx),
+                        cy + static_cast<int64_t>(dy),
+                        cz + static_cast<int64_t>(dz));
                     auto it = cells_.find(key);
                     if (it != cells_.end()) {
                         result.insert(result.end(), it->second.begin(), it->second.end());
@@ -153,14 +298,31 @@ public:
     }
     
 private:
-    static uint64_t hashCell(int x, int y, int z) {
+    int64_t cellCoordinate(float value, double origin) const {
+        const double coordinate =
+            std::floor((static_cast<double>(value) - origin) * inv_cell_size_);
+        // Valid finite inputs naturally stay far inside this range. Retain a
+        // margin for neighbor-radius addition so public helper inputs cannot
+        // trigger float-to-integer or signed-addition undefined behavior.
+        constexpr int64_t margin = 1024;
+        constexpr int64_t minimum = std::numeric_limits<int64_t>::min() + margin;
+        constexpr int64_t maximum = std::numeric_limits<int64_t>::max() - margin;
+        if (!std::isfinite(coordinate)) return coordinate < 0.0 ? minimum : maximum;
+        if (coordinate <= static_cast<double>(minimum)) return minimum;
+        if (coordinate >= static_cast<double>(maximum)) return maximum;
+        return static_cast<int64_t>(coordinate);
+    }
+
+    static uint64_t hashCell(int64_t x, int64_t y, int64_t z) {
         // Simple spatial hash
-        return (static_cast<uint64_t>(x & 0x1FFFFF) << 42) |
-               (static_cast<uint64_t>(y & 0x1FFFFF) << 21) |
-               (static_cast<uint64_t>(z & 0x1FFFFF));
+        constexpr uint64_t mask = 0x1fffff;
+        return ((static_cast<uint64_t>(x) & mask) << 42) |
+               ((static_cast<uint64_t>(y) & mask) << 21) |
+               (static_cast<uint64_t>(z) & mask);
     }
     
-    float inv_cell_size_;
+    double inv_cell_size_;
+    double origin_[3] = {0.0, 0.0, 0.0};
     std::unordered_map<uint64_t, std::vector<size_t>> cells_;
 };
 
@@ -195,9 +357,19 @@ class EnhancedConverter::Impl {
 public:
     metal::MetalContext* metal_ctx_ = nullptr;
     tinygltf::TinyGLTF loader_;
+    gltf_fs::Context fs_context_;
     
-    Impl() = default;
-    explicit Impl(metal::MetalContext* ctx) : metal_ctx_(ctx) {}
+    Impl() { configureFilesystem(); }
+    explicit Impl(metal::MetalContext* ctx) : metal_ctx_(ctx) { configureFilesystem(); }
+
+    void configureFilesystem() {
+        std::string ignored;
+        loader_.SetFsCallbacks(gltf_fs::callbacks(fs_context_), &ignored);
+    }
+
+    bool setInputRoot(const std::string& filepath, std::string& error) {
+        return gltf_fs::setRootForInput(fs_context_, filepath, error);
+    }
     
     EnhancedConversionResult convert(
         const std::vector<float>& positions,
@@ -208,6 +380,32 @@ public:
         
         EnhancedConversionResult result;
         result.original_vertices = positions.size() / 3;
+
+        const auto finitePositive = [](float value) {
+            return std::isfinite(value) && value > 0.0f;
+        };
+        if (positions.size() % 3 != 0 || normals.size() % 3 != 0 || colors.size() % 3 != 0 ||
+            config.knn_neighbors < 1 || config.knn_neighbors > 1024 ||
+            !finitePositive(config.scale_factor) || !finitePositive(config.min_scale) ||
+            !finitePositive(config.max_scale) || config.max_scale < config.min_scale ||
+            !finitePositive(config.normal_scale_ratio) ||
+            !finitePositive(config.position_scale) ||
+            !std::isfinite(config.default_opacity) || config.default_opacity <= 0.0f ||
+            config.default_opacity > 1.0f ||
+            !std::isfinite(config.default_color[0]) ||
+            !std::isfinite(config.default_color[1]) ||
+            !std::isfinite(config.default_color[2]) ||
+            config.default_color[0] < 0.0f || config.default_color[0] > 1.0f ||
+            config.default_color[1] < 0.0f || config.default_color[1] > 1.0f ||
+            config.default_color[2] < 0.0f || config.default_color[2] > 1.0f ||
+            !std::all_of(positions.begin(), positions.end(), [&](float value) {
+                return std::isfinite(value) && std::isfinite(value * config.position_scale);
+            }) ||
+            !std::all_of(normals.begin(), normals.end(), [](float value) { return std::isfinite(value); }) ||
+            !std::all_of(colors.begin(), colors.end(), [](float value) { return std::isfinite(value); })) {
+            result.error_message = "Invalid enhanced conversion input or configuration";
+            return result;
+        }
         
         if (positions.empty()) {
             result.error_message = "No positions provided";
@@ -219,7 +417,7 @@ public:
         // ones, CPU spatial hash when no GPU is available.
         std::vector<float> adaptive_scales;
         size_t num_points = positions.size() / 3;
-        if (metal_ctx_ && num_points > 0) {
+        if (config.use_gpu && metal_ctx_ && num_points > 0) {
             metal::GaussianProcessor processor(*metal_ctx_);
             std::vector<float> knn_dists;
             if (num_points < 10000) {
@@ -249,7 +447,7 @@ public:
             }
         }
 #ifdef MELKOR_HAS_CUDA
-        if (adaptive_scales.empty() && num_points > 0) {
+        if (config.use_gpu && adaptive_scales.empty() && num_points > 0) {
             auto knn_dists = cudaGridKnnMeanDists(positions, config.knn_neighbors);
             if (knn_dists.size() == num_points) {
                 adaptive_scales.resize(num_points);
@@ -293,7 +491,7 @@ public:
         // Use Metal GPU acceleration when available for the per-point loop.
         result.cloud.reserve(num_points * 2);
 
-        if (metal_ctx_ && num_points > 0) {
+        if (config.use_gpu && metal_ctx_ && num_points > 0) {
             // Metal-accelerated per-point conversion
             metal::GaussianProcessor processor(*metal_ctx_);
             metal::GaussianProcessor::EnhancedConvertConfig mtl_cfg;
@@ -379,7 +577,7 @@ public:
             splat.f_dc_2 = utils::rgbToShDc(b);
             
             // Opacity (in logit space)
-            splat.opacity = utils::logit(std::clamp(config.default_opacity, 0.001f, 0.999f));
+            splat.opacity = utils::logit(config.default_opacity);
             
             // Adaptive anisotropic scale
             float base_scale = adaptive_scales[i] * config.scale_factor;
@@ -581,12 +779,13 @@ EnhancedConversionResult EnhancedConverter::convertFromFile(
     const EnhancedConversionConfig& config) {
     
     EnhancedConversionResult result;
+    if (!impl_->setInputRoot(filepath, result.error_message)) return result;
     
     tinygltf::Model model;
     std::string err, warn;
     bool success;
     
-    if (filepath.size() >= 4 && filepath.substr(filepath.size() - 4) == ".glb") {
+    if (gltf_scene::fileHasGlbMagic(filepath)) {
         success = impl_->loader_.LoadBinaryFromFile(&model, &err, &warn, filepath);
     } else {
         success = impl_->loader_.LoadASCIIFromFile(&model, &err, &warn, filepath);
@@ -596,130 +795,188 @@ EnhancedConversionResult EnhancedConverter::convertFromFile(
         result.error_message = err;
         return result;
     }
+
+    if (const std::string contract_error = gltf_scene::validateModelContract(model);
+        !contract_error.empty()) {
+        result.error_message = contract_error;
+        return result;
+    }
     
-    // Extract mesh data from GLB
+    // Extract mesh data from GLB. Unlike TinyGLTF's high-level parsing, its
+    // model containers do not make direct vector indexing safe: malformed
+    // accessor/buffer references may still be present. Resolve every accessor
+    // through the checked view above and use memcpy-based scalar reads so an
+    // unaligned (but otherwise valid) byte offset cannot trigger UB.
     std::vector<float> positions;
     std::vector<float> normals;
     std::vector<float> colors;
     std::vector<uint32_t> indices;
+    bool any_normals = false;
+    bool any_colors = false;
     
-    for (const auto& mesh : model.meshes) {
+    const auto traversal = gltf_scene::activeMeshInstances(model);
+    if (!traversal.success()) {
+        result.error_message = traversal.error;
+        return result;
+    }
+    const auto& instances = traversal.instances;
+    for (const auto& instance : instances) {
+        const auto& mesh = model.meshes[instance.mesh_index];
         for (const auto& primitive : mesh.primitives) {
-            // Get positions
             auto pos_it = primitive.attributes.find("POSITION");
-            if (pos_it == primitive.attributes.end()) continue;
-            
-            const auto& pos_accessor = model.accessors[pos_it->second];
-            const auto& pos_buffer_view = model.bufferViews[pos_accessor.bufferView];
-            const auto& pos_buffer = model.buffers[pos_buffer_view.buffer];
-            
-            const uint8_t* pos_data = pos_buffer.data.data() + 
-                pos_buffer_view.byteOffset + pos_accessor.byteOffset;
-            size_t pos_stride = pos_accessor.ByteStride(pos_buffer_view);
-            if (pos_stride == 0) pos_stride = sizeof(float) * 3;
-            
-            size_t base_idx = positions.size() / 3;
-            size_t count = pos_accessor.count;
-            
-            for (size_t i = 0; i < count; ++i) {
-                const float* pos = reinterpret_cast<const float*>(pos_data + i * pos_stride);
-                positions.push_back(pos[0]);
-                positions.push_back(pos[1]);
-                positions.push_back(pos[2]);
+            if (pos_it == primitive.attributes.end()) {
+                result.error_message = "Primitive is missing its POSITION attribute";
+                return result;
             }
-            
-            // Get normals
+
+            AccessorView pos_view;
+            if (!resolveAccessor(model, pos_it->second, pos_view) ||
+                pos_view.component_type != TINYGLTF_COMPONENT_TYPE_FLOAT ||
+                pos_view.type != TINYGLTF_TYPE_VEC3 || pos_view.count == 0) {
+                result.error_message = "Primitive has an invalid POSITION accessor";
+                return result;
+            }
+            if (pos_view.count > std::numeric_limits<size_t>::max() / 3 ||
+                positions.size() >
+                    std::numeric_limits<size_t>::max() - pos_view.count * 3) {
+                result.error_message = "POSITION accessor is too large";
+                return result;
+            }
+
+            // Decode a primitive into temporary storage first. If one position
+            // is NaN/Inf, reject the document rather than silently producing a
+            // lossy conversion from only its remaining primitives.
+            std::vector<float> primitive_positions;
+            primitive_positions.reserve(pos_view.count * 3);
+            bool positions_valid = true;
+            for (size_t i = 0; i < pos_view.count; ++i) {
+                float local[3];
+                float value[3];
+                if (!readFloatVec3(pos_view, i, local) ||
+                    !gltf_scene::transformPoint(instance.world, local, value)) {
+                    positions_valid = false;
+                    break;
+                }
+                primitive_positions.insert(primitive_positions.end(), value, value + 3);
+            }
+            if (!positions_valid) {
+                result.error_message =
+                    "Primitive contains a non-finite or non-transformable POSITION";
+                return result;
+            }
+
+            size_t base_idx = positions.size() / 3;
+            const size_t count = pos_view.count;
+            positions.insert(positions.end(), primitive_positions.begin(),
+                             primitive_positions.end());
+
+            // Keep one placeholder normal/color per appended position. If no
+            // primitive supplies an attribute, the arrays are cleared below so
+            // the converter estimates normals / applies the configured color.
+            const size_t normal_start = normals.size();
+            normals.resize(normal_start + count * 3, 0.0f);
             auto norm_it = primitive.attributes.find("NORMAL");
             if (norm_it != primitive.attributes.end()) {
-                const auto& norm_accessor = model.accessors[norm_it->second];
-                const auto& norm_buffer_view = model.bufferViews[norm_accessor.bufferView];
-                const auto& norm_buffer = model.buffers[norm_buffer_view.buffer];
-                
-                const uint8_t* norm_data = norm_buffer.data.data() + 
-                    norm_buffer_view.byteOffset + norm_accessor.byteOffset;
-                size_t norm_stride = norm_accessor.ByteStride(norm_buffer_view);
-                if (norm_stride == 0) norm_stride = sizeof(float) * 3;
-                
-                for (size_t i = 0; i < count; ++i) {
-                    const float* n = reinterpret_cast<const float*>(norm_data + i * norm_stride);
-                    normals.push_back(n[0]);
-                    normals.push_back(n[1]);
-                    normals.push_back(n[2]);
+                AccessorView normal_view;
+                if (!resolveAccessor(model, norm_it->second, normal_view) ||
+                    normal_view.count != count ||
+                    normal_view.component_type != TINYGLTF_COMPONENT_TYPE_FLOAT ||
+                    normal_view.type != TINYGLTF_TYPE_VEC3) {
+                    result.error_message = "Primitive has an invalid NORMAL accessor";
+                    return result;
                 }
+                for (size_t i = 0; i < count; ++i) {
+                    float local[3];
+                    float value[3];
+                    if (!readFloatVec3(normal_view, i, local) ||
+                        !gltf_scene::transformNormal(instance.world, local, value)) {
+                        result.error_message =
+                            "Primitive contains a non-finite or non-transformable NORMAL";
+                        return result;
+                    }
+                    std::copy(value, value + 3,
+                              normals.begin() + static_cast<ptrdiff_t>(normal_start + i * 3));
+                }
+                any_normals = true;
             }
-            
-            // Get colors
+
+            const size_t color_start = colors.size();
+            for (size_t i = 0; i < count; ++i) {
+                colors.push_back(config.default_color[0]);
+                colors.push_back(config.default_color[1]);
+                colors.push_back(config.default_color[2]);
+            }
             auto color_it = primitive.attributes.find("COLOR_0");
             if (color_it != primitive.attributes.end()) {
-                const auto& color_accessor = model.accessors[color_it->second];
-                const auto& color_buffer_view = model.bufferViews[color_accessor.bufferView];
-                const auto& color_buffer = model.buffers[color_buffer_view.buffer];
-                
-                const uint8_t* color_ptr = color_buffer.data.data() + 
-                    color_buffer_view.byteOffset + color_accessor.byteOffset;
-                
-                // Determine stride and component count
-                int num_components = (color_accessor.type == TINYGLTF_TYPE_VEC4) ? 4 : 3;
-                size_t color_stride = color_accessor.ByteStride(color_buffer_view);
-                if (color_stride == 0) {
-                    if (color_accessor.componentType == TINYGLTF_COMPONENT_TYPE_UNSIGNED_BYTE) {
-                        color_stride = num_components;
-                    } else if (color_accessor.componentType == TINYGLTF_COMPONENT_TYPE_UNSIGNED_SHORT) {
-                        color_stride = num_components * 2;
-                    } else {
-                        color_stride = num_components * sizeof(float);
-                    }
+                AccessorView color_view;
+                const bool supported_component =
+                    resolveAccessor(model, color_it->second, color_view) &&
+                    (color_view.component_type == TINYGLTF_COMPONENT_TYPE_FLOAT ||
+                     color_view.component_type == TINYGLTF_COMPONENT_TYPE_UNSIGNED_BYTE ||
+                     color_view.component_type == TINYGLTF_COMPONENT_TYPE_UNSIGNED_SHORT);
+                const bool supported_type = color_view.type == TINYGLTF_TYPE_VEC3 ||
+                                            color_view.type == TINYGLTF_TYPE_VEC4;
+                const bool valid_normalization =
+                    color_view.component_type == TINYGLTF_COMPONENT_TYPE_FLOAT ||
+                    color_view.normalized;
+                if (!supported_component || !supported_type || !valid_normalization ||
+                    color_view.count != count) {
+                    result.error_message = "Primitive has an invalid COLOR_0 accessor";
+                    return result;
                 }
-                
                 for (size_t i = 0; i < count; ++i) {
-                    const uint8_t* cp = color_ptr + i * color_stride;
-                    float r, g, b;
-                    if (color_accessor.componentType == TINYGLTF_COMPONENT_TYPE_UNSIGNED_BYTE) {
-                        r = cp[0] / 255.0f;
-                        g = cp[1] / 255.0f;
-                        b = cp[2] / 255.0f;
-                    } else if (color_accessor.componentType == TINYGLTF_COMPONENT_TYPE_UNSIGNED_SHORT) {
-                        const uint16_t* c16 = reinterpret_cast<const uint16_t*>(cp);
-                        r = c16[0] / 65535.0f;
-                        g = c16[1] / 65535.0f;
-                        b = c16[2] / 65535.0f;
-                    } else {
-                        const float* cf = reinterpret_cast<const float*>(cp);
-                        r = cf[0];
-                        g = cf[1];
-                        b = cf[2];
+                    float value[3];
+                    if (!readColor(color_view, i, value)) {
+                        result.error_message = "Primitive contains a non-finite COLOR_0 value";
+                        return result;
                     }
-                    colors.push_back(r);
-                    colors.push_back(g);
-                    colors.push_back(b);
-                    // VEC4: ignore alpha — splat opacity is controlled separately
+                    std::copy(value, value + 3,
+                              colors.begin() + static_cast<ptrdiff_t>(color_start + i * 3));
                 }
+                any_colors = true;
             }
-            
-            // Get indices (for potential triangle-based processing)
+
+            // Indices are not currently consumed by the point-based converter,
+            // but decode valid ones so the API remains ready for triangle-aware
+            // processing without preserving the old unchecked reads.
+            if (primitive.indices < -1) {
+                result.error_message = "Primitive has an invalid indices accessor";
+                return result;
+            }
             if (primitive.indices >= 0) {
-                const auto& idx_accessor = model.accessors[primitive.indices];
-                const auto& idx_buffer_view = model.bufferViews[idx_accessor.bufferView];
-                const auto& idx_buffer = model.buffers[idx_buffer_view.buffer];
-                
-                const uint8_t* idx_ptr = idx_buffer.data.data() + 
-                    idx_buffer_view.byteOffset + idx_accessor.byteOffset;
-                
-                for (size_t i = 0; i < idx_accessor.count; ++i) {
-                    uint32_t idx;
-                    if (idx_accessor.componentType == TINYGLTF_COMPONENT_TYPE_UNSIGNED_SHORT) {
-                        idx = reinterpret_cast<const uint16_t*>(idx_ptr)[i];
-                    } else if (idx_accessor.componentType == TINYGLTF_COMPONENT_TYPE_UNSIGNED_INT) {
-                        idx = reinterpret_cast<const uint32_t*>(idx_ptr)[i];
+                AccessorView index_view;
+                if (!resolveAccessor(model, primitive.indices, index_view) ||
+                    index_view.type != TINYGLTF_TYPE_SCALAR ||
+                    (index_view.component_type != TINYGLTF_COMPONENT_TYPE_UNSIGNED_BYTE &&
+                     index_view.component_type != TINYGLTF_COMPONENT_TYPE_UNSIGNED_SHORT &&
+                     index_view.component_type != TINYGLTF_COMPONENT_TYPE_UNSIGNED_INT)) {
+                    result.error_message = "Primitive has an invalid indices accessor";
+                    return result;
+                }
+                for (size_t i = 0; i < index_view.count; ++i) {
+                    const uint8_t* p = index_view.data + i * index_view.stride;
+                    uint32_t idx = 0;
+                    if (index_view.component_type == TINYGLTF_COMPONENT_TYPE_UNSIGNED_BYTE) {
+                        idx = *p;
+                    } else if (index_view.component_type == TINYGLTF_COMPONENT_TYPE_UNSIGNED_SHORT) {
+                        idx = readUnaligned<uint16_t>(p);
                     } else {
-                        idx = idx_ptr[i];
+                        idx = readUnaligned<uint32_t>(p);
+                    }
+                    if (idx >= count ||
+                        base_idx > std::numeric_limits<uint32_t>::max() - idx) {
+                        result.error_message = "Primitive contains an out-of-range index";
+                        return result;
                     }
                     indices.push_back(static_cast<uint32_t>(base_idx + idx));
                 }
             }
         }
     }
-    
+
+    if (!any_normals) normals.clear();
+    if (!any_colors) colors.clear();
+
     return impl_->convert(positions, normals, colors, indices, config);
 }
 

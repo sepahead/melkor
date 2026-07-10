@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Download the SparkJS viewer's runtime dependencies and city/area splat scenes.
+# Download the SparkJS viewer's runtime dependencies and optional test scenes.
 # These are gitignored (large / third-party); run this once after cloning.
 #
 #   ./viewer/fetch-assets.sh
@@ -11,6 +11,19 @@
 set -euo pipefail
 
 cd "$(dirname "$0")"
+
+FETCH_SAMPLES=1
+for arg in "$@"; do
+  case "$arg" in
+    --runtime-only) FETCH_SAMPLES=0 ;;
+    -h|--help)
+      echo "Usage: $0 [--runtime-only]"
+      echo "  --runtime-only  fetch MIT-licensed JS only; generate project-owned demos"
+      exit 0
+      ;;
+    *) echo "Error: unknown option: $arg" >&2; exit 1 ;;
+  esac
+done
 
 THREE_VER="0.180.0"
 SPARK_VER="2.1.0"
@@ -30,13 +43,15 @@ vendor_files=(
   "vendor/spark.module.js|https://sparkjs.dev/releases/spark/${SPARK_VER}/spark.module.js|c0355a962f68a6de9b13df69f05b1aba3614d9aec43a4504975daeb349126a8a"
 )
 
-# City / area Gaussian-splat scenes (SPZ, SOG/.zip, .splat — every format Spark auto-loads).
+# External Gaussian-splat scenes used only as opt-in developer/render-test
+# fixtures. They are integrity-pinned but have no standalone redistribution
+# license published at their source, so stage-dist.js never packages them.
+# See ASSET_PROVENANCE.md.
 splat_files=(
   "public/splats/snow-street.spz|https://sparkjs.dev/assets/splats/snow-street.spz|35840fd3d178388409096537e2f363c49e1502850c5bb81dbaa5cbc4ecb3ecaa"
   "public/splats/valley.spz|https://sparkjs.dev/assets/splats/valley.spz|565768b0b758698a641521654ac0947a74c85cb69ee0f034e6c928fbefa97833"
   "public/splats/distant-igloo.spz|https://sparkjs.dev/assets/splats/distant-igloo.spz|41579c3bfc754fd40da3db0c9924cfd8b70b403d7448e0f90935e8f62d6f5121"
   "public/splats/sutro.zip|https://sparkjs.dev/assets/splats/sutro.zip|6a76be688a4c8066be1de8a951f179bee2463d0fc9dbd6cf4389a15db6a161a9"
-  "public/splats/train.splat|https://huggingface.co/cakewalk/splat-data/resolve/main/train.splat|d371f544e9e6a0a10b4a9d75c48d66f3c47f484559c33883c33c97ad7d2aa6af"
 )
 
 # SHA-256 helper, resolved once and fail-closed: prefer sha256sum (Linux/CI),
@@ -77,8 +92,14 @@ fetch() {
 
 echo "== runtime libraries =="
 for f in "${vendor_files[@]}"; do fetch "$f"; done
-echo "== splat scenes =="
-for f in "${splat_files[@]}"; do fetch "$f"; done
+if [ "$FETCH_SAMPLES" -eq 1 ]; then
+  echo "== external developer/test scenes =="
+  for f in "${splat_files[@]}"; do fetch "$f"; done
+fi
+
+echo "== project-owned demo assets =="
+node make-static-demo.js
+node make-4d-demo.js
 
 # Optional: dogfood melkor to emit a standard 3DGS .ply from one scene, so the
 # viewer's PLY entry (the 4th SparkJS format) lights up. Needs melkor built once:
@@ -96,10 +117,6 @@ fi
 # Optional: generate the synthetic 4D (temporal) demo sequence so the viewer's
 # "Wave · 4D" scene and its temporal player light up. Real 4D content: run
 # 4D-GS export_perframe_3DGS.py and drop time_*.ply + a manifest.json here.
-if command -v node >/dev/null 2>&1 && [ ! -s "public/splats/4d/wave/manifest.json" ]; then
-  echo "== 4D demo sequence =="
-  node make-4d-demo.js && echo "ok     public/splats/4d/wave/ (24 frames)"
-fi
 # Optional: pack the demo to per-frame SPZ (the "4D format producer" path).
 # Needs the melkor binary; demonstrates ~94% smaller streamable 4D.
 if command -v node >/dev/null 2>&1 && [ -n "$MELKOR_BIN" ] \

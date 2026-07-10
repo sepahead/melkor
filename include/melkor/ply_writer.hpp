@@ -57,11 +57,31 @@ class PlyReader {
 public:
     PlyReader();
     ~PlyReader();
+
+    struct Metadata {
+        enum class Encoding {
+            Unknown,
+            Ascii,
+            BinaryLittleEndian,
+            BinaryBigEndian,
+        };
+
+        Encoding encoding = Encoding::Unknown;
+        size_t declared_vertices = 0;
+        bool has_position = false;
+        bool has_sh_dc = false;
+        bool has_rgb = false;
+        bool has_opacity = false;
+        bool has_scale = false;
+        bool has_rotation = false;
+        bool has_sh_rest = false;
+    };
     
     struct ReadResult {
         bool success = false;
         std::string error_message;
         GaussianCloud cloud;
+        Metadata metadata;
     };
     
     // Read from file

@@ -1,11 +1,12 @@
 #include "melkor/compute_provider.hpp"
+#include "melkor/cloud_inspector.hpp"
 #include "melkor/densifier.hpp"
 #include "melkor/glb_reader.hpp"
 #include "melkor/ply_writer.hpp"
 #include "melkor/spz_encoder.hpp"
 #include "melkor/enhanced_converter.hpp"
-#include "melkor/gaussian_fitter.hpp"
-#include "melkor/feedforward_model.hpp"
+#include "inspect_command.hpp"
+#include "safe_text.hpp"
 
 // Metal-specific features (EnhancedConverter GPU path, GaussianFitter,
 // DifferentiableRenderer) still require metal::MetalContext directly.
@@ -17,22 +18,35 @@
 #include <string>
 #include <chrono>
 #include <filesystem>
+#include <cerrno>
+#include <cctype>
+#include <charconv>
+#include <cmath>
+#include <cstdlib>
+#include <new>
+#include <stdexcept>
 
 namespace fs = std::filesystem;
 
 void printUsage(const char* program) {
     std::cout << "Melkor - Advanced Gaussian Splatting Toolkit\n";
-    std::cout << "\nUsage: " << program << " <input.glb> <output.ply|output.spz> [options]\n";
+    std::cout << "\nUsage: ";
+    melkor::text::writeDisplayString(std::cout, program);
+    std::cout << " <input.glb> <output.ply|output.spz> [options]\n       ";
+    melkor::text::writeDisplayString(std::cout, program);
+    std::cout << " inspect <input> [--json] [--strict]\n";
     std::cout << "\nSupported conversions:\n";
     std::cout << "  GLB -> PLY    Convert GLB mesh to Gaussian splatting PLY\n";
     std::cout << "  GLB -> SPZ    Convert GLB mesh to compressed SPZ format\n";
     std::cout << "  PLY -> SPZ    Convert PLY to compressed SPZ format\n";
     std::cout << "  SPZ -> PLY    Convert SPZ to PLY format\n";
+    std::cout << "  inspect       Validate and report PLY/SPZ/GLB/glTF metadata without GPU init\n";
     std::cout << "\nConversion Modes:\n";
     std::cout << "  --basic              Basic vertex-to-splat conversion (default, fast)\n";
     std::cout << "  --enhanced           Enhanced conversion with adaptive scale & surface alignment\n";
-    std::cout << "  --fit                Render-based Gaussian fitting (higher quality, slower)\n";
-    std::cout << "  --feedforward        Use pre-trained neural network (requires setup)\n";
+    std::cout << "\nNeural reconstruction:\n";
+    std::cout << "  Use ./da3-infer after running scripts/setup_da3.sh. The native CLI only\n";
+    std::cout << "  performs deterministic format conversion.\n";
     std::cout << "\nBasic/Enhanced Options:\n";
     std::cout << "  --scale <float>      Scale factor for splat size (default: 0.01)\n";
     std::cout << "  --opacity <float>    Default opacity 0-1 (default: 1.0)\n";
@@ -41,13 +55,6 @@ void printUsage(const char* program) {
     std::cout << "\nEnhanced Mode Options:\n";
     std::cout << "  --knn <int>          K neighbors for density estimation (default: 8)\n";
     std::cout << "  --no-surface-align   Disable surface-aligned Gaussians\n";
-    std::cout << "\nFit Mode Options:\n";
-    std::cout << "  --iterations <int>   Number of fitting iterations (default: 3000)\n";
-    std::cout << "  --views <int>        Number of camera views (default: 8)\n";
-    std::cout << "  --resolution <int>   Render resolution (default: 512)\n";
-    std::cout << "\nFeedforward Mode Options:\n";
-    std::cout << "  --model <type>       Model type: splatter-image, mvsplat (default: splatter-image)\n";
-    std::cout << "  --download-model     Download model weights if not present\n";
     std::cout << "\nScene Completion Options (any splat input: PLY/SPZ/GLB):\n";
     std::cout << "  --fill-holes         Densify sparse regions and bridge interior holes\n";
     std::cout << "                       (3DGS densification, aka scene completion/inpainting)\n";
@@ -61,7 +68,7 @@ void printUsage(const char* program) {
     std::cout << "  --no-gpu             Disable GPU acceleration (use CPU)\n";
     std::cout << "  --no-metal           Alias for --no-gpu (deprecated)\n";
     std::cout << "  --info               Show GPU info and exit\n";
-    std::cout << "  --list-models        List available feedforward models\n";
+    std::cout << "  --list-models        List supported DA3 reconstruction checkpoints\n";
     std::cout << "  --version            Show version and exit\n";
     std::cout << "  -h, --help           Show this help\n";
 }
@@ -96,18 +103,21 @@ std::string getExtension(const std::string& path) {
     auto pos = path.rfind('.');
     if (pos == std::string::npos) return "";
     std::string ext = path.substr(pos);
-    for (char& c : ext) c = std::tolower(c);
+    for (char& c : ext) {
+        c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+    }
     return ext;
 }
 
 enum class ConversionMode {
     Basic,
-    Enhanced,
-    Fit,
-    Feedforward
+    Enhanced
 };
 
-int main(int argc, char* argv[]) {
+int main(int argc, char* argv[]) try {
+    if (argc >= 2 && std::string(argv[1]) == "inspect") {
+        return melkor::cli::runInspectCommand(argc - 2, argv + 2, argv[0]);
+    }
     if (argc < 2) {
         printUsage(argv[0]);
         return 1;
@@ -124,22 +134,14 @@ int main(int argc, char* argv[]) {
     bool use_gpu = true;
     bool show_info = false;
     bool list_models = false;
-    bool download_model = false;
 
     // Mode selection
     ConversionMode mode = ConversionMode::Basic;
+    bool mode_explicit = false;
 
     // Enhanced mode options
     int knn_neighbors = 8;
     bool surface_align = true;
-
-    // Fit mode options
-    int fit_iterations = 3000;
-    int fit_views = 8;
-    int fit_resolution = 512;
-
-    // Feedforward mode options
-    std::string model_type = "splatter-image";
 
     // Scene completion options
     bool fill_holes = false;
@@ -147,24 +149,61 @@ int main(int argc, char* argv[]) {
     float fill_strength = 1.0f;
     float max_hole_size = 8.0f;
 
-    // Helper: parse a numeric argument safely, returning false on failure.
+    // Parse complete, finite tokens. std::stof/std::stoi accept a valid prefix
+    // (for example "1oops") and comparisons alone do not reject NaN.
     auto parseFloat = [&](const char* flag, const char* val, float& out) -> bool {
-        try {
-            out = std::stof(val);
-            return true;
-        } catch (const std::exception&) {
-            std::cerr << "Error: Invalid number for " << flag << ": \"" << val << "\"\n";
+        if (!val || *val == '\0') {
+            std::cerr << "Error: Invalid number for " << flag << ": \"";
+            melkor::text::writeDisplayString(std::cerr, val ? std::string(val) : std::string());
+            std::cerr << "\"\n";
             return false;
         }
+        errno = 0;
+        char* end = nullptr;
+        const float parsed = std::strtof(val, &end);
+        if (end == val || *end != '\0' || errno == ERANGE || !std::isfinite(parsed)) {
+            std::cerr << "Error: Invalid finite number for " << flag << ": \"";
+            melkor::text::writeDisplayString(std::cerr, val);
+            std::cerr << "\"\n";
+            return false;
+        }
+        out = parsed;
+        return true;
     };
     auto parseInt = [&](const char* flag, const char* val, int& out) -> bool {
-        try {
-            out = std::stoi(val);
-            return true;
-        } catch (const std::exception&) {
-            std::cerr << "Error: Invalid integer for " << flag << ": \"" << val << "\"\n";
+        if (!val || *val == '\0') {
+            std::cerr << "Error: Invalid integer for " << flag << ": \"";
+            melkor::text::writeDisplayString(std::cerr, val ? std::string(val) : std::string());
+            std::cerr << "\"\n";
             return false;
         }
+        int parsed = 0;
+        const char* end = val + std::char_traits<char>::length(val);
+        const auto parsed_result = std::from_chars(val, end, parsed);
+        if (parsed_result.ec != std::errc{} || parsed_result.ptr != end) {
+            std::cerr << "Error: Invalid integer for " << flag << ": \"";
+            melkor::text::writeDisplayString(std::cerr, val);
+            std::cerr << "\"\n";
+            return false;
+        }
+        out = parsed;
+        return true;
+    };
+    auto requireValue = [&](int index, const std::string& flag) -> bool {
+        if (index + 1 < argc) return true;
+        std::cerr << "Error: Missing value for ";
+        melkor::text::writeDisplayString(std::cerr, flag);
+        std::cerr << '\n';
+        return false;
+    };
+    auto selectMode = [&](ConversionMode selected, const char* flag) -> bool {
+        if (mode_explicit && mode != selected) {
+            std::cerr << "Error: Conflicting conversion mode: " << flag << "\n";
+            return false;
+        }
+        mode = selected;
+        mode_explicit = true;
+        return true;
     };
 
     for (int i = 1; i < argc; ++i) {
@@ -184,43 +223,55 @@ int main(int argc, char* argv[]) {
             show_info = true;
         } else if (arg == "--list-models") {
             list_models = true;
-        } else if (arg == "--download-model") {
-            download_model = true;
         } else if (arg == "--basic") {
-            mode = ConversionMode::Basic;
+            if (!selectMode(ConversionMode::Basic, "--basic")) return 1;
         } else if (arg == "--enhanced") {
-            mode = ConversionMode::Enhanced;
+            if (!selectMode(ConversionMode::Enhanced, "--enhanced")) return 1;
         } else if (arg == "--fit") {
-            mode = ConversionMode::Fit;
+            std::cerr << "Error: --fit is unavailable because the previous implementation did not\n"
+                         "perform optimization. Use OpenSplat for trained fitting.\n";
+            return 1;
         } else if (arg == "--feedforward") {
-            mode = ConversionMode::Feedforward;
-        } else if (arg == "--scale" && i + 1 < argc) {
+            std::cerr << "Error: Native --feedforward has been retired because it did not provide\n"
+                         "model-correct adapters. Run ./da3-infer instead.\n";
+            return 1;
+        } else if (arg == "--download-model" || arg == "--model") {
+            std::cerr << "Error: ";
+            melkor::text::writeDisplayString(std::cerr, arg);
+            std::cerr << " belongs to the retired native feedforward facade.\n"
+                         "Run scripts/setup_da3.sh and use ./da3-infer.\n";
+            return 1;
+        } else if (arg == "--iterations" || arg == "--views" || arg == "--resolution") {
+            std::cerr << "Error: ";
+            melkor::text::writeDisplayString(std::cerr, arg);
+            std::cerr << " belongs to the unavailable --fit mode.\n";
+            return 1;
+        } else if (arg == "--scale") {
+            if (!requireValue(i, arg)) return 1;
             if (!parseFloat("--scale", argv[++i], splat_scale)) return 1;
-        } else if (arg == "--opacity" && i + 1 < argc) {
+        } else if (arg == "--opacity") {
+            if (!requireValue(i, arg)) return 1;
             if (!parseFloat("--opacity", argv[++i], opacity)) return 1;
-        } else if (arg == "--pos-scale" && i + 1 < argc) {
+        } else if (arg == "--pos-scale") {
+            if (!requireValue(i, arg)) return 1;
             if (!parseFloat("--pos-scale", argv[++i], pos_scale)) return 1;
         } else if (arg == "--no-coord-convert") {
             convert_coords = false;
-        } else if (arg == "--knn" && i + 1 < argc) {
+        } else if (arg == "--knn") {
+            if (!requireValue(i, arg)) return 1;
             if (!parseInt("--knn", argv[++i], knn_neighbors)) return 1;
         } else if (arg == "--no-surface-align") {
             surface_align = false;
-        } else if (arg == "--iterations" && i + 1 < argc) {
-            if (!parseInt("--iterations", argv[++i], fit_iterations)) return 1;
-        } else if (arg == "--views" && i + 1 < argc) {
-            if (!parseInt("--views", argv[++i], fit_views)) return 1;
-        } else if (arg == "--resolution" && i + 1 < argc) {
-            if (!parseInt("--resolution", argv[++i], fit_resolution)) return 1;
-        } else if (arg == "--model" && i + 1 < argc) {
-            model_type = argv[++i];
         } else if (arg == "--fill-holes") {
             fill_holes = true;
-        } else if (arg == "--fill-iterations" && i + 1 < argc) {
+        } else if (arg == "--fill-iterations") {
+            if (!requireValue(i, arg)) return 1;
             if (!parseInt("--fill-iterations", argv[++i], fill_iterations)) return 1;
-        } else if (arg == "--fill-strength" && i + 1 < argc) {
+        } else if (arg == "--fill-strength") {
+            if (!requireValue(i, arg)) return 1;
             if (!parseFloat("--fill-strength", argv[++i], fill_strength)) return 1;
-        } else if (arg == "--max-hole-size" && i + 1 < argc) {
+        } else if (arg == "--max-hole-size") {
+            if (!requireValue(i, arg)) return 1;
             if (!parseFloat("--max-hole-size", argv[++i], max_hole_size)) return 1;
         } else if (arg == "--ascii") {
             use_binary = false;
@@ -232,21 +283,27 @@ int main(int argc, char* argv[]) {
             } else if (output_path.empty()) {
                 output_path = arg;
             } else {
-                std::cerr << "Warning: Ignoring extra positional argument: " << arg << "\n";
+                std::cerr << "Error: Unexpected extra positional argument: ";
+                melkor::text::writeDisplayString(std::cerr, arg);
+                std::cerr << '\n';
+                return 1;
             }
         } else {
-            std::cerr << "Warning: Unknown option: " << arg << "\n";
+            std::cerr << "Error: Unknown option: ";
+            melkor::text::writeDisplayString(std::cerr, arg);
+            std::cerr << '\n';
+            return 1;
         }
     }
 
     // Validate numeric options: out-of-range values produce NaN scales
     // (0/0 in k-NN averaging) or degenerate fits rather than clean errors.
-    if (knn_neighbors < 1) {
-        std::cerr << "Error: --knn must be >= 1 (got " << knn_neighbors << ")\n";
+    if (knn_neighbors < 1 || knn_neighbors > 1024) {
+        std::cerr << "Error: --knn must be in [1, 1024] (got " << knn_neighbors << ")\n";
         return 1;
     }
-    if (fit_iterations < 1 || fit_views < 1 || fit_resolution < 1) {
-        std::cerr << "Error: --iterations, --views and --resolution must be >= 1\n";
+    if (splat_scale <= 0.0f || pos_scale <= 0.0f) {
+        std::cerr << "Error: --scale and --pos-scale must be > 0\n";
         return 1;
     }
     if (opacity <= 0.0f || opacity > 1.0f) {
@@ -268,34 +325,11 @@ int main(int argc, char* argv[]) {
     }
 
     if (list_models) {
-        std::cout << "Available feedforward models:\n";
-        melkor::ModelWeightManager manager;
-        for (const auto& model : manager.listModels()) {
-            std::cout << "  " << model.name;
-            if (model.downloaded) {
-                std::cout << " [downloaded]";
-            } else {
-                std::cout << " [not downloaded, ~" << model.size_mb << "MB]";
-            }
-            std::cout << "\n    " << model.description << "\n";
-        }
-        return 0;
-    }
-
-    if (download_model) {
-        std::cout << "Downloading model weights for: " << model_type << "\n";
-        melkor::ModelWeightManager manager;
-        auto result = manager.downloadWeights(model_type, [](float progress) {
-            std::cout << "\rProgress: " << static_cast<int>(progress * 100) << "%" << std::flush;
-        });
-        std::cout << "\n";
-        if (result.success) {
-            std::cout << "Downloaded to: " << result.local_path << "\n";
-            std::cout << "Size: " << (result.bytes_downloaded / 1024 / 1024) << " MB\n";
-        } else {
-            std::cerr << "Download failed: " << result.error_message << "\n";
-            return 1;
-        }
+        std::cout << "Supported da3-infer reconstruction checkpoints:\n"
+                     "  da3-small, da3-base (Apache-2.0)\n"
+                     "  da3-large-1.1, da3-giant-1.1, da3nested-giant-large-1.1 "
+                     "(noncommercial)\n"
+                     "Run scripts/setup_da3.sh, then ./da3-infer --help.\n";
         return 0;
     }
 
@@ -307,7 +341,9 @@ int main(int argc, char* argv[]) {
 
     // Check input exists
     if (!fs::exists(input_path)) {
-        std::cerr << "Error: Input file not found: " << input_path << "\n";
+        std::cerr << "Error: Input file not found: ";
+        melkor::text::writeDisplayString(std::cerr, input_path);
+        std::cerr << '\n';
         return 1;
     }
 
@@ -344,7 +380,9 @@ int main(int argc, char* argv[]) {
 
     // Load input
     if (input_ext == ".glb" || input_ext == ".gltf") {
-        std::cout << "Loading GLB: " << input_path << "\n";
+        std::cout << "Loading GLB: ";
+        melkor::text::writeDisplayString(std::cout, input_path);
+        std::cout << '\n';
 
         // Handle different conversion modes for GLB input
         if (mode == ConversionMode::Enhanced) {
@@ -352,6 +390,7 @@ int main(int argc, char* argv[]) {
 
             melkor::EnhancedConverter converter(metal_ctx);
             melkor::EnhancedConversionConfig config;
+            config.use_gpu = use_gpu;
             config.knn_neighbors = knn_neighbors;
             config.scale_factor = splat_scale * 50.0f;  // Adjust scale factor
             config.use_surface_alignment = surface_align;
@@ -361,7 +400,9 @@ int main(int argc, char* argv[]) {
 
             auto result = converter.convertFromFile(input_path, config);
             if (!result.success) {
-                std::cerr << "Error: " << result.error_message << "\n";
+                std::cerr << "Error: ";
+                melkor::text::writeDisplayString(std::cerr, result.error_message);
+                std::cerr << '\n';
                 return 1;
             }
 
@@ -369,72 +410,6 @@ int main(int argc, char* argv[]) {
             std::cout << "Enhanced conversion: " << result.original_vertices << " vertices -> "
                       << result.output_splats << " splats\n";
             std::cout << "Average scale: " << result.avg_scale << "\n";
-
-        } else if (mode == ConversionMode::Fit) {
-            std::cout << "Using render-based Gaussian fitting mode\n";
-            std::cout << "This may take several minutes...\n";
-
-#ifdef MELKOR_HAS_METAL
-            if (!metal_ctx) {
-                std::cerr << "Error: Fit mode requires Metal GPU acceleration\n";
-                std::cerr << "Use OpenSplat with --backend cuda/metal for GPU-accelerated training\n";
-                return 1;
-            }
-
-            melkor::GaussianFitter fitter(*metal_ctx);
-            melkor::GaussianFitConfig config;
-            config.num_iterations = fit_iterations;
-            config.num_views = fit_views;
-            config.render_width = fit_resolution;
-            config.render_height = fit_resolution;
-            config.progress_callback = [](int iter, float loss, size_t num_gaussians) {
-                if (iter % 500 == 0) {
-                    std::cout << "Iteration " << iter << ": loss=" << loss
-                              << ", gaussians=" << num_gaussians << "\n";
-                }
-            };
-
-            auto result = fitter.fitFromGlb(input_path, config);
-            if (!result.success) {
-                std::cerr << "Error: " << result.error_message << "\n";
-                return 1;
-            }
-
-            cloud = std::move(result.cloud);
-            std::cout << "Fitting complete: " << cloud.size() << " Gaussians\n";
-            std::cout << "Final loss: " << result.final_loss << "\n";
-            std::cout << "Time: " << result.fitting_time_seconds << "s\n";
-#else
-            std::cerr << "Error: Fit mode requires Metal GPU acceleration (not compiled)\n";
-            std::cerr << "Build with Metal support or use OpenSplat for GPU training\n";
-            return 1;
-#endif
-
-        } else if (mode == ConversionMode::Feedforward) {
-            std::cout << "Using feedforward neural network mode\n";
-
-            melkor::FeedforwardModel model;
-            melkor::FeedforwardConfig config;
-            config.model_type = model_type;
-            config.log_callback = [](const std::string& msg) {
-                std::cout << msg << "\n";
-            };
-
-            if (!model.initialize(config)) {
-                std::cerr << "Error: Failed to initialize feedforward model\n";
-                std::cerr << "Run with --download-model to download weights first\n";
-                return 1;
-            }
-
-            auto result = model.predictFromGlb(input_path);
-            if (!result.success) {
-                std::cerr << "Error: " << result.error_message << "\n";
-                return 1;
-            }
-
-            cloud = std::move(result.cloud);
-            std::cout << "Inference complete: " << cloud.size() << " Gaussians\n";
-            std::cout << "Inference time: " << result.inference_time_ms << "ms\n";
 
         } else {
             // Basic mode (original implementation)
@@ -447,7 +422,9 @@ int main(int argc, char* argv[]) {
 
             auto result = reader.loadFromFile(input_path, config);
             if (!result.success) {
-                std::cerr << "Error loading GLB: " << result.error_message << "\n";
+                std::cerr << "Error loading GLB: ";
+                melkor::text::writeDisplayString(std::cerr, result.error_message);
+                std::cerr << '\n';
                 return 1;
             }
 
@@ -457,12 +434,16 @@ int main(int argc, char* argv[]) {
         }
 
     } else if (input_ext == ".ply") {
-        std::cout << "Loading PLY: " << input_path << "\n";
+        std::cout << "Loading PLY: ";
+        melkor::text::writeDisplayString(std::cout, input_path);
+        std::cout << '\n';
 
         melkor::PlyReader reader;
         auto result = reader.readFromFile(input_path);
         if (!result.success) {
-            std::cerr << "Error loading PLY: " << result.error_message << "\n";
+            std::cerr << "Error loading PLY: ";
+            melkor::text::writeDisplayString(std::cerr, result.error_message);
+            std::cerr << '\n';
             return 1;
         }
 
@@ -471,12 +452,16 @@ int main(int argc, char* argv[]) {
 
     } else if (input_ext == ".spz") {
 #ifdef MELKOR_HAS_SPZ
-        std::cout << "Loading SPZ: " << input_path << "\n";
+        std::cout << "Loading SPZ: ";
+        melkor::text::writeDisplayString(std::cout, input_path);
+        std::cout << '\n';
 
         melkor::SpzDecoder decoder;
         auto result = decoder.decodeFromFile(input_path);
         if (!result.success) {
-            std::cerr << "Error loading SPZ: " << result.error_message << "\n";
+            std::cerr << "Error loading SPZ: ";
+            melkor::text::writeDisplayString(std::cerr, result.error_message);
+            std::cerr << '\n';
             return 1;
         }
 
@@ -487,9 +472,37 @@ int main(int argc, char* argv[]) {
         return 1;
 #endif
     } else {
-        std::cerr << "Error: Unsupported input format: " << input_ext << "\n";
+        std::cerr << "Error: Unsupported input format: ";
+        melkor::text::writeDisplayString(std::cerr, input_ext);
+        std::cerr << '\n';
         return 1;
     }
+
+    const auto validateCloud = [&](const char* phase) {
+        const melkor::CloudInspection inspection = melkor::inspectCloud(cloud);
+        if (inspection.valid) return true;
+        std::cerr << "Error: " << phase << " cloud failed numeric validation\n";
+        for (const auto& issue : inspection.issues) {
+            if (issue.severity != melkor::InspectionSeverity::Error) continue;
+            std::cerr << "  [";
+            melkor::text::writeDisplayString(std::cerr, issue.code);
+            std::cerr << "] ";
+            melkor::text::writeDisplayString(std::cerr, issue.message);
+            if (issue.count > 1) {
+                std::cerr << " (" << issue.count << " occurrences)";
+            }
+            if (issue.has_index) {
+                std::cerr << " First splat: " << issue.first_index << '.';
+            }
+            std::cerr << '\n';
+        }
+        return false;
+    };
+
+    // Treat decoded clouds as untrusted data before any GPU kernel, spatial
+    // operation, or quantizing encoder sees them. In particular, SPZ position
+    // packing converts floats to integers, which is undefined for NaN/Inf.
+    if (!validateCloud("input")) return 1;
 
     // Scene completion: densify sparse regions and bridge interior holes.
     if (fill_holes && !cloud.empty()) {
@@ -521,9 +534,15 @@ int main(int argc, char* argv[]) {
         provider->normalizeQuaternions(cloud);
     }
 
+    // Re-check after every mutating processing stage so a densifier/backend
+    // regression cannot hand invalid numeric data to either output writer.
+    if (!validateCloud("processed")) return 1;
+
     // Write output
     if (output_ext == ".ply") {
-        std::cout << "Writing PLY: " << output_path << "\n";
+        std::cout << "Writing PLY: ";
+        melkor::text::writeDisplayString(std::cout, output_path);
+        std::cout << '\n';
 
         melkor::PlyWriter writer;
         melkor::PlyWriteConfig config;
@@ -535,7 +554,9 @@ int main(int argc, char* argv[]) {
 
         auto result = writer.writeToFile(output_path, cloud, config);
         if (!result.success) {
-            std::cerr << "Error writing PLY: " << result.error_message << "\n";
+            std::cerr << "Error writing PLY: ";
+            melkor::text::writeDisplayString(std::cerr, result.error_message);
+            std::cerr << '\n';
             return 1;
         }
 
@@ -543,7 +564,9 @@ int main(int argc, char* argv[]) {
 
     } else if (output_ext == ".spz") {
 #ifdef MELKOR_HAS_SPZ
-        std::cout << "Writing SPZ: " << output_path << "\n";
+        std::cout << "Writing SPZ: ";
+        melkor::text::writeDisplayString(std::cout, output_path);
+        std::cout << '\n';
 
         melkor::SpzEncoder encoder;
         melkor::SpzEncodeConfig config;
@@ -551,7 +574,9 @@ int main(int argc, char* argv[]) {
 
         auto result = encoder.encodeToFile(output_path, cloud, config);
         if (!result.success) {
-            std::cerr << "Error writing SPZ: " << result.error_message << "\n";
+            std::cerr << "Error writing SPZ: ";
+            melkor::text::writeDisplayString(std::cerr, result.error_message);
+            std::cerr << '\n';
             return 1;
         }
 
@@ -561,7 +586,9 @@ int main(int argc, char* argv[]) {
         return 1;
 #endif
     } else {
-        std::cerr << "Error: Unsupported output format: " << output_ext << "\n";
+        std::cerr << "Error: Unsupported output format: ";
+        melkor::text::writeDisplayString(std::cerr, output_ext);
+        std::cerr << '\n';
         return 1;
     }
 
@@ -578,4 +605,18 @@ int main(int argc, char* argv[]) {
               << maxX << ", " << maxY << ", " << maxZ << ")\n";
 
     return 0;
+} catch (const std::bad_alloc&) {
+    std::cerr << "Error: operation exceeded available memory\n";
+    return 1;
+} catch (const std::length_error&) {
+    std::cerr << "Error: operation exceeded a container size limit\n";
+    return 1;
+} catch (const std::exception& error) {
+    std::cerr << "Error: operation failed safely: ";
+    melkor::text::writeDisplayString(std::cerr, error.what());
+    std::cerr << '\n';
+    return 1;
+} catch (...) {
+    std::cerr << "Error: operation failed safely with an unknown error\n";
+    return 1;
 }

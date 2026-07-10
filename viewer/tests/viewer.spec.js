@@ -5,6 +5,7 @@ import { mkdirSync } from "node:fs";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const SHOT_DIR = join(__dirname, "..", "screenshots");
+const LOCAL_SPLAT = join(__dirname, "..", "public", "splats", "generated", "wave.splat");
 mkdirSync(SHOT_DIR, { recursive: true });
 
 // City / area scenes in public/splats/. `min` = sane lower bound on splat count.
@@ -13,7 +14,7 @@ const SCENES = [
   { id: "snow-street",   fmt: "SPZ",   min: 900_000,   file: "snow-street.spz" },
   { id: "valley",        fmt: "SPZ",   min: 450_000,   file: "valley.spz" },
   { id: "sutro",         fmt: "SOG",   min: 1_900_000, file: "sutro.zip" },
-  { id: "train",         fmt: "SPLAT", min: 1_000_000, file: "train.splat" },
+  { id: "wave-static",   fmt: "SPLAT", min: 4_000,     file: "generated/wave.splat" },
   { id: "distant-igloo", fmt: "SPZ",   min: 300_000,   file: "distant-igloo.spz" },
   { id: "igloo-ply",     fmt: "PLY",   min: 300_000,   file: "distant-igloo.ply", optional: true },
 ];
@@ -61,6 +62,165 @@ test.describe("Melkor · SparkJS splat viewer", () => {
       if (s.optional && !ok) { test.info().annotations.push({ type: "skip-asset", description: s.file }); continue; }
       expect(ok, `${s.file} served (200)`).toBe(true);
     }
+  });
+
+  test("development server fails closed on malformed and private paths", async ({ request }) => {
+    const malformed = await request.fetch("http://127.0.0.1:8771/%");
+    expect(malformed.status()).toBe(400);
+    expect((await request.fetch("/package.json")).status()).toBe(404);
+    for (const path of [
+      "/vendor/../package.json",
+      "/vendor/..%2Fpackage.json",
+      "/public/..%2Fsrc-tauri%2FCargo.toml",
+      "/public/%2e%2e%2fsrc-tauri%2fCargo.toml",
+    ]) {
+      expect((await request.fetch(path)).status(), path).not.toBe(200);
+    }
+    expect((await request.post("/index.html")).status()).toBe(405);
+  });
+
+  test("controls stay within a narrow mobile viewport", async ({ page }) => {
+    await page.setViewportSize({ width: 375, height: 667 });
+    await boot(page);
+    const bounds = await page.evaluate(() => ["hud", "scenes", "bar"].map((id) => {
+      const rect = document.getElementById(id).getBoundingClientRect();
+      return { id, left: rect.left, right: rect.right, top: rect.top, bottom: rect.bottom };
+    }));
+    for (const rect of bounds) {
+      expect(rect.left, `${rect.id} starts inside viewport`).toBeGreaterThanOrEqual(0);
+      expect(rect.right, `${rect.id} ends inside viewport`).toBeLessThanOrEqual(375);
+      expect(rect.top, `${rect.id} starts vertically inside viewport`).toBeGreaterThanOrEqual(0);
+      expect(rect.bottom, `${rect.id} ends vertically inside viewport`).toBeLessThanOrEqual(667);
+    }
+  });
+
+  test("opens a local splat offline and can reopen the same file", async ({ page, context }) => {
+    const errors = await boot(page);
+    await context.setOffline(true);
+    try {
+      await page.locator("#localFileInput").setInputFiles(LOCAL_SPLAT);
+      const first = await page.evaluate(() => window.__viewer.waitRendered(30_000));
+      expect(first.scene).toBe("local-file");
+      expect(first.format).toBe("SPLAT");
+      expect(first.source).toBe("local");
+      expect(first.fileBytes).toBeGreaterThan(0);
+      expect(first.splatCount).toBeGreaterThanOrEqual(4_000);
+      expect(await pixelStats(page)).toMatchObject({ nonBgFrac: expect.any(Number) });
+      expect((await pixelStats(page)).nonBgFrac, "local scene renders while offline")
+        .toBeGreaterThan(0.001);
+      await expect(page.locator("#h-scene")).toContainText("wave.splat");
+      await expect(page.locator("#h-source")).toContainText("local");
+      await expect(page.locator('[data-scene="local-file"]')).toHaveAttribute("aria-pressed", "true");
+
+      // The input is reset after selection, so choosing an unchanged file is
+      // a real reload rather than a no-op.
+      await page.locator("#localFileInput").setInputFiles(LOCAL_SPLAT);
+      const reopened = await page.evaluate(() => window.__viewer.waitRendered(30_000));
+      expect(reopened.splatCount).toBe(first.splatCount);
+      expect(errors, "local import has no runtime errors").toEqual([]);
+    } finally {
+      await context.setOffline(false);
+    }
+  });
+
+  test("drag and drop opens one local splat", async ({ page }) => {
+    const errors = await boot(page);
+    await page.evaluate(async () => {
+      const response = await fetch("/public/splats/generated/wave.splat");
+      const file = new File([await response.arrayBuffer()], "dropped-wave.splat", {
+        type: "application/octet-stream",
+      });
+      const transfer = new DataTransfer();
+      transfer.items.add(file);
+      window.__localDropTransfer = transfer;
+      window.dispatchEvent(new DragEvent("dragenter", { bubbles: true, dataTransfer: transfer }));
+    });
+    await expect(page.locator("#dropTarget")).toBeVisible();
+    await page.evaluate(() => {
+      window.dispatchEvent(new DragEvent("drop", {
+        bubbles: true,
+        dataTransfer: window.__localDropTransfer,
+      }));
+    });
+    const stats = await page.evaluate(() => window.__viewer.waitRendered(30_000));
+    expect(stats.scene).toBe("local-file");
+    expect(stats.source).toBe("local");
+    expect(stats.splatCount).toBeGreaterThanOrEqual(4_000);
+    await expect(page.locator("#dropTarget")).toBeHidden();
+    await expect(page.locator("#h-scene")).toContainText("dropped-wave.splat");
+    expect(errors, "drop import has no runtime errors").toEqual([]);
+  });
+
+  test("unsupported local files preserve the scene and offer recovery", async ({ page }) => {
+    await boot(page);
+    await page.evaluate(async () => {
+      await window.__viewer.load("wave-static");
+      await window.__viewer.waitRendered(30_000);
+    });
+    const before = await page.evaluate(() => window.__viewer.getStats());
+    await page.locator("#localFileInput").setInputFiles({
+      name: "not-a-splat.txt",
+      mimeType: "text/plain",
+      buffer: Buffer.from("not a splat"),
+    });
+    await expect(page.locator("#overlay")).toHaveAttribute("role", "alert");
+    await expect(page.locator("#ov-title")).toContainText("Unsupported file type");
+    await expect(page.getByRole("button", { name: "Choose another file" })).toBeVisible();
+    expect((await page.evaluate(() => window.__viewer.getStats())).scene,
+      "invalid input keeps the current scene").toBe(before.scene);
+
+    // Cancelling the replacement chooser must not strand an actionless modal.
+    const chooser = page.waitForEvent("filechooser");
+    await page.getByRole("button", { name: "Choose another file" }).click();
+    await (await chooser).setFiles([]);
+    await expect(page.getByRole("button", { name: "Choose another file" })).toBeVisible();
+    await expect(page.getByRole("button", { name: "Dismiss" })).toBeVisible();
+
+    await page.getByRole("button", { name: "Dismiss" }).click();
+    await expect(page.locator("#overlay")).not.toHaveClass(/show/);
+    expect((await page.evaluate(() => window.__viewer.getStats())).inputError).toBeNull();
+  });
+
+  test("damaged local replacement preserves the committed local scene", async ({ page }) => {
+    await boot(page);
+    await page.locator("#localFileInput").setInputFiles(LOCAL_SPLAT);
+    const before = await page.evaluate(() => window.__viewer.waitRendered(30_000));
+    expect(before.scene).toBe("local-file");
+    await expect(page.locator('[data-scene="local-file"]')).toContainText("wave.splat");
+    await expect(page.locator('[data-scene="local-file"]')).toHaveAttribute("aria-pressed", "true");
+
+    await page.locator("#localFileInput").setInputFiles({
+      name: "damaged.ply",
+      mimeType: "application/octet-stream",
+      buffer: Buffer.from("not a ply file"),
+    });
+    await expect(page.locator("#overlay")).toHaveAttribute("role", "alert");
+    await expect(page.getByRole("button", { name: "Choose another file" })).toBeVisible();
+    await expect(page.locator("#h-scene")).toContainText("wave.splat");
+    await expect(page.locator('[data-scene="local-file"]')).toContainText("wave.splat");
+    await expect(page.locator('[data-scene="local-file"]')).toHaveAttribute("aria-pressed", "true");
+    const localCatalog = await page.evaluate(() =>
+      window.__viewer.scenes.filter((scene) => scene.local));
+    expect(localCatalog).toEqual([
+      expect.objectContaining({ id: "local-file", label: "wave.splat" }),
+    ]);
+
+    await page.getByRole("button", { name: "Dismiss" }).click();
+    expect((await page.evaluate(() => window.__viewer.getStats())).error).toBeNull();
+    expect((await pixelStats(page)).nonBgFrac, "last good local scene stays visible")
+      .toBeGreaterThan(0.001);
+  });
+
+  test("reduced-motion preference disables automatic orbit", async ({ page }) => {
+    await page.emulateMedia({ reducedMotion: "reduce" });
+    await boot(page);
+    await page.evaluate(() => window.__viewer.waitRendered(120_000));
+    const before = await page.evaluate(() => window.__viewer.getStats().camera);
+    await page.waitForTimeout(700);
+    const after = await page.evaluate(() => window.__viewer.getStats().camera);
+    expect(Math.hypot(before[0] - after[0], before[1] - after[1], before[2] - after[2]))
+      .toBeLessThan(0.001);
+    expect(await page.locator("#orbitBtn").getAttribute("aria-pressed")).toBe("false");
   });
 
   for (const sc of SCENES) {
@@ -145,6 +305,81 @@ test.describe("Melkor · SparkJS splat viewer", () => {
   // 4D temporal player: loads a per-frame splat sequence (manifest + N PLYs,
   // the shape a 4D-GS export produces) and plays it on a timeline. The demo
   // sequence is generated by `node make-4d-demo.js`; skip if not present.
+  test("failed 4D entry preserves the active static scene", async ({ page, request }) => {
+    const hasManifest = (await request.fetch("/public/splats/4d/wave/manifest.json",
+      { method: "HEAD" })).status() === 200;
+    test.skip(!hasManifest, "4D demo sequence not generated (run node make-4d-demo.js)");
+
+    await boot(page);
+    await page.evaluate(async () => {
+      await window.__viewer.load("wave-static");
+      await window.__viewer.waitRendered(30_000);
+    });
+    const before = await page.evaluate(() => window.__viewer.getStats());
+    await page.route("**/4d/wave/manifest.json", async (route) => {
+      if (route.request().method() === "GET") {
+        await route.fulfill({ status: 500, contentType: "text/plain", body: "forced failure" });
+      } else {
+        await route.continue();
+      }
+    });
+    await page.evaluate(() => window.__viewer.load("wave-4d").catch(() => {}));
+    await expect(page.locator("#overlay")).toHaveAttribute("role", "alert");
+    await expect(page.getByRole("button", { name: "Retry" })).toBeVisible();
+    await expect(page.getByRole("button", { name: "Dismiss" })).toBeVisible();
+    const retained = await page.evaluate(() => ({
+      stats: window.__viewer.getStats(),
+      sequence: window.__viewer.get4DState(),
+    }));
+    expect(retained.stats.scene).toBe(before.scene);
+    expect(retained.sequence.count).toBe(0);
+    expect((await pixelStats(page)).nonBgFrac, "active static scene remains visible")
+      .toBeGreaterThan(0.001);
+
+    await page.getByRole("button", { name: "Dismiss" }).click();
+    await page.waitForFunction(() => window.__viewer.getStats().rendered === true);
+    expect((await page.evaluate(() => window.__viewer.getStats())).error).toBeNull();
+  });
+
+  test("damaged local file cannot destroy the active 4D scene", async ({ page, request }) => {
+    const hasManifest = (await request.fetch("/public/splats/4d/wave/manifest.json",
+      { method: "HEAD" })).status() === 200;
+    test.skip(!hasManifest, "4D demo sequence not generated (run node make-4d-demo.js)");
+
+    await boot(page);
+    await page.evaluate(async () => {
+      await window.__viewer.load("wave-4d");
+      await window.__viewer.waitRendered(120_000);
+    });
+    const before = await page.evaluate(() => ({
+      scene: window.__viewer.getStats().scene,
+      sequence: window.__viewer.get4DState(),
+    }));
+    expect(before.sequence.count).toBeGreaterThan(1);
+    expect(before.sequence.buffered).toBeGreaterThan(0);
+
+    await page.locator("#localFileInput").setInputFiles({
+      name: "damaged.ply",
+      mimeType: "application/octet-stream",
+      buffer: Buffer.from("not a ply file"),
+    });
+    await expect(page.locator("#overlay")).toHaveAttribute("role", "alert");
+    await expect(page.locator("#ov-title")).toContainText("Could not open damaged.ply");
+    const retained = await page.evaluate(() => ({
+      stats: window.__viewer.getStats(),
+      sequence: window.__viewer.get4DState(),
+    }));
+    expect(retained.stats.scene).toBe(before.scene);
+    expect(retained.sequence.count).toBe(before.sequence.count);
+    expect(retained.sequence.buffered).toBeGreaterThan(0);
+    expect((await pixelStats(page)).nonBgFrac, "active 4D scene remains visible")
+      .toBeGreaterThan(0.001);
+
+    await page.getByRole("button", { name: "Dismiss" }).click();
+    await expect(page.locator("#overlay")).not.toHaveClass(/show/);
+    expect((await page.evaluate(() => window.__viewer.getStats())).error).toBeNull();
+  });
+
   test("4D temporal player sequences per-frame splats", async ({ page, request }) => {
     const hasManifest = (await request.fetch("/public/splats/4d/wave/manifest.json",
       { method: "HEAD" })).status() === 200;
@@ -199,6 +434,23 @@ test.describe("Melkor · SparkJS splat viewer", () => {
     expect(seeked.playing, "seek pauses playback").toBe(false);
     expect(seeked.buffered, "buffer stays windowed after seeking").toBeLessThan(seeked.count);
 
+    // Playback is a loop, not a one-shot. Seeking to the final frame must
+    // prefetch frame 0 and cross the boundary without stalling.
+    const wrapped = await page.evaluate(async () => {
+      const count = window.__viewer.get4DState().count;
+      await window.__viewer.seek4D(count - 1);
+      window.__viewer.play4D();
+      const deadline = performance.now() + 3000;
+      while (performance.now() < deadline) {
+        const state = window.__viewer.get4DState();
+        if (state.active === 0) return state;
+        await new Promise((resolve) => setTimeout(resolve, 25));
+      }
+      return window.__viewer.get4DState();
+    });
+    expect(wrapped.active, "playback wraps from the final frame to frame 0").toBe(0);
+    expect(wrapped.playing, "playback remains active after wrapping").toBe(true);
+
     // Switch from the 4D sequence back to a normal scene: must clear the
     // frames cleanly (no double-dispose) and render the new scene.
     await page.evaluate(async () => {
@@ -216,6 +468,61 @@ test.describe("Melkor · SparkJS splat viewer", () => {
     }
     expect(frac, "normal scene renders after leaving 4D").toBeGreaterThan(0.001);
     expect(errors, "no page errors").toEqual([]);
+  });
+
+  test("4D scrubbing is latest-seek-wins when frame loads resolve out of order", async ({ page, request }) => {
+    const hasManifest = (await request.fetch("/public/splats/4d/wave/manifest.json",
+      { method: "HEAD" })).status() === 200;
+    test.skip(!hasManifest, "4D demo sequence not generated (run node make-4d-demo.js)");
+
+    await page.route("**/4d/wave/time_00015.ply", async (route) => {
+      await new Promise((resolve) => setTimeout(resolve, 750));
+      await route.continue();
+    });
+    await boot(page);
+    await page.evaluate(async () => {
+      await window.__viewer.load("wave-4d");
+      window.__viewer.pause4D();
+      const stale = window.__viewer.seek4D(15);
+      await new Promise((resolve) => setTimeout(resolve, 25));
+      const latest = window.__viewer.seek4D(8);
+      await Promise.all([stale, latest]);
+    });
+    await page.waitForTimeout(900);
+    expect(await page.evaluate(() => window.__viewer.get4DState().active),
+      "the delayed stale seek cannot overwrite the latest seek").toBe(8);
+  });
+
+  test("4D missing frames retry finitely and surface a recoverable error", async ({ page, request }) => {
+    const hasManifest = (await request.fetch("/public/splats/4d/wave/manifest.json",
+      { method: "HEAD" })).status() === 200;
+    test.skip(!hasManifest, "4D demo sequence not generated (run node make-4d-demo.js)");
+
+    let requests = 0;
+    await page.route("**/4d/wave/time_00007.ply", async (route) => {
+      requests++;
+      await route.fulfill({ status: 404, contentType: "text/plain", body: "missing test frame" });
+    });
+    await boot(page);
+    await page.evaluate(() => window.__viewer.load("wave-4d"));
+    await page.waitForFunction(() => window.__viewer.get4DState().error !== null, undefined,
+      { timeout: 8_000 });
+
+    const failed = await page.evaluate(() => ({
+      state: window.__viewer.get4DState(),
+      retryVisible: !document.getElementById("ov-retry").hidden,
+    }));
+    expect(requests, "a missing frame has a strict retry cap").toBe(3);
+    expect(failed.state.playing, "playback pauses rather than freezing silently").toBe(false);
+    expect(failed.state.error, "the failure is visible to callers").toContain("after 3 attempts");
+    expect(failed.retryVisible, "the viewer offers an explicit retry action").toBe(true);
+
+    await page.getByRole("button", { name: "Retry" }).click();
+    await page.waitForFunction(() => window.__viewer.get4DState().error !== null, undefined,
+      { timeout: 8_000 });
+    expect(requests, "a failed explicit retry runs one new bounded retry cycle").toBe(6);
+    expect(await page.getByRole("button", { name: "Retry" }).isVisible(),
+      "a repeated failure remains recoverable").toBe(true);
   });
 
   // The "4D format producer" (pack-4d.js) packs a per-frame sequence into

@@ -1,6 +1,8 @@
 # Third-Party Licenses
 
-This document contains the full text of licenses for third-party software included in Melkor.
+This document records license terms and the authoritative in-tree license files
+for software shipped with or vendored by Melkor. The native binary's embedded
+dependencies are reproduced here in full.
 
 ## DA3coreml - Depth Anything 3
 
@@ -74,19 +76,105 @@ Full license text: third_party/spz/LICENSE
 
 MIT License
 
-Copyright (c) 2017-2024 Syoyo Fujita and contributors
+Copyright (c) 2015 - Present Syoyo Fujita, Aurélien Chatelain and many
+contributors.
 
-Full license text available at: https://github.com/syoyo/tinygltf
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+
+Source notice: `third_party/tinygltf/tiny_gltf.h`.
+
+### JSON for Modern C++ (embedded by tinygltf)
+
+MIT License
+
+Copyright (c) 2013-2019 Niels Lohmann.
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+
+Source notice: `third_party/tinygltf/json.hpp`.
+
+### René Nyffenegger base64 codec (embedded by tinygltf)
+
+Copyright (C) 2004-2008 René Nyffenegger
+
+This source code is provided "as-is", without any express or implied warranty.
+In no event will the author be held liable for any damages arising from the use
+of this software.
+
+Permission is granted to anyone to use this software for any purpose, including
+commercial applications, and to alter it and redistribute it freely, subject
+to these restrictions: the origin must not be misrepresented; altered source
+versions must be plainly marked; and the notice may not be removed or altered
+from a source distribution.
+
+Source notice: `third_party/tinygltf/tiny_gltf.h`.
+
+### dlib URI decoder (embedded by tinygltf)
+
+Copyright (C) 2003 Davis E. King. Boost Software License 1.0. The complete
+license grant and disclaimer are present in
+`third_party/tinygltf/tiny_gltf.h`; its notice requirement exempts copies that
+are solely machine-executable object code.
 
 ---
 
 ## stb_image
 
-Public Domain / MIT License
+MIT License (selected from the upstream MIT / public-domain dual license)
 
-Copyright (c) 2017-2024 Sean Barrett and contributors
+Copyright (c) 2017 Sean Barrett
 
-Full license text available at: https://github.com/nothings/stb
+Permission is hereby granted, free of charge, to any person obtaining a copy of
+this software and associated documentation files (the "Software"), to deal in
+the Software without restriction, including without limitation the rights to
+use, copy, modify, merge, publish, distribute, sublicense, and/or sell copies of
+the Software, and to permit persons to whom the Software is furnished to do so,
+subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+
+Source notice: `third_party/stb/stb_image.h`.
 
 ---
 

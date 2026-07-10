@@ -1,13 +1,36 @@
 #include "melkor/ply_writer.hpp"
 #include <algorithm>
+#include <cerrno>
+#include <charconv>
+#include <cmath>
 #include <cstdint>
+#include <cstdlib>
 #include <fstream>
 #include <sstream>
 #include <cstring>
 #include <iomanip>
+#include <limits>
+#include <new>
+#include <stdexcept>
 #include <string_view>
 
 namespace melkor {
+namespace {
+
+void writeFloatLittleEndian(std::ostream& stream, float value) {
+    static_assert(sizeof(float) == sizeof(uint32_t), "PLY requires IEEE-754 32-bit floats");
+    uint32_t bits = 0;
+    std::memcpy(&bits, &value, sizeof(bits));
+    const char bytes[4] = {
+        static_cast<char>(bits & 0xffu),
+        static_cast<char>((bits >> 8u) & 0xffu),
+        static_cast<char>((bits >> 16u) & 0xffu),
+        static_cast<char>((bits >> 24u) & 0xffu),
+    };
+    stream.write(bytes, sizeof(bytes));
+}
+
+} // namespace
 
 PlyWriter::PlyWriter() = default;
 PlyWriter::~PlyWriter() = default;
@@ -104,40 +127,40 @@ PlyWriteResult PlyWriter::writeToStream(std::ostream& stream,
         // Binary format
         for (const auto& splat : splats) {
             // Position
-            stream.write(reinterpret_cast<const char*>(&splat.x), sizeof(float));
-            stream.write(reinterpret_cast<const char*>(&splat.y), sizeof(float));
-            stream.write(reinterpret_cast<const char*>(&splat.z), sizeof(float));
+            writeFloatLittleEndian(stream, splat.x);
+            writeFloatLittleEndian(stream, splat.y);
+            writeFloatLittleEndian(stream, splat.z);
             
             // Normals (dummy values)
             float nx = 0.0f, ny = 0.0f, nz = 1.0f;
-            stream.write(reinterpret_cast<const char*>(&nx), sizeof(float));
-            stream.write(reinterpret_cast<const char*>(&ny), sizeof(float));
-            stream.write(reinterpret_cast<const char*>(&nz), sizeof(float));
+            writeFloatLittleEndian(stream, nx);
+            writeFloatLittleEndian(stream, ny);
+            writeFloatLittleEndian(stream, nz);
             
             // DC color
-            stream.write(reinterpret_cast<const char*>(&splat.f_dc_0), sizeof(float));
-            stream.write(reinterpret_cast<const char*>(&splat.f_dc_1), sizeof(float));
-            stream.write(reinterpret_cast<const char*>(&splat.f_dc_2), sizeof(float));
+            writeFloatLittleEndian(stream, splat.f_dc_0);
+            writeFloatLittleEndian(stream, splat.f_dc_1);
+            writeFloatLittleEndian(stream, splat.f_dc_2);
             
             // SH rest coefficients
             for (int i = 0; i < sh_rest_count; ++i) {
                 float val = (i < static_cast<int>(splat.sh_rest.size())) ? splat.sh_rest[i] : 0.0f;
-                stream.write(reinterpret_cast<const char*>(&val), sizeof(float));
+                writeFloatLittleEndian(stream, val);
             }
             
             // Opacity
-            stream.write(reinterpret_cast<const char*>(&splat.opacity), sizeof(float));
+            writeFloatLittleEndian(stream, splat.opacity);
             
             // Scale
-            stream.write(reinterpret_cast<const char*>(&splat.scale_0), sizeof(float));
-            stream.write(reinterpret_cast<const char*>(&splat.scale_1), sizeof(float));
-            stream.write(reinterpret_cast<const char*>(&splat.scale_2), sizeof(float));
+            writeFloatLittleEndian(stream, splat.scale_0);
+            writeFloatLittleEndian(stream, splat.scale_1);
+            writeFloatLittleEndian(stream, splat.scale_2);
             
             // Rotation
-            stream.write(reinterpret_cast<const char*>(&splat.rot_0), sizeof(float));
-            stream.write(reinterpret_cast<const char*>(&splat.rot_1), sizeof(float));
-            stream.write(reinterpret_cast<const char*>(&splat.rot_2), sizeof(float));
-            stream.write(reinterpret_cast<const char*>(&splat.rot_3), sizeof(float));
+            writeFloatLittleEndian(stream, splat.rot_0);
+            writeFloatLittleEndian(stream, splat.rot_1);
+            writeFloatLittleEndian(stream, splat.rot_2);
+            writeFloatLittleEndian(stream, splat.rot_3);
             
             result.bytes_written += (6 + 3 + sh_rest_count + 1 + 3 + 4) * sizeof(float);
         }
@@ -192,24 +215,65 @@ PlyWriteResult PlyWriter::writeToBuffer(std::vector<uint8_t>& buffer,
 PlyReader::PlyReader() = default;
 PlyReader::~PlyReader() = default;
 
-PlyReader::ReadResult PlyReader::readFromFile(const std::string& filepath) {
+PlyReader::ReadResult PlyReader::readFromFile(const std::string& filepath) try {
     std::ifstream file(filepath, std::ios::binary);
     if (!file.is_open()) {
-        return {false, "Failed to open file: " + filepath, {}};
+        return {false, "Failed to open file: " + filepath, {}, {}};
     }
     
-    // Read entire file into memory
+    // Reject malformed/header-bomb inputs before allocating for the entire
+    // file. Valid payloads still decode in memory because the public result is
+    // a materialized GaussianCloud, but an unrelated sparse multi-GB file no
+    // longer consumes its full size merely to discover a bad magic line.
     file.seekg(0, std::ios::end);
-    size_t size = file.tellg();
+    const std::streamoff end = file.tellg();
+    if (end <= 0 || static_cast<uintmax_t>(end) > std::numeric_limits<size_t>::max() ||
+        static_cast<uintmax_t>(end) > static_cast<uintmax_t>(std::numeric_limits<std::streamsize>::max())) {
+        return {false, "Invalid or oversized PLY file", {}, {}};
+    }
+    const size_t size = static_cast<size_t>(end);
     file.seekg(0, std::ios::beg);
-    
-    std::vector<uint8_t> buffer(size);
-    file.read(reinterpret_cast<char*>(buffer.data()), size);
+
+    constexpr size_t kMaxHeaderBytes = 1024 * 1024;
+    const size_t prefix_size = std::min(size, kMaxHeaderBytes);
+    std::vector<uint8_t> prefix(prefix_size);
+    if (!file.read(reinterpret_cast<char*>(prefix.data()),
+                   static_cast<std::streamsize>(prefix_size))) {
+        return {false, "Failed to read PLY header", {}, {}};
+    }
+    const std::string_view prefix_view(reinterpret_cast<const char*>(prefix.data()), prefix.size());
+    if (!(prefix_view.rfind("ply\n", 0) == 0 || prefix_view.rfind("ply\r\n", 0) == 0)) {
+        return {false, "Invalid PLY: missing ply magic line", {}, {}};
+    }
+    const bool has_header_end = prefix_view.find("\nend_header\n") != std::string_view::npos ||
+                                prefix_view.find("\nend_header\r\n") != std::string_view::npos;
+    if (!has_header_end && size > prefix_size) {
+        return {false, "Invalid PLY: header exceeds 1 MiB limit", {}, {}};
+    }
+
+    std::vector<uint8_t> buffer;
+    try {
+        buffer.resize(size);
+    } catch (const std::bad_alloc&) {
+        return {false, "PLY file exceeds available memory", {}, {}};
+    }
+    file.clear();
+    file.seekg(0, std::ios::beg);
+    if (!file.read(reinterpret_cast<char*>(buffer.data()), static_cast<std::streamsize>(size))) {
+        return {false, "Failed to read complete PLY file", {}, {}};
+    }
     
     return readFromBuffer(buffer.data(), buffer.size());
+} catch (const std::bad_alloc&) {
+    return {false, "PLY file exceeds available memory", {}, {}};
+} catch (const std::length_error&) {
+    return {false, "PLY file exceeds a container size limit", {}, {}};
 }
 
-PlyReader::ReadResult PlyReader::readFromBuffer(const uint8_t* data, size_t size) {
+PlyReader::ReadResult PlyReader::readFromBuffer(const uint8_t* data, size_t size) try {
+    if (data == nullptr || size == 0) {
+        return {false, "Invalid PLY: input buffer is null or empty", {}, {}};
+    }
     ReadResult result;
     result.success = true;
 
@@ -253,12 +317,16 @@ PlyReader::ReadResult PlyReader::readFromBuffer(const uint8_t* data, size_t size
     bool is_binary = false;
     bool is_big_endian = false;
     bool in_vertex = false;
+    bool saw_format = false;
+    bool saw_vertex = false;
+    std::vector<std::string> element_names;
 
     std::string_view view(reinterpret_cast<const char*>(data), size);
     size_t header_bytes = 0;
     {
         bool found_end = false;
         size_t line_start = 0;
+        size_t line_number = 0;
         while (line_start < size) {
             size_t nl = view.find('\n', line_start);
             if (nl == std::string_view::npos) break;  // header lines must end in '\n'
@@ -266,48 +334,120 @@ PlyReader::ReadResult PlyReader::readFromBuffer(const uint8_t* data, size_t size
             // Strip trailing CR.
             if (!line.empty() && line.back() == '\r') line.pop_back();
             line_start = nl + 1;
+            if (line_number++ == 0) {
+                if (line != "ply") {
+                    return {false, "Invalid PLY: missing ply magic line", {}, {}};
+                }
+                continue;
+            }
             if (line == "end_header") {
                 header_bytes = line_start;
                 found_end = true;
                 break;
             }
             if (line.rfind("format ", 0) == 0) {
-                is_binary = (line.rfind("format binary", 0) == 0);
-                is_big_endian = (line.rfind("format binary_big_endian", 0) == 0);
+                if (saw_format) {
+                    return {false, "Invalid PLY: duplicate format declaration", {}, {}};
+                }
+                saw_format = true;
+                if (line == "format ascii 1.0") {
+                    is_binary = false;
+                    is_big_endian = false;
+                } else if (line == "format binary_little_endian 1.0") {
+                    is_binary = true;
+                    is_big_endian = false;
+                } else if (line == "format binary_big_endian 1.0") {
+                    is_binary = true;
+                    is_big_endian = true;
+                } else {
+                    return {false, "Invalid PLY: unsupported format declaration", {}, {}};
+                }
             } else if (line.rfind("element ", 0) == 0) {
-                in_vertex = (line.find("element vertex ") == 0);
+                std::istringstream declaration(line);
+                std::string keyword;
+                std::string element_name;
+                std::string count_token;
+                std::string extra;
+                declaration >> keyword >> element_name >> count_token >> extra;
+                if (keyword != "element" || element_name.empty() || count_token.empty() ||
+                    !extra.empty()) {
+                    return {false, "Invalid PLY: malformed element declaration", {}, {}};
+                }
+                if (std::find(element_names.begin(), element_names.end(), element_name) !=
+                    element_names.end()) {
+                    return {false, "Invalid PLY: duplicate element declaration", {}, {}};
+                }
+                element_names.push_back(element_name);
+
+                size_t element_count = 0;
+                const char* begin = count_token.data();
+                const char* end = begin + count_token.size();
+                const auto parsed = std::from_chars(begin, end, element_count);
+                if (parsed.ec != std::errc{} || parsed.ptr != end) {
+                    return {false, "Invalid PLY: malformed element count in header", {}, {}};
+                }
+
+                in_vertex = element_name == "vertex";
                 if (in_vertex) {
-                    // "element vertex <count>"
-                    auto p = line.find_first_of("0123456789");
-                    if (p != std::string::npos) {
-                        try {
-                            vertex_count = std::stoull(line.substr(p));
-                        } catch (const std::exception&) {
-                            // std::stoull throws out_of_range on absurd counts;
-                            // report cleanly instead of terminating the process.
-                            return {false, "Invalid PLY: malformed vertex count in header", {}};
-                        }
-                    }
+                    saw_vertex = true;
+                    vertex_count = element_count;
+                } else if (!saw_vertex && element_count != 0) {
+                    // This reader intentionally extracts only vertex records.
+                    // Without decoding the preceding element schema, treating
+                    // its first record as a vertex would silently corrupt both
+                    // ASCII rows and binary strides.
+                    return {false,
+                            "Invalid PLY: non-vertex data precedes the vertex element",
+                            {}, {}};
                 }
             } else if (line.rfind("property ", 0) == 0 && in_vertex) {
-                // Forms: "property <type> <name>" or "property <count> <type> <name>"
-                // For splat PLYs we only care about scalar properties; list
-                // properties ("property list ...") are skipped.
-                if (line.find("property list") == std::string::npos) {
-                    std::istringstream ls(line);
-                    std::string kw, t, n;
-                    ls >> kw >> t >> n;
-                    if (!n.empty()) {
-                        vertex_props.push_back({n, prop_type(t), 0});
-                    }
+                std::istringstream property(line);
+                std::string keyword;
+                std::string type_name;
+                std::string property_name;
+                std::string extra;
+                property >> keyword >> type_name >> property_name >> extra;
+                if (keyword != "property" || type_name.empty() || property_name.empty() ||
+                    !extra.empty()) {
+                    return {false, "Invalid PLY: malformed vertex property", {}, {}};
                 }
+                // A list has a data-dependent record width. Skipping it would
+                // misalign every later binary field, so fail closed.
+                if (type_name == "list") {
+                    return {false, "Invalid PLY: vertex list properties are unsupported", {}, {}};
+                }
+                const PropType type = prop_type(type_name);
+                if (type.kind == PropKind::Unknown) {
+                    return {false, "Invalid PLY: unsupported scalar property type " + type_name,
+                            {}, {}};
+                }
+                if (std::any_of(vertex_props.begin(), vertex_props.end(),
+                                [&](const Property& existing) {
+                                    return existing.name == property_name;
+                                })) {
+                    return {false, "Invalid PLY: duplicate vertex property " + property_name,
+                            {}, {}};
+                }
+                vertex_props.push_back({property_name, type, 0});
             }
             // comment/obj_info and unrecognized lines are skipped.
         }
         if (!found_end) {
-            return {false, "Invalid PLY: no end_header found", {}};
+            return {false, "Invalid PLY: no end_header found", {}, {}};
+        }
+        if (!saw_format) {
+            return {false, "Invalid PLY: missing format declaration", {}, {}};
+        }
+        if (!saw_vertex) {
+            return {false, "Invalid PLY: no vertex element found", {}, {}};
         }
     }
+
+    result.metadata.declared_vertices = vertex_count;
+    result.metadata.encoding = is_big_endian
+        ? Metadata::Encoding::BinaryBigEndian
+        : is_binary ? Metadata::Encoding::BinaryLittleEndian
+                    : Metadata::Encoding::Ascii;
 
     if (vertex_count == 0) {
         // An empty cloud is a valid PLY (the writer emits one for empty input,
@@ -319,7 +459,7 @@ PlyReader::ReadResult PlyReader::readFromBuffer(const uint8_t* data, size_t size
         return result;
     }
     if (vertex_props.empty()) {
-        return {false, "Invalid PLY: no vertex properties found", {}};
+        return {false, "Invalid PLY: no vertex properties found", {}, {}};
     }
 
     // Resolve the canonical splat fields by name. Both 3DGS (f_dc_0/...)
@@ -338,16 +478,55 @@ PlyReader::ReadResult PlyReader::readFromBuffer(const uint8_t* data, size_t size
     int is0 = find_idx("scale_0"), is1 = find_idx("scale_1"), is2 = find_idx("scale_2");
     int ir0 = find_idx("rot_0"), ir1 = find_idx("rot_1"), ir2 = find_idx("rot_2"), ir3 = find_idx("rot_3");
 
-    // Gather f_rest_* indices in order.
+    result.metadata.has_position = ix >= 0 && iy >= 0 && iz >= 0;
+    result.metadata.has_sh_dc = ifdc0 >= 0 && ifdc1 >= 0 && ifdc2 >= 0;
+    result.metadata.has_rgb = ir >= 0 && ig >= 0 && ib >= 0;
+    result.metadata.has_opacity = iopacity >= 0;
+    result.metadata.has_scale = is0 >= 0 && is1 >= 0 && is2 >= 0;
+    result.metadata.has_rotation = ir0 >= 0 && ir1 >= 0 && ir2 >= 0 && ir3 >= 0;
+
+    // Gather f_rest_* indices by their numeric suffix. Property order is not
+    // semantically significant, but suffixes must uniquely and contiguously
+    // describe one supported SH degree; accepting gaps or duplicates silently
+    // corrupts view-dependent color.
     std::vector<int> sh_rest_idx;
-    for (const auto& p : vertex_props) {
+    std::vector<std::pair<size_t, int>> indexed_sh_rest;
+    for (size_t property_index = 0; property_index < vertex_props.size(); ++property_index) {
+        const auto& p = vertex_props[property_index];
         if (p.name.rfind("f_rest_", 0) == 0) {
-            sh_rest_idx.push_back(find_idx(p.name));
+            const std::string suffix = p.name.substr(7);
+            size_t coefficient = 0;
+            const char* begin = suffix.data();
+            const char* end = begin + suffix.size();
+            const auto parsed = std::from_chars(begin, end, coefficient);
+            if (suffix.empty() || parsed.ec != std::errc{} || parsed.ptr != end ||
+                coefficient > 44) {
+                return {false, "Invalid PLY: malformed f_rest coefficient name", {}, {}};
+            }
+            if (std::any_of(indexed_sh_rest.begin(), indexed_sh_rest.end(),
+                            [&](const auto& item) { return item.first == coefficient; })) {
+                return {false, "Invalid PLY: duplicate f_rest coefficient", {}, {}};
+            }
+            indexed_sh_rest.emplace_back(coefficient, static_cast<int>(property_index));
         }
     }
-    if (!sh_rest_idx.empty()) {
+    if (!indexed_sh_rest.empty()) {
+        std::sort(indexed_sh_rest.begin(), indexed_sh_rest.end());
+        const size_t coefficient_count = indexed_sh_rest.size();
+        if (coefficient_count != 9 && coefficient_count != 24 && coefficient_count != 45) {
+            return {false, "Invalid PLY: f_rest count does not match SH degree 1, 2, or 3",
+                    {}, {}};
+        }
+        for (size_t coefficient = 0; coefficient < coefficient_count; ++coefficient) {
+            if (indexed_sh_rest[coefficient].first != coefficient) {
+                return {false, "Invalid PLY: f_rest coefficients must be contiguous from zero",
+                        {}, {}};
+            }
+            sh_rest_idx.push_back(indexed_sh_rest[coefficient].second);
+        }
+        result.metadata.has_sh_rest = true;
         result.cloud.setShDegree([&] {
-            switch (static_cast<int>(sh_rest_idx.size())) {
+            switch (static_cast<int>(coefficient_count)) {
                 case 9: return 1;
                 case 24: return 2;
                 case 45: return 3;
@@ -357,7 +536,7 @@ PlyReader::ReadResult PlyReader::readFromBuffer(const uint8_t* data, size_t size
     }
 
     if (ix < 0 || iy < 0 || iz < 0) {
-        return {false, "Invalid PLY: missing x/y/z position properties", {}};
+        return {false, "Invalid PLY: missing x/y/z position properties", {}, {}};
     }
 
     // Record stride and per-property byte offsets from the canonical type
@@ -375,7 +554,7 @@ PlyReader::ReadResult PlyReader::readFromBuffer(const uint8_t* data, size_t size
     const size_t remaining = size - header_bytes;
     if (is_binary) {
         if (stride == 0 || vertex_count > remaining / stride) {
-            return {false, "Invalid PLY: data section too small for declared vertex count", {}};
+            return {false, "Invalid PLY: data section too small for declared vertex count", {}, {}};
         }
     } else {
         // ASCII data size is not stride-predictable, but each value needs at
@@ -383,7 +562,7 @@ PlyReader::ReadResult PlyReader::readFromBuffer(const uint8_t* data, size_t size
         // occupy fewer than 2*props - 1 bytes. Cap the count accordingly.
         const size_t min_record = 2 * vertex_props.size() - 1;
         if (vertex_count > remaining / min_record + 1) {
-            return {false, "Invalid PLY: declared vertex count exceeds data size", {}};
+            return {false, "Invalid PLY: declared vertex count exceeds data size", {}, {}};
         }
     }
 
@@ -430,6 +609,68 @@ PlyReader::ReadResult PlyReader::readFromBuffer(const uint8_t* data, size_t size
         return utils::rgbToShDc(c / 255.0f);
     };
 
+    auto parse_ascii_value = [](const std::string& token, PropKind kind,
+                                float& output) -> bool {
+        if (token.empty()) return false;
+        char* end = nullptr;
+        errno = 0;
+        switch (kind) {
+            case PropKind::F32: {
+                const float value = std::strtof(token.c_str(), &end);
+                if (end != token.c_str() + token.size() || errno == ERANGE) return false;
+                output = value;
+                return true;
+            }
+            case PropKind::F64: {
+                const double value = std::strtod(token.c_str(), &end);
+                if (end != token.c_str() + token.size() || errno == ERANGE) return false;
+                if (std::isfinite(value) &&
+                    (std::abs(value) > std::numeric_limits<float>::max() ||
+                     (value != 0.0 && std::abs(value) < std::numeric_limits<float>::denorm_min()))) {
+                    return false;
+                }
+                output = static_cast<float>(value);
+                return true;
+            }
+            case PropKind::U8:
+            case PropKind::U16:
+            case PropKind::U32: {
+                if (token.front() == '-') return false;
+                const unsigned long long value = std::strtoull(token.c_str(), &end, 10);
+                const unsigned long long maximum = kind == PropKind::U8
+                    ? std::numeric_limits<uint8_t>::max()
+                    : kind == PropKind::U16 ? std::numeric_limits<uint16_t>::max()
+                                            : std::numeric_limits<uint32_t>::max();
+                if (end != token.c_str() + token.size() || errno == ERANGE || value > maximum) {
+                    return false;
+                }
+                output = static_cast<float>(value);
+                return true;
+            }
+            case PropKind::I8:
+            case PropKind::I16:
+            case PropKind::I32: {
+                const long long value = std::strtoll(token.c_str(), &end, 10);
+                const long long minimum = kind == PropKind::I8
+                    ? std::numeric_limits<int8_t>::min()
+                    : kind == PropKind::I16 ? std::numeric_limits<int16_t>::min()
+                                           : std::numeric_limits<int32_t>::min();
+                const long long maximum = kind == PropKind::I8
+                    ? std::numeric_limits<int8_t>::max()
+                    : kind == PropKind::I16 ? std::numeric_limits<int16_t>::max()
+                                           : std::numeric_limits<int32_t>::max();
+                if (end != token.c_str() + token.size() || errno == ERANGE ||
+                    value < minimum || value > maximum) {
+                    return false;
+                }
+                output = static_cast<float>(value);
+                return true;
+            }
+            case PropKind::Unknown:
+            default: return false;
+        }
+    };
+
     if (is_binary) {
         for (size_t i = 0; i < vertex_count; ++i) {
             const uint8_t* base = vertex_data + i * stride;
@@ -472,12 +713,25 @@ PlyReader::ReadResult PlyReader::readFromBuffer(const uint8_t* data, size_t size
         std::istringstream stream(std::string(reinterpret_cast<const char*>(vertex_data),
                                               size - header_bytes));
         std::vector<float> vals(vertex_props.size());
+        std::string token;
         for (size_t i = 0; i < vertex_count; ++i) {
+            std::string record_line;
+            if (!std::getline(stream, record_line)) {
+                return {false, "Invalid PLY: missing ASCII record for vertex " +
+                    std::to_string(i), {}, {}};
+            }
+            if (!record_line.empty() && record_line.back() == '\r') record_line.pop_back();
+            std::istringstream record(record_line);
             for (size_t j = 0; j < vertex_props.size(); ++j) {
-                if (!(stream >> vals[j])) {
-                    return {false, "Invalid PLY: unexpected end of data at vertex " +
-                        std::to_string(i), {}};
+                if (!(record >> token) ||
+                    !parse_ascii_value(token, vertex_props[j].type.kind, vals[j])) {
+                    return {false, "Invalid PLY: malformed scalar at vertex " +
+                        std::to_string(i), {}, {}};
                 }
+            }
+            if (record >> token) {
+                return {false, "Invalid PLY: extra scalar at vertex " +
+                    std::to_string(i), {}, {}};
             }
             GaussianSplat splat;
             splat.x = vals[ix];
@@ -517,6 +771,10 @@ PlyReader::ReadResult PlyReader::readFromBuffer(const uint8_t* data, size_t size
     }
 
     return result;
+} catch (const std::bad_alloc&) {
+    return {false, "PLY buffer exceeds available memory", {}, {}};
+} catch (const std::length_error&) {
+    return {false, "PLY buffer exceeds a container size limit", {}, {}};
 }
 
 } // namespace melkor

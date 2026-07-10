@@ -1,0 +1,304 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="dark light">
+  <title>Melkor engineering review — 2026-07-10</title>
+  <style>
+    :root {
+      --bg: #11110f;
+      --surface: #191916;
+      --surface-2: #22221e;
+      --text: #f3f0e7;
+      --muted: #aaa79d;
+      --line: #3a3932;
+      --green: #94d6a4;
+      --amber: #e4c274;
+      --red: #ee8e82;
+      --blue: #9ac5e8;
+      --radius: 14px;
+      font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont,
+        "Segoe UI", sans-serif;
+    }
+    * { box-sizing: border-box; }
+    html { scroll-behavior: smooth; }
+    body {
+      margin: 0;
+      background: var(--bg);
+      color: var(--text);
+      font-size: 16px;
+      line-height: 1.55;
+    }
+    a { color: var(--blue); text-underline-offset: 0.18em; }
+    a:focus-visible, summary:focus-visible {
+      outline: 3px solid var(--blue);
+      outline-offset: 3px;
+      border-radius: 4px;
+    }
+    .skip {
+      position: absolute;
+      left: 1rem;
+      top: -5rem;
+      padding: 0.65rem 0.9rem;
+      color: #111;
+      background: var(--blue);
+      z-index: 10;
+    }
+    .skip:focus { top: 1rem; }
+    header, main, footer { width: min(1120px, calc(100% - 2rem)); margin-inline: auto; }
+    header { padding: clamp(3rem, 8vw, 6rem) 0 2rem; }
+    main { padding-bottom: 4rem; }
+    footer { color: var(--muted); border-top: 1px solid var(--line); padding: 1.5rem 0 3rem; }
+    h1, h2, h3 { line-height: 1.15; letter-spacing: -0.025em; }
+    h1 { max-width: 16ch; margin: 0.3rem 0 1rem; font-size: clamp(2.4rem, 7vw, 5.3rem); }
+    h2 { margin: 3rem 0 1rem; font-size: clamp(1.65rem, 4vw, 2.5rem); }
+    h3 { margin: 0 0 0.65rem; font-size: 1.12rem; }
+    p { max-width: 76ch; }
+    code {
+      padding: 0.1rem 0.32rem;
+      border: 1px solid var(--line);
+      border-radius: 5px;
+      background: var(--surface-2);
+      font: 0.9em ui-monospace, SFMono-Regular, Menlo, monospace;
+    }
+    .eyebrow { color: var(--amber); font-size: 0.78rem; font-weight: 760; letter-spacing: 0.13em; text-transform: uppercase; }
+    .lede { max-width: 72ch; color: var(--muted); font-size: clamp(1.05rem, 2vw, 1.24rem); }
+    .meta { display: flex; flex-wrap: wrap; gap: 0.5rem 1.4rem; color: var(--muted); font-size: 0.88rem; }
+    .verdict {
+      margin: 2rem 0;
+      padding: clamp(1.25rem, 3vw, 2rem);
+      border: 1px solid #55765b;
+      border-radius: var(--radius);
+      background: linear-gradient(135deg, #17241a, var(--surface));
+    }
+    .verdict strong { color: var(--green); }
+    .grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 0.75rem; }
+    .card {
+      min-width: 0;
+      padding: 1rem;
+      border: 1px solid var(--line);
+      border-radius: var(--radius);
+      background: var(--surface);
+    }
+    .grade { display: block; margin-top: 0.3rem; color: var(--green); font-size: 2.15rem; font-weight: 780; }
+    .grade.b { color: var(--amber); }
+    .label { color: var(--muted); font-size: 0.85rem; }
+    .risk-line { display: flex; flex-wrap: wrap; gap: 0.6rem; margin: 1rem 0; }
+    .pill { padding: 0.32rem 0.65rem; border: 1px solid var(--line); border-radius: 99px; color: var(--muted); background: var(--surface); font-size: 0.82rem; }
+    .pill.pass { color: var(--green); border-color: #4d7255; }
+    .pill.warn { color: var(--amber); border-color: #75643e; }
+    .table-wrap { overflow-x: auto; border: 1px solid var(--line); border-radius: var(--radius); }
+    table { width: 100%; border-collapse: collapse; background: var(--surface); }
+    th, td { padding: 0.78rem 0.9rem; border-bottom: 1px solid var(--line); text-align: left; vertical-align: top; }
+    th { color: var(--muted); background: var(--surface-2); font-size: 0.78rem; letter-spacing: 0.04em; text-transform: uppercase; }
+    tr:last-child td { border-bottom: 0; }
+    .status { color: var(--green); font-weight: 720; }
+    .sev-medium { color: var(--amber); font-weight: 720; }
+    .sev-low { color: var(--blue); font-weight: 720; }
+    .changes { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 0.75rem; }
+    .changes ul { margin: 0.5rem 0 0; padding-left: 1.15rem; }
+    .changes li + li { margin-top: 0.45rem; }
+    details { margin-top: 1rem; padding: 0.85rem 1rem; border: 1px solid var(--line); border-radius: var(--radius); background: var(--surface); }
+    summary { cursor: pointer; font-weight: 720; }
+    .note { margin-top: 1rem; padding: 1rem; border-left: 3px solid var(--amber); background: var(--surface); color: var(--muted); }
+    @media (max-width: 780px) {
+      .grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+      .changes { grid-template-columns: 1fr; }
+      th, td { min-width: 10rem; }
+    }
+    @media (max-width: 430px) {
+      header, main, footer { width: min(100% - 1.25rem, 1120px); }
+      .grid { grid-template-columns: 1fr; }
+    }
+    @media (prefers-reduced-motion: reduce) {
+      html { scroll-behavior: auto; }
+    }
+    @media print {
+      :root { --bg: #fff; --surface: #fff; --surface-2: #f5f5f2; --text: #151515; --muted: #555; --line: #bbb; }
+      body { font-size: 11pt; }
+      .card, .verdict, .table-wrap, details { break-inside: avoid; }
+    }
+  </style>
+</head>
+<body>
+  <a class="skip" href="#content">Skip to report</a>
+  <header>
+    <div class="eyebrow">Engineering review · 10 July 2026</div>
+    <h1>Melkor is honest, hardened, and testable.</h1>
+    <p class="lede">
+      The maintained native, DA3, viewer, Tauri, and CoreML surfaces now meet a
+      strong current engineering baseline. The review found and fixed correctness,
+      security, provenance, and product-contract gaps instead of relabeling
+      experimental code as production-ready.
+    </p>
+    <div class="meta">
+      <span>Baseline: <code>5634ae5ef9eb7c2a110e3f9575c9aeec67ef099a</code></span>
+      <span>Scope: 82 modified + 14 new files before report artifacts</span>
+      <span>Review host: macOS / Metal</span>
+    </div>
+  </header>
+
+  <main id="content">
+    <section class="verdict" aria-labelledby="verdict-title">
+      <h2 id="verdict-title">Verdict</h2>
+      <p>
+        <strong>Source-release candidate after clean-commit CI.</strong> There are no
+        known open critical or high-severity findings in the maintained surfaces.
+        “SOTA” is appropriate for the engineering baseline—not as an unqualified
+        research benchmark claim. Signed desktop distribution, CUDA runtime
+        qualification, and reproducible ML environment locks remain explicit gates.
+      </p>
+      <div class="risk-line" aria-label="Open finding counts">
+        <span class="pill pass">0 critical</span>
+        <span class="pill pass">0 high</span>
+        <span class="pill warn">3 medium</span>
+        <span class="pill">2 low</span>
+      </div>
+    </section>
+
+    <section aria-labelledby="scores-title">
+      <h2 id="scores-title">Review scores</h2>
+      <div class="grid">
+        <article class="card"><span class="label">Security</span><span class="grade">A−</span><p>Fail-closed boundaries, pinned supply chain, secret and dependency policy.</p></article>
+        <article class="card"><span class="label">Correctness</span><span class="grade">A</span><p>Scene transforms, renderer math, backend semantics, and strict CLI contracts.</p></article>
+        <article class="card"><span class="label">Code & product quality</span><span class="grade">A−</span><p>Unsupported facades retired; documentation and executable surfaces agree.</p></article>
+        <article class="card"><span class="label">Release engineering</span><span class="grade b">B</span><p>Strong source and license gates; signing, SBOM, and attestations not yet shipped.</p></article>
+      </div>
+    </section>
+
+    <section aria-labelledby="validation-title">
+      <h2 id="validation-title">Evidence from the final local matrix</h2>
+      <div class="table-wrap" role="region" aria-label="Validation matrix" tabindex="0">
+        <table>
+          <thead><tr><th>Surface</th><th>Result</th><th>What it establishes</th></tr></thead>
+          <tbody>
+            <tr><td>Apple/Metal release, warnings-as-errors</td><td class="status">9 / 9 pass</td><td>Core, SPZ/PLY fuzz, provider, densifier, CLI, gradients, DA3 conversion, metadata.</td></tr>
+            <tr><td>Apple/Metal ASan + UBSan</td><td class="status">9 / 9 pass</td><td>No sanitizer failure with fail-fast sanitizer settings.</td></tr>
+            <tr><td>CPU-only warnings-as-errors</td><td class="status">8 / 8 pass</td><td>Portable stub topology and CPU semantics compile and execute cleanly.</td></tr>
+            <tr><td>Differentiable renderer</td><td class="status">155 / 155 stable</td><td>Analytic gradients match finite differences; 13 nondifferentiable samples skipped by design.</td></tr>
+            <tr><td>DA3 synthetic geometry</td><td class="status">8 scenarios pass</td><td>Camera-Z unprojection, learned fields, pruning, formats, and malformed inputs.</td></tr>
+            <tr><td>Viewer / Chromium</td><td class="status">17 / 17 pass</td><td>Rendering, mobile behavior, server policy, retry/seek, generated 4D/static assets.</td></tr>
+            <tr><td>Swift package</td><td class="status">Build + 4 tests pass</td><td>Exact dependency resolution and reduced infer/benchmark CLI surface.</td></tr>
+            <tr><td>Rust / Tauri</td><td class="status">Pass</td><td>fmt, clippy −D warnings, locked check, cargo-deny, frozen license inventory, real no-bundle build.</td></tr>
+            <tr><td>Supply chain</td><td class="status">Pass</td><td>npm audit: 0; gitleaks: 42 commits, no leak; vendored dependency hashes verified.</td></tr>
+            <tr><td>CI definition</td><td class="status">Pass</td><td>actionlint and YAML parse; immutable action SHAs and least-privilege defaults.</td></tr>
+          </tbody>
+        </table>
+      </div>
+      <p class="note">
+        CUDA was compile-validated in the CI design, not runtime-qualified on this
+        Apple host. Research-model quality/performance was not benchmarked without
+        the corresponding weights, datasets, and target GPUs.
+      </p>
+    </section>
+
+    <section aria-labelledby="changes-title">
+      <h2 id="changes-title">Material improvements</h2>
+      <div class="changes">
+        <article class="card">
+          <h3>Native input and math</h3>
+          <ul>
+            <li>Bounded, alignment-safe glTF accessor reads with finite/configuration limits.</li>
+            <li>Active-scene traversal, matrix/TRS composition, instancing, cycle protection, and inverse-transpose normals.</li>
+            <li>Robust quaternions, log-scale covariance, little-endian PLY, and CPU/Metal/CUDA reference alignment.</li>
+            <li>Correct front-to-back compositing, final-transmittance background, and backward recurrence.</li>
+          </ul>
+        </article>
+        <article class="card">
+          <h3>Honest product surface</h3>
+          <ul>
+            <li>Native fit/feedforward commands now fail closed instead of reporting success for incomplete implementations.</li>
+            <li>Unsafe DA3 view sharding retired; one jointly inferred scene retains a shared camera frame.</li>
+            <li>CoreML CLI limited to the two experimentally supported commands.</li>
+            <li>Documentation no longer advertises unsupported speed, benchmark, format, or parity claims.</li>
+          </ul>
+        </article>
+        <article class="card">
+          <h3>ML and model supply chain</h3>
+          <ul>
+            <li>Official DA3 source/checkpoint revisions are immutable, validated, marked, and installed atomically.</li>
+            <li>Depth conversion uses camera-Z geometry and rejects missing/malformed cameras and empty output.</li>
+            <li>Remote-code trust, executable eval/shell construction, unsafe pickle, and unrestricted model loads removed from exposed paths.</li>
+            <li>Unmaintained research snapshots carry explicit quarantine notices.</li>
+          </ul>
+        </article>
+        <article class="card">
+          <h3>Viewer and distribution</h3>
+          <ul>
+            <li>Bounded circular 4D prefetch, latest-seek wins, finite retries, recovery states, and reduced-motion/mobile behavior.</li>
+            <li>GET/HEAD allowlist server, restrictive Tauri CSP, context-loss recovery, and safe DOM updates.</li>
+            <li>Deterministic project-owned demos and exact digest-checked staging exclude unlicensed sample scenes.</li>
+            <li>Project, Spark, Three, and locked Rust dependency notices ship with the desktop payload.</li>
+          </ul>
+        </article>
+        <article class="card">
+          <h3>CI and governance</h3>
+          <ul>
+            <li>Immutable action SHAs, least privilege, concurrency cancellation, and bounded job timeouts.</li>
+            <li>macOS Metal/sanitizer, Linux CPU/CUDA compile, Python/shell, viewer, Rust, Tauri, CoreML, and secret-scan jobs.</li>
+            <li>Dependabot, dependency review, CODEOWNERS, cargo-deny, npm audit, and frozen license inventory.</li>
+            <li>Install layout includes project and third-party notices; cross-manifest version drift is tested.</li>
+          </ul>
+        </article>
+        <article class="card">
+          <h3>Frontend craft</h3>
+          <ul>
+            <li>Responsive controls, keyboard/focus behavior, aria-live status, touch targets, and safe-area handling.</li>
+            <li>Loading, retry, unsupported-browser, and WebGL-context states are visible and recoverable.</li>
+            <li>Runtime allocations reduced with scratch objects and production rendering flags.</li>
+            <li>Playwright locks behavior across desktop, mobile, static, and temporal scenes.</li>
+          </ul>
+        </article>
+      </div>
+    </section>
+
+    <section aria-labelledby="open-title">
+      <h2 id="open-title">Remaining release gates</h2>
+      <div class="table-wrap" role="region" aria-label="Remaining findings" tabindex="0">
+        <table>
+          <thead><tr><th>Severity</th><th>Finding</th><th>Concrete closure</th></tr></thead>
+          <tbody>
+            <tr><td class="sev-medium">Medium</td><td>No protected tag workflow for signed/notarized artifacts, SBOM, and provenance attestations.</td><td>Implement every production-distribution gate in <a href="../docs/RELEASE.md">docs/RELEASE.md</a>; verify artifacts from a separate clean host.</td></tr>
+            <tr><td class="sev-medium">Medium</td><td>CUDA provider has no runtime evidence in this review.</td><td>Add scheduled/self-hosted NVIDIA jobs that run provider parity, malformed inputs, representative clouds, and memory checks on advertised SMs.</td></tr>
+            <tr><td class="sev-medium">Medium</td><td>DA3 transitive Python/PyTorch packages remain dynamically resolved.</td><td>Generate hash-locked environments per supported Python × PyTorch × CUDA matrix and test checkpoint inference before publishing them.</td></tr>
+            <tr><td class="sev-low">Low</td><td>Reviewed unmaintained Tauri/GTK transitive advisories are time-boxed exceptions.</td><td>Reassess and remove the exceptions by 2026-10-01; track the upstream platform migration.</td></tr>
+            <tr><td class="sev-low">Low</td><td>Native differentiable rendering is a reference API, not a production training stack.</td><td>Add a benchmarked optimizer, scalable/tiled sorting, convergence tests, and real-scene comparisons before restoring a fit command.</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+    <section aria-labelledby="scope-title">
+      <h2 id="scope-title">Scope and interpretation</h2>
+      <p>
+        This was a repository-wide engineering review of maintained first-party
+        paths and the vendored code they expose. It included source inspection,
+        adversarial boundary tests, local builds, browser automation, package
+        policy, provenance, and documentation/executable agreement.
+      </p>
+      <p>
+        It was not a new research-paper evaluation. Newer reconstruction methods
+        are tracked in a dated catalog, but none is described as integrated or
+        superior without a model-correct adapter and reproducible evidence.
+      </p>
+      <details>
+        <summary>Review limitations</summary>
+        <ul>
+          <li>No NVIDIA GPU was attached to the review host.</li>
+          <li>No signing identities, notarization account, or external release authority were in scope.</li>
+          <li>No large proprietary model weights or benchmark datasets were downloaded.</li>
+          <li>Remote CI must still run on the committed tree; local actionlint cannot emulate every hosted runner detail.</li>
+        </ul>
+      </details>
+    </section>
+  </main>
+
+  <footer>
+    <p>
+      Companion handoff: <a href="build-context.md">build-context.md</a> ·
+      Release gates: <a href="../docs/RELEASE.md">docs/RELEASE.md</a>
+    </p>
+  </footer>
+</body>
+</html>

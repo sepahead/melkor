@@ -1,3 +1,7 @@
+> **Vendored snapshot:** these are upstream benchmark instructions for the
+> captured DA3 source tree, not Melkor's supported inference contract. Model
+> identifiers and dependencies may be stale; see `../../docs/DA3_FEEDFORWARD.md`.
+
 # 📏 Visual Geometry Benchmark
 
 This document provides comprehensive instructions for running benchmark evaluation on Depth Anything 3.

@@ -107,13 +107,17 @@ void GaussianCloud::computeBoundingBox(float& minX, float& minY, float& minZ,
 namespace utils {
 
 void normalizeQuaternion(float& w, float& x, float& y, float& z) {
-    float len = std::sqrt(w*w + x*x + y*y + z*z);
-    if (len > 0.0f) {
-        float inv_len = 1.0f / len;
-        w *= inv_len;
-        x *= inv_len;
-        y *= inv_len;
-        z *= inv_len;
+    const float max_component = std::max({std::abs(w), std::abs(x), std::abs(y), std::abs(z)});
+    if (std::isfinite(max_component) && max_component > 0.0f) {
+        w /= max_component;
+        x /= max_component;
+        y /= max_component;
+        z /= max_component;
+        const float len = std::sqrt(w*w + x*x + y*y + z*z);
+        w /= len;
+        x /= len;
+        y /= len;
+        z /= len;
     } else {
         // Default to identity quaternion
         w = 1.0f;

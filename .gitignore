@@ -58,6 +58,18 @@ __pycache__/
 *.egg-info/
 *.pyc
 
+# Local secrets and signing material
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+*.p12
+*.pfx
+*.jks
+*.keystore
+*.mobileprovision
+
 # Feedforward model weights
 ~/.melkor/
 

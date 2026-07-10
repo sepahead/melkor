@@ -1,14 +1,129 @@
 # Changelog
 
-## Unreleased
+## 2.0.0-rc.1 (2026-07-11)
+
+### Security
+
+- Constrained glTF external resources to the input asset directory, including
+  canonical symlink containment, and reject unsupported versions, required
+  extensions, KHR Gaussian semantics, and lossy partial primitive decodes.
+- Bounded SPZ inflation to its validated v1-v3 header-derived payload size and
+  reject null/oversized buffers. SPZ encoding now rejects fixed-point and SH
+  quantization overflow before upstream integer casts, and endpoint alpha
+  bytes decode to finite logits. PLY now preflights a capped header, enforces
+  element order and one exact ASCII record per vertex, and validates scalar,
+  property, and SH declarations before allocating.
+- Hardened GLB/glTF ingestion as an untrusted-input boundary: checked accessor,
+  buffer-view, stride, alignment, count, scene traversal, transform, memory,
+  finite-value, and configuration bounds now fail cleanly instead of reading
+  outside buffers or propagating invalid values. Cycles, multiple parents,
+  invalid roots/children/meshes, and malformed optional color/normal accessors
+  are rejected consistently by inspect, basic, and enhanced modes.
+- Restricted the viewer development server to GET/HEAD and an explicit public
+  path allowlist; malformed URLs, traversal, private files, and unsupported
+  methods fail closed. The Tauri shell now has a restrictive CSP and
+  `nosniff` response policy.
+- Pinned GitHub Actions, DA3 source/checkpoint revisions, feedforward catalog
+  repositories, Swift dependencies, Bun, Rust, Ruff, cargo-deny, cargo-about,
+  and Tauri CLI tooling. Model downloads are staged, validated, revision
+  marked, and moved atomically; viewer lockfile installs disable dependency
+  lifecycle scripts before Playwright installs its browser explicitly.
+- Replaced executable `eval`, shell command construction, unsafe pickle loads,
+  unrestricted `torch.load`, and remote-code trust in maintained/vendored ML
+  paths. The stale ml-sharp snapshot is explicitly quarantined.
+- Added dependency review, Dependabot, CODEOWNERS, npm audit, Rust advisory /
+  source / wildcard / license policy, and generated locked-crate license
+  inventory checks.
+
+### Breaking changes
+
+- `PlyReader::ReadResult` and `SpzDecoder::DecodeResult` now expose container
+  metadata. Downstream structured bindings over the former three-field
+  aggregates must add the metadata field or access members by name.
+- Retired native `--fit`: the former path returned success without an
+  optimization loop. Use OpenSplat for trained fitting.
+- Retired native `--feedforward`, its built-in weight manager, and
+  `scripts/setup_feedforward.sh`: they did not implement model-correct
+  adapters. Use the pinned `da3-infer` bridge or the reviewed catalog.
+- Retired `da3-infer-multigpu` view sharding because independently inferred
+  view subsets do not share DA3's joint camera frame. Keep a scene on one GPU
+  or use official DA3-Streaming for long sequences.
+- Reduced the experimental CoreML CLI to single-image `infer` and `benchmark`.
+  Conversion, fusion, streaming, and 3DGS commands remain disabled until
+  sequence-level PyTorch parity is demonstrated.
 
 ### Added
-- **4D temporal player in the viewer** ([docs/STREAMING.md](docs/STREAMING.md) §3): plays back a dynamic/volumetric-video splat *sequence* over a play/pause + scrub timeline. A 4D scene is a per-frame splat sequence plus a `manifest.json` (`{ fps, frames }`) — exactly the shape [4D-GS](https://github.com/hustvl/4DGaussians)'s `export_perframe_3DGS.py` produces (standard `time_*.ply`), so it drops into melkor's PLY/SPZ IO with zero translation. A verified survey of SOTA 4D methods confirmed no web splat renderer (Spark, three.js, PlayCanvas) plays temporal sequences natively, so this is a genuine addition. The player **streams a bounded window** of frames around the playhead (keeps `[active-2, active+6]` resident, prefetches ahead, evicts the rest, stalls to buffer rather than dropping a frame, seeks on demand), so memory is O(window) not O(sequence length) and arbitrarily long volumetric video plays within a fixed budget. `viewer/make-4d-demo.js` generates a synthetic sequence for the "Wave · 4D" scene; `__viewer.play4D/pause4D/seek4D/get4DState` (the last reporting the resident `buffered` window) drive it; locked by Playwright tests verifying bounded-memory windowing, on-demand seek, frame advance, inter-frame motion, and clean switch-back to a normal scene.
-- **4D reconstruction installers** (`scripts/setup_streaming.sh` gained a `4d` group): installs the verified dynamic/volumetric-video methods that produce the per-frame content — 4D-GS (the one drop-in producer: `export_perframe_3DGS.py` → `time_*.ply` → `pack-4d.js` → viewer), VideoGS/V3 (packable per-frame checkpoints), and GIFStream/Spacetime-GS/Ex4DGS (custom non-PLY formats, catalogued honestly). Entry points verified against each repo's README; license gating flags that the useful ones (4D-GS, VideoGS) inherit Inria's non-commercial rasterizer license despite permissive top-level licenses. Completes the 4D pipeline's reconstruction arrow: reconstruct → pack+compress → stream. The installer now spans `slam`, `4d`, and `permissive` groups.
-- **4D format producer** (`viewer/pack-4d.js`): packages a per-frame splat sequence (a 4D-GS `export_perframe_3DGS.py` output, `time_*.ply`) into a compressed, streamable 4D scene — sorts frames numerically, optionally compresses each frame PLY → SPZ via the melkor binary (~94% smaller, measured on the demo), writes the `manifest.json`, and prints the viewer `SCENES` entry. This closes the 4D pipeline: reconstruct (4D-GS) → pack+compress (melkor) → stream (viewer). The temporal player streams SPZ frames identically to PLY; the demo ships both "Wave · 4D" and the 94%-smaller "Wave · 4D (SPZ)", the latter covered by a producer→player Playwright test (12/12 total).
-- **Streaming / online 3DGS reconstruction stage** (`scripts/setup_streaming.sh`, expanded [docs/STREAMING.md](docs/STREAMING.md)): an installer for the SLAM-style and free-viewpoint-video methods that build a splat scene incrementally, with entry points verified against each repo's README. Gaussian-SLAM (MIT) emits a standard INRIA 3DGS PLY directly and SplaTAM (BSD-3) via `export_ply.py` — both feed `melkor scene.ply scene.spz`; Splat-SLAM (Apache), 3DGStream (per-frame free-viewpoint video), and MonoGS are also catalogued. License gating flags 3DGStream and MonoGS as non-commercial (3DGStream inherits Inria's non-commercial license through its CUDA rasterizer submodule). The installer is honest about reality: these are Linux+CUDA research pipelines that need a calibrated dataset config (not a folder of images), so it clones + scaffolds each repo and defers the tool-specific CUDA/conda env to the repo, rather than faking a one-command install.
-- **Progressive streaming in the viewer** ([docs/STREAMING.md](docs/STREAMING.md)): the first load now adds the `SplatMesh` to the scene before the download completes, so Spark 2.1 renders splats as they stream in (progressive display) instead of a blank screen until 100%; the overlay drops its dim/blur to a floating progress card so the build-up is visible, and a scene switch still keeps the current scene until the new one is ready. Locked by a new `first load streams progressively` Playwright test (10/10). `docs/STREAMING.md` also maps the four streaming senses — progressive/LOD loading and streamable formats (SPZ, SOG, `.RAD`), online/incremental SLAM reconstruction (Splat-SLAM, Gaussian-SLAM, SplaTAM, MonoGS, AMB3R SLAM mode → PLY → melkor), 4D network streaming, and out-of-core paging — with verified repo URLs and licenses.
-- **SOTA feedforward models** (`scripts/setup_feedforward_sota.sh`, [docs/FEEDFORWARD_SOTA.md](docs/FEEDFORWARD_SOTA.md)): a single installer for the strongest 2025–2026 pose-free reconstruction models beyond Depth-Anything-3, selected from a verified multi-source survey. Geometry models — **VGGT**, **MapAnything**, **Pi3**, **AMB3R** — export a COLMAP `sparse/` that drops straight into the existing `pipeline.sh`/`opensplat_wrapper.sh` training path (replacing the SfM stage); direct-splat models — **YoNoSplat**, **SPFSplatV2** — output Gaussians in one pass to PLY; **MoGe-2** does single-image geometry. The installer gates on license class — permissive (MIT/Apache) install by default, CC-BY-NC weights need `--accept-noncommercial`, and AMB3R (no published license) needs `--accept-unlicensed` — and re-prints each repo's actual `LICENSE` at install time. Verified: all seven repo URLs resolve and licenses were checked against each repo (AMB3R confirmed to have no LICENSE file).
+
+- Added `melkor inspect INPUT [--json] [--strict]`, a deterministic,
+  backend-free validation surface for PLY, SPZ, GLB, and glTF inputs. It
+  reports container metadata, bounds, field provenance, numeric hazards, and
+  stable issue codes without mutating the source.
+- Added private, offline local-file opening to the web and desktop viewer by
+  picker or drag-and-drop for PLY, SPZ, SPLAT, KSPLAT, SOG, and ZIP scenes.
+  Files stream directly from the browser into Spark and can be reopened after
+  failures without uploading data or granting filesystem permissions.
+- Added active-scene glTF traversal with node matrices/TRS, instancing, cycle
+  protection, world-space positions, and inverse-transpose normal transforms.
+- Added a bounded-memory 4D PLY/SPZ player with circular prefetch, latest-seek
+  semantics, finite retry/backoff, visible recovery, and producer scripts.
+- Added responsive/accessibility/reduced-motion viewer behavior, WebGL context
+  recovery, deterministic generated SPLAT/4D fixtures, exact desktop staging,
+  provenance records, and third-party notices.
+- Added strict CLI contract tests, scene-graph/malformed-input tests, DA3
+  geometry tests, renderer reference/gradient tests, and mobile/server/4D
+  Playwright coverage.
+- Added a dated, license-aware feedforward integration catalog with immutable
+  repository revisions and explicit gates for non-commercial or unspecified
+  checkpoint terms.
+
+### Fixed
+
+- Kept inspector JSON valid for empty clouds, control-byte paths, malformed
+  UTF-8 parser errors, and every failure path; scale checks now classify the
+  actual float32 covariance operation at overflow/subnormal/zero boundaries.
+- Made normal viewer loads transactional while a 4D sequence is active, so a
+  damaged local file cannot clear the current frame cache; cancelling a
+  replacement chooser retains recovery actions, while fatal 4D errors keep
+  their Retry action visible.
+- Corrected differentiable rendering to depth-sort front-to-back, composite the
+  background through final transmittance, and include background in the
+  backward recurrence. Stable analytic gradients now match finite differences.
+- Standardized robust quaternion normalization, log-scale covariance input,
+  opacity epsilon, near-to-far sorting, CPU fallbacks, allocation/command
+  failure handling, and little-endian PLY output across compute backends.
+- Reworked DA3 reconstruction to use one joint multi-view call, preserve the
+  official learned Gaussian fields on GIANT/NESTED, perform camera-Z (not
+  Euclidean-ray) unprojection for depth models, filter confidence/sky/borders,
+  and reject missing or malformed cameras and empty output.
+- Made CLI numeric parsing fully consume finite tokens and reject missing,
+  conflicting, unknown, extra, or out-of-range arguments.
+- Made enhanced CPU spatial hashing origin-relative and range-checked, removing
+  float-to-integer and neighbor-addition undefined behavior for large finite
+  scene translations. Conversion validates clouds both before and after every
+  mutating backend/densification stage.
+- Made SPZ output self-round-trippable at default opacity, normalized extreme
+  finite quaternions safely, preserved channel-major SH when exporting a lower
+  degree, and completed file encoding before opening the destination.
+- Escaped invalid UTF-8 plus terminal C0/C1 controls in human paths, parser
+  failures, CLI arguments, and writer diagnostics.
+- Removed fixed-count and unsupported benchmark/model claims from public docs;
+  the DA3 and CoreML documentation now matches the executable surfaces.
+
+### Distribution
+
+- Synchronized the native CLI, npm, Tauri, Cargo, lockfiles, changelog, and
+  generated Rust notices at `2.0.0-rc.1`.
+- Added deterministic source release evidence: normalized archive, per-file
+  SHA-256 manifest, SPDX 2.3 source SBOM, unsigned in-toto/SLSA-shaped
+  provenance, aggregate checksums, self-verification, and an RC tag workflow.
+  The generator is byte-bound to the selected Git tree, and verification
+  rejects unlisted nested, symlinked, or non-regular payloads.
+- Native `cmake --install` now includes the project and third-party notices.
+- The desktop bundle includes only project-owned generated captures; external
+  test scenes without explicit redistribution terms are excluded.
+- Tauri packaging embeds project/Spark/three.js notices and a cargo-about
+  inventory generated from the locked Rust graph. CI verifies the inventory,
+  license policy, CSP staging, and a real `tauri build --no-bundle` path.
 
 ## 1.2.1 (2026-07-07)
 

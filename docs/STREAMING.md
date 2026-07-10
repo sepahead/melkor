@@ -144,7 +144,8 @@ the `manifest.json`, and prints the viewer `SCENES` entry to add. The
 temporal player streams the SPZ frames identically to PLY (the demo ships
 both **Wave · 4D** and **Wave · 4D (SPZ)**, the latter 94% smaller).
 
-Other 4D methods need converters, not drop-in: 3DGStream (MIT) uses a
+Other 4D methods need converters, not drop-in: 3DGStream's top-level code is
+MIT, but its inherited Inria 3DGS components are non-commercial; it uses a
 keyframe PLY + per-frame NTC deltas; V3/VideoGS (MIT) packs frames into a
 hardware-codec 2D video; dedicated streaming codecs (4DGCPro H.264 layered,
 GIFStream Apache-2.0) don't use PLY/SPZ and would need a new container path.

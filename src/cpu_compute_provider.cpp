@@ -58,14 +58,19 @@ public:
         // the sign is canonicalized to w >= 0 (q and -q encode the same
         // rotation).
         for (auto& s : cloud.splats()) {
-            float len = std::sqrt(s.rot_0*s.rot_0 + s.rot_1*s.rot_1 +
-                                  s.rot_2*s.rot_2 + s.rot_3*s.rot_3);
-            if (len > 0.0f) {
-                float inv = 1.0f / len;
-                s.rot_0 *= inv;
-                s.rot_1 *= inv;
-                s.rot_2 *= inv;
-                s.rot_3 *= inv;
+            const float max_component = std::max({std::abs(s.rot_0), std::abs(s.rot_1),
+                                                   std::abs(s.rot_2), std::abs(s.rot_3)});
+            if (std::isfinite(max_component) && max_component > 0.0f) {
+                s.rot_0 /= max_component;
+                s.rot_1 /= max_component;
+                s.rot_2 /= max_component;
+                s.rot_3 /= max_component;
+                const float len = std::sqrt(s.rot_0*s.rot_0 + s.rot_1*s.rot_1 +
+                                            s.rot_2*s.rot_2 + s.rot_3*s.rot_3);
+                s.rot_0 /= len;
+                s.rot_1 /= len;
+                s.rot_2 /= len;
+                s.rot_3 /= len;
             } else {
                 s.rot_0 = 1.0f;
                 s.rot_1 = s.rot_2 = s.rot_3 = 0.0f;
@@ -125,8 +130,10 @@ public:
         std::vector<float> cov(n * 6);
         for (size_t i = 0; i < n; ++i) {
             const auto& s = cloud[i];
-            // Build 3x3 scale matrix S = diag(sx, sy, sz)
-            float sx = s.scale_0, sy = s.scale_1, sz = s.scale_2;
+            // GaussianCloud stores log scale; covariance uses linear scale.
+            float sx = std::exp(s.scale_0);
+            float sy = std::exp(s.scale_1);
+            float sz = std::exp(s.scale_2);
             // Build 3x3 rotation matrix R from quaternion
             float w = s.rot_0, x = s.rot_1, y = s.rot_2, z = s.rot_3;
             float r00 = 1.f - 2.f*(y*y + z*z);

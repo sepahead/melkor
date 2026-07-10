@@ -20,6 +20,7 @@
 #include <cmath>
 #include <cstdio>
 #include <cstdlib>
+#include <limits>
 #include <vector>
 
 namespace {
@@ -56,9 +57,9 @@ melkor::GaussianCloud makeRandomCloud(size_t n, uint32_t seed) {
         s.f_dc_1 = rng.next();
         s.f_dc_2 = rng.next();
         s.opacity = 0.1f + rng.next() * 0.8f;   // linear (0.1, 0.9)
-        s.scale_0 = 0.2f + rng.next();          // linear scales for covariances
-        s.scale_1 = 0.2f + rng.next();
-        s.scale_2 = 0.2f + rng.next();
+        s.scale_0 = std::log(0.2f + rng.next()); // GaussianCloud native log scale
+        s.scale_1 = std::log(0.2f + rng.next());
+        s.scale_2 = std::log(0.2f + rng.next());
         s.rot_0 = rng.next() * 2.0f - 1.0f;
         s.rot_1 = rng.next() * 2.0f - 1.0f;
         s.rot_2 = rng.next() * 2.0f - 1.0f;
@@ -106,6 +107,23 @@ bool test_cpu_math() {
         if (std::abs(len - 1.0f) > 1e-4f) unit = false;
     }
     check(unit, "normalizeQuaternions yields unit quaternions");
+
+    melkor::GaussianCloud extreme;
+    melkor::GaussianSplat huge{};
+    huge.rot_0 = huge.rot_1 = huge.rot_2 = huge.rot_3 =
+        std::numeric_limits<float>::max();
+    extreme.addSplat(huge);
+    melkor::GaussianSplat invalid{};
+    invalid.rot_0 = std::numeric_limits<float>::quiet_NaN();
+    invalid.rot_1 = 1.0f;
+    extreme.addSplat(invalid);
+    p->normalizeQuaternions(extreme);
+    check(std::abs(extreme[0].rot_0 - 0.5f) < 1e-6f &&
+          std::abs(extreme[0].rot_3 - 0.5f) < 1e-6f,
+          "extreme finite quaternions normalize without overflow");
+    check(extreme[1].rot_0 == 1.0f && extreme[1].rot_1 == 0.0f &&
+          extreme[1].rot_2 == 0.0f && extreme[1].rot_3 == 0.0f,
+          "non-finite quaternions fall back to identity");
 
     cloud = ref;
     p->rgbToShDc(cloud);
@@ -198,7 +216,7 @@ bool test_covariances() {
     auto p = melkor::ComputeProvider::create(melkor::ComputeBackend::CPU);
     melkor::GaussianCloud cloud;
     melkor::GaussianSplat s{};
-    s.scale_0 = 2.0f; s.scale_1 = 3.0f; s.scale_2 = 4.0f;  // LINEAR scale
+    s.scale_0 = std::log(2.0f); s.scale_1 = std::log(3.0f); s.scale_2 = std::log(4.0f);
     s.rot_0 = 1.0f;  // identity rotation
     cloud.addSplat(s);
 
@@ -220,7 +238,7 @@ bool test_covariances() {
     // world covariance is diag(sy^2, sx^2, sz^2).
     melkor::GaussianCloud rot;
     melkor::GaussianSplat rs{};
-    rs.scale_0 = 2.0f; rs.scale_1 = 3.0f; rs.scale_2 = 4.0f;   // LINEAR
+    rs.scale_0 = std::log(2.0f); rs.scale_1 = std::log(3.0f); rs.scale_2 = std::log(4.0f);
     const float h = std::sqrt(0.5f);
     rs.rot_0 = h; rs.rot_1 = 0.0f; rs.rot_2 = 0.0f; rs.rot_3 = h;  // 90deg +Z
     rot.addSplat(rs);
@@ -275,15 +293,13 @@ bool test_gpu_cpu_parity() {
     }
     check(max_err < 1e-3f, "processCloud parity (positions, colors, opacity)");
 
-    // Covariance parity. computeCovariances expects LINEAR scale, so build a
-    // cloud with positive linear scales and normalized (non-identity)
-    // rotations. A transposed rotation in one backend shows up here.
+    // Covariance parity consumes GaussianCloud's native log scales.
     auto ca = makeRandomCloud(256, 79);
     cpu->normalizeQuaternions(ca);
     for (size_t i = 0; i < ca.size(); ++i) {
-        ca[i].scale_0 = 0.3f + std::abs(ca[i].scale_0);
-        ca[i].scale_1 = 0.3f + std::abs(ca[i].scale_1);
-        ca[i].scale_2 = 0.3f + std::abs(ca[i].scale_2);
+        ca[i].scale_0 = std::log(0.3f + std::abs(ca[i].scale_0));
+        ca[i].scale_1 = std::log(0.3f + std::abs(ca[i].scale_1));
+        ca[i].scale_2 = std::log(0.3f + std::abs(ca[i].scale_2));
     }
     auto gcov = gpu->computeCovariances(ca);
     auto ccov = cpu->computeCovariances(ca);

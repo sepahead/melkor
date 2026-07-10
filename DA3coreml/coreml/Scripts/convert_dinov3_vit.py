@@ -178,7 +178,7 @@ class DINOv3CoreMLExporter:
             raise ImportError("transformers library required. Install with: pip install transformers")
         
         print(f"Loading model: {self.model_name}")
-        self.model = AutoModel.from_pretrained(self.model_name, trust_remote_code=True)
+        self.model = AutoModel.from_pretrained(self.model_name, trust_remote_code=False)
         self.processor = AutoImageProcessor.from_pretrained(self.model_name)
         
         self.model.eval()

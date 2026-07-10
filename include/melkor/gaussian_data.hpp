@@ -142,8 +142,12 @@ namespace utils {
     // dependency on the (separately compiled) normalizeQuaternion.
     inline void quatToRotationMatrix(float w, float x, float y, float z,
                                      float out[9]) {
-        float len = std::sqrt(w * w + x * x + y * y + z * z);
-        if (len > 0.0f) { float inv = 1.0f / len; w *= inv; x *= inv; y *= inv; z *= inv; }
+        const float max_component = std::max({std::abs(w), std::abs(x), std::abs(y), std::abs(z)});
+        if (std::isfinite(max_component) && max_component > 0.0f) {
+            w /= max_component; x /= max_component; y /= max_component; z /= max_component;
+            const float len = std::sqrt(w*w + x*x + y*y + z*z);
+            w /= len; x /= len; y /= len; z /= len;
+        }
         else { w = 1.0f; x = y = z = 0.0f; }
         float xx = x * x, yy = y * y, zz = z * z;
         float xy = x * y, xz = x * z, yz = y * z;

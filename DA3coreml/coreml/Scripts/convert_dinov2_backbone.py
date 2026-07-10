@@ -133,7 +133,7 @@ def main():
     # Load HuggingFace model
     print("Loading HuggingFace model...")
     from transformers import AutoModel
-    hf_model = AutoModel.from_pretrained(hf_model_name, trust_remote_code=True)
+    hf_model = AutoModel.from_pretrained(hf_model_name, trust_remote_code=False)
     hf_model.eval()
 
     print(f"Hidden size: {hf_model.config.hidden_size}")

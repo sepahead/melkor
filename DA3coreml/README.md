@@ -1,3 +1,11 @@
+> [!CAUTION]
+> This is a vendored upstream DA3 research snapshot, not Melkor's supported
+> integration guide. Its model names, install commands, and benchmark advice
+> reflect the captured upstream revision and may differ from the pinned Melkor
+> bridge. Use [`../docs/DA3_FEEDFORWARD.md`](../docs/DA3_FEEDFORWARD.md) for
+> reconstruction and [`coreml/README.md`](coreml/README.md) for the quarantined
+> CoreML port status.
+
 <div align="center">
 <h1 style="border-bottom: none; margin-bottom: 0px ">Depth Anything 3: Recovering the Visual Space from Any Views</h1>
 <!-- <h2 style="border-top: none; margin-top: 3px;">Recovering the Visual Space from Any Views</h2> -->
@@ -28,9 +36,6 @@ In pursuit of minimal modeling, DA3 yields two key insights:
 and [VGGT](https://github.com/facebookresearch/vggt) for multi-view depth estimation and pose estimation.
 All models are trained exclusively on **public academic datasets**.
 
-<!-- <p align="center">
-  <img src="assets/images/da3_teaser.png" alt="Depth Anything 3" width="100%">
-</p> -->
 <p align="center">
   <img src="assets/images/demo320-2.gif" alt="Depth Anything 3 - Left" width="70%">
 </p>

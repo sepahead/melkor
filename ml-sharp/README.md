@@ -1,5 +1,12 @@
 # Sharp Monocular View Synthesis in Less Than a Second
 
+> [!CAUTION]
+> This directory is a vendored upstream research snapshot, not a supported
+> Melkor integration. It is not exercised by Melkor CI, and its pinned
+> requirements currently contain known security advisories. Do not deploy it
+> or process untrusted inputs until the environment is updated, locked,
+> audited, and covered by an end-to-end Melkor adapter test.
+
 [![Project Page](https://img.shields.io/badge/Project-Page-green)](https://apple.github.io/ml-sharp/)
 [![arXiv](https://img.shields.io/badge/arXiv-2512.10685-b31b1b.svg)](https://arxiv.org/abs/2512.10685)
 

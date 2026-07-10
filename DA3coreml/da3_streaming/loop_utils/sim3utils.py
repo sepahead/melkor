@@ -1213,7 +1213,7 @@ def weighted_align_point_maps(
             all_weights,
             delta=config["Model"]["IRLS"]["delta"],
             max_iters=config["Model"]["IRLS"]["max_iters"],
-            tol=eval(config["Model"]["IRLS"]["tol"]),
+            tol=float(config["Model"]["IRLS"]["tol"]),
             align_method=config["Model"]["align_method"],
         )
     elif config["Model"]["align_lib"] == "numpy":  # numpy
@@ -1223,7 +1223,7 @@ def weighted_align_point_maps(
             all_weights,
             delta=config["Model"]["IRLS"]["delta"],
             max_iters=config["Model"]["IRLS"]["max_iters"],
-            tol=eval(config["Model"]["IRLS"]["tol"]),
+            tol=float(config["Model"]["IRLS"]["tol"]),
             align_method=config["Model"]["align_method"],
         )
     elif config["Model"]["align_lib"] == "torch":  # torch
@@ -1233,7 +1233,7 @@ def weighted_align_point_maps(
             all_weights,
             delta=config["Model"]["IRLS"]["delta"],
             max_iters=config["Model"]["IRLS"]["max_iters"],
-            tol=eval(config["Model"]["IRLS"]["tol"]),
+            tol=float(config["Model"]["IRLS"]["tol"]),
             align_method=config["Model"]["align_method"],
         )
     elif config["Model"]["align_lib"] == "triton":  # triton
@@ -1243,7 +1243,7 @@ def weighted_align_point_maps(
             all_weights,
             delta=config["Model"]["IRLS"]["delta"],
             max_iters=config["Model"]["IRLS"]["max_iters"],
-            tol=eval(config["Model"]["IRLS"]["tol"]),
+            tol=float(config["Model"]["IRLS"]["tol"]),
             align_method=config["Model"]["align_method"],
         )
     else:

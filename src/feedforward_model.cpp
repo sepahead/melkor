@@ -360,6 +360,11 @@ ModelWeightManager::DownloadResult ModelWeightManager::downloadWeights(
     std::function<void(float)> progress_callback) {
     
     DownloadResult result;
+    result.error_message =
+        "Native model downloads are retired because the registry did not provide "
+        "verified per-model adapters or immutable checkpoint artifacts. Run "
+        "scripts/setup_da3.sh instead.";
+    return result;
     
     auto models = impl_->getModelRegistry();
     std::string url;
@@ -531,29 +536,26 @@ FeedforwardModel::FeedforwardModel() : impl_(std::make_unique<Impl>()) {}
 FeedforwardModel::~FeedforwardModel() = default;
 
 bool FeedforwardModel::isAvailable() {
-    return PythonBridge::isPythonAvailable();
+    return false;
 }
 
-bool FeedforwardModel::isModelAvailable(const std::string& model_type) {
-    ModelWeightManager manager;
-    return manager.hasWeights(model_type);
+bool FeedforwardModel::isModelAvailable(const std::string& /*model_type*/) {
+    return false;
 }
 
 std::vector<std::string> FeedforwardModel::getAvailableModels() {
-    std::vector<std::string> available;
-    ModelWeightManager manager;
-    
-    for (const auto& model : manager.listModels()) {
-        if (model.downloaded) {
-            available.push_back(model.name);
-        }
-    }
-    
-    return available;
+    return {};
 }
 
 bool FeedforwardModel::initialize(const FeedforwardConfig& config) {
     impl_->config_ = config;
+    impl_->initialized_ = false;
+    if (config.log_callback) {
+        config.log_callback(
+            "Native FeedforwardModel is retired; use scripts/setup_da3.sh and "
+            "./da3-infer, which owns the model-specific Python environment.");
+    }
+    return false;
     
     if (!impl_->python_bridge_.initialize(config.python_env)) {
         return false;

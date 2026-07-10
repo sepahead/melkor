@@ -1,6 +1,10 @@
 #!/bin/bash
 set -euo pipefail
 
+echo "Error: the DA3 CoreML setup pipeline is disabled pending sequence-level PyTorch parity." >&2
+echo "Use scripts/setup_da3.sh and ./da3-infer for supported reconstruction." >&2
+exit 2
+
 # End-to-end helper: convert DINOv3 backbone + DA3 head to CoreML for all sizes,
 # build the Swift CLI, generate mock inputs, and run a quick inference smoke test.
 

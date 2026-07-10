@@ -1,4 +1,5 @@
 #include "melkor/cuda_compute.hpp"
+#include "melkor/compute_provider.hpp"
 #include <cuda_runtime.h>
 #include <iostream>
 #include <vector>
@@ -332,25 +333,28 @@ bool GaussianProcessor::scalePositions(GaussianCloud& cloud, float scale) {
     return impl_->downloadFromDevice(cloud);
 }
 
-bool GaussianProcessor::rgbToShDc(GaussianCloud& /*cloud*/) {
-    // Not implemented yet - can be added later if needed
-    return false;
+bool GaussianProcessor::rgbToShDc(GaussianCloud& cloud) {
+    // These operations are cheap compared with PCIe transfer. Keep the CUDA
+    // provider operation-complete with a deterministic host fallback until a
+    // fused device pipeline is warranted.
+    auto cpu = createCpuProvider();
+    return cpu && cpu->rgbToShDc(cloud);
 }
 
-bool GaussianProcessor::opacityToLogit(GaussianCloud& /*cloud*/) {
-    // Not implemented yet - can be added later if needed
-    return false;
+bool GaussianProcessor::opacityToLogit(GaussianCloud& cloud) {
+    auto cpu = createCpuProvider();
+    return cpu && cpu->opacityToLogit(cloud);
 }
 
-bool GaussianProcessor::sortByDistance(GaussianCloud& /*cloud*/,
-                                       float /*camera_x*/, float /*camera_y*/, float /*camera_z*/) {
-    // Not implemented yet - can be added later if needed
-    return false;
+bool GaussianProcessor::sortByDistance(GaussianCloud& cloud,
+                                       float camera_x, float camera_y, float camera_z) {
+    auto cpu = createCpuProvider();
+    return cpu && cpu->sortByDistance(cloud, camera_x, camera_y, camera_z);
 }
 
-std::vector<float> GaussianProcessor::computeCovariances(const GaussianCloud& /*cloud*/) {
-    // Not implemented yet - can be added later if needed
-    return {};
+std::vector<float> GaussianProcessor::computeCovariances(const GaussianCloud& cloud) {
+    auto cpu = createCpuProvider();
+    return cpu ? cpu->computeCovariances(cloud) : std::vector<float>{};
 }
 
 namespace {

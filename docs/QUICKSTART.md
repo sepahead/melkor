@@ -26,6 +26,7 @@ Melkor is a unified toolkit for 3D Gaussian Splatting that provides:
 - **Multiple training backends**: OpenSplat, LichtFeld-Studio, gsplat (CUDA and MPS), DA3
 - **Two approaches**: COLMAP-based (traditional) and COLMAP-free (feedforward)
 - **Format conversion**: GLB → PLY → SPZ (GLB is input only)
+- **Asset validation**: deterministic PLY/SPZ/GLB/glTF diagnostics via `melkor inspect` — see [INSPECT.md](INSPECT.md)
 - **Scene completion**: densification-based hole filling via `--fill-holes` — see [SCENE_COMPLETION.md](SCENE_COMPLETION.md)
 - **Bundled viewer**: SparkJS web viewer with an optional Tauri desktop shell — see [viewer/README.md](../viewer/README.md)
 - **Cross-platform GPU support**: Metal (macOS), CUDA (Linux), CPU fallback; `melkor --info` prints the active backend
@@ -110,6 +111,9 @@ cmake --build build -j
 # Verify the build and see which GPU backend is active (Metal/CUDA/CPU)
 ./build/melkor --info
 
+# Validate a source or output without initializing the GPU
+./build/melkor inspect scene.ply --json --strict
+
 # Install the training tools (auto-detects platform; installs COLMAP too)
 ./scripts/setup_all.sh
 ```
@@ -150,25 +154,28 @@ No COLMAP, no camera poses, just images → 3D Gaussians
 # 3. Multiple images (no COLMAP required)
 ./da3-infer --input ~/Photos/my_scene/ --output scene.ply
 
-# 4. Multi-GPU for faster processing
-./da3-infer-multigpu --input ~/Photos/my_scene/ --output scene.ply
+# 4. With a specific reviewed model variant
+./da3-infer --model da3-large-1.1 --input images/ --output high_quality.ply
 
-# 5. With specific model variant
-./da3-infer --model DA3-LARGE --input images/ --output high_quality.ply
-
-# 6. Compress to SPZ
+# 5. Compress to SPZ
 ./build/melkor scene.ply scene.spz
 ```
+
+One scene must remain one joint DA3 inference call. The old
+`da3-infer-multigpu` view sharder is retired because independently predicted
+view subsets do not share a valid pose frame. Use the official DA3-Streaming
+pipeline for long sequences, or distribute multiple complete scenes across
+GPUs.
 
 **DA3 Model Variants:**
 
 | Model | Size | Speed | Use Case |
 |-------|------|-------|----------|
-| `DA3-SMALL` | ~1GB | ⚡⚡⚡ | Quick preview |
-| `DA3-BASE` | ~2GB | ⚡⚡ | Balanced (default) |
-| `DA3-LARGE` | ~4GB | ⚡ | High quality |
-| `DA3-GIANT` | ~8GB | 🐢 | Maximum quality |
-| `DA3METRIC-LARGE` | ~4GB | ⚡⚡ | Metric depth (meters) |
+| `da3-small` | ~1GB | ⚡⚡⚡ | Depth/pose-derived point splats |
+| `da3-base` | ~2GB | ⚡⚡ | Balanced depth/pose path (default) |
+| `da3-large-1.1` | ~4GB | ⚡ | Refreshed depth/pose path; non-commercial weights |
+| `da3-giant-1.1` | ~8GB | 🐢 | Learned Gaussian head; non-commercial weights |
+| `da3nested-giant-large-1.1` | ~12GB | 🐢 | Learned Gaussians + metric alignment; non-commercial weights |
 
 ### Option 2: COLMAP-Based Pipeline (Best Quality - Minutes)
 
@@ -266,8 +273,8 @@ python examples/simple_trainer.py \
 
 > **Note:** GLB is only supported as an INPUT format (for converting 3D meshes to
 > Gaussian splats). PLY and SPZ are the supported OUTPUT formats.
-> Run `./build/melkor --help` for all conversion modes (`--basic`, `--enhanced`,
-> `--fit`, `--feedforward`) and options. `--no-gpu` forces the CPU path
+> Run `./build/melkor --help` for the supported conversion modes (`--basic`,
+> `--enhanced`) and options. `--no-gpu` forces the CPU path
 > (`--no-metal` is a deprecated alias). Hole-filling parameters are documented in
 > [SCENE_COMPLETION.md](SCENE_COMPLETION.md).
 
@@ -323,7 +330,7 @@ python examples/simple_trainer.py \
 
 | Tool | Speed | Quality | Platform | COLMAP Required | Features |
 |------|-------|---------|----------|-----------------|----------|
-| **DA3 (Feedforward)** | ⚡⚡⚡⚡ | Good | Linux CUDA | ❌ No | Multi-GPU, any # images |
+| **DA3 (Feedforward)** | ⚡⚡⚡⚡ | Good | Linux CUDA | ❌ No | One joint scene per GPU; learned GS on GIANT/NESTED |
 | **LichtFeld-Studio** | ⚡⚡⚡ | High | Linux CUDA 12.8+ | ✅ Yes | Pose optimization, MCMC |
 | **OpenSplat** | ⚡⚡ | High | All | ✅ Yes | Cross-platform, reliable |
 | **gsplat-mps** | ⚡ | Highest | macOS Metal | ✅ Yes | Research, customizable |
@@ -611,7 +618,7 @@ Hole-filling algorithm, parameters, and limits: [SCENE_COMPLETION.md](SCENE_COMP
 ```bash
 # DA3 Feedforward (COLMAP-free, Linux CUDA)
 ./da3-infer --input <images> --output <output.ply>
-./da3-infer-multigpu --input <images> --output <output.ply>  # Multi-GPU
+# Keep every scene on one GPU; use DA3-Streaming for long sequences.
 
 # OpenSplat (COLMAP-based)
 ./opensplat <colmap_project> -n <iterations> -o <output.ply>

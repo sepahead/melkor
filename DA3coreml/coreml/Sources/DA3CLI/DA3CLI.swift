@@ -137,9 +137,12 @@ private enum CLIImageLoader {
 struct DA3CLI: ParsableCommand {
     static var configuration = CommandConfiguration(
         commandName: "da3-coreml",
-        abstract: "Depth-Anything-3 CoreML - Monocular depth and ray estimation",
+        abstract: "Experimental DA3 CoreML single-image depth inference",
         version: "1.0.0",
-        subcommands: [Infer.self, Convert.self, Benchmark.self, To3DGS.self, Fuse.self, Stream.self],
+        // Multi-view fusion/streaming and model conversion are intentionally
+        // not exposed: the current S=1 export does not preserve DA3's joint
+        // camera-token context and has not passed PyTorch numerical parity.
+        subcommands: [Infer.self, Benchmark.self],
         defaultSubcommand: Infer.self
     )
 }

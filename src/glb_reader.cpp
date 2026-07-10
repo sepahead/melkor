@@ -3,31 +3,90 @@
 #include "tiny_gltf.h"
 
 #include "melkor/glb_reader.hpp"
+#include "gltf_scene_utils.hpp"
+#include "safe_gltf_fs.hpp"
+#include <algorithm>
+#include <cmath>
+#include <cstdint>
 #include <fstream>
 #include <cstring>
+#include <limits>
 
 namespace melkor {
+
+namespace {
+
+template <typename T>
+T readUnaligned(const uint8_t* data) {
+    T value{};
+    std::memcpy(&value, data, sizeof(value));
+    return value;
+}
+
+}  // namespace
 
 class GlbReader::Impl {
 public:
     tinygltf::TinyGLTF loader;
+    gltf_fs::Context fs_context;
+
+    Impl() {
+        std::string ignored;
+        loader.SetFsCallbacks(gltf_fs::callbacks(fs_context), &ignored);
+    }
+
+    bool setInputRoot(const std::string& filepath, std::string& error) {
+        return gltf_fs::setRootForInput(fs_context, filepath, error);
+    }
     
     GlbLoadResult processModel(const tinygltf::Model& model,
                                const GlbConversionConfig& config) {
         GlbLoadResult result;
+        if (const std::string contract_error = gltf_scene::validateModelContract(model);
+            !contract_error.empty()) {
+            result.error_message = contract_error;
+            return result;
+        }
+        const auto traversal = gltf_scene::activeMeshInstances(model);
+        if (!traversal.success()) {
+            result.error_message = traversal.error;
+            return result;
+        }
+        const auto& instances = traversal.instances;
+        result.total_meshes = instances.size();
+
+        if (!std::isfinite(config.default_scale) || config.default_scale <= 0.0f ||
+            !std::isfinite(config.default_opacity) || config.default_opacity <= 0.0f ||
+            config.default_opacity > 1.0f ||
+            !std::isfinite(config.position_scale) || config.position_scale <= 0.0f ||
+            !std::isfinite(config.default_color[0]) ||
+            !std::isfinite(config.default_color[1]) ||
+            !std::isfinite(config.default_color[2]) ||
+            config.default_color[0] < 0.0f || config.default_color[0] > 1.0f ||
+            config.default_color[1] < 0.0f || config.default_color[1] > 1.0f ||
+            config.default_color[2] < 0.0f || config.default_color[2] > 1.0f) {
+            result.error_message = "Invalid conversion configuration";
+            return result;
+        }
         result.success = true;
-        result.total_meshes = model.meshes.size();
         
         // Count total vertices first for reservation. Only count accessors
         // that pass validation so a crafted count can't force a huge reserve.
         size_t total_verts = 0;
-        for (const auto& mesh : model.meshes) {
+        for (const auto& instance : instances) {
+            const auto& mesh = model.meshes[instance.mesh_index];
             for (const auto& primitive : mesh.primitives) {
                 auto pos_it = primitive.attributes.find("POSITION");
                 if (pos_it != primitive.attributes.end()) {
                     size_t stride = 0;
                     if (validateAndGetAccessorData(model, pos_it->second, stride)) {
-                        total_verts += model.accessors[pos_it->second].count;
+                        const size_t count = model.accessors[pos_it->second].count;
+                        if (count > std::numeric_limits<size_t>::max() - total_verts) {
+                            result.success = false;
+                            result.error_message = "Vertex count overflow";
+                            return result;
+                        }
+                        total_verts += count;
                     }
                 }
                 result.total_primitives++;
@@ -37,9 +96,10 @@ public:
         result.cloud.reserve(total_verts);
         
         // Process each mesh
-        for (const auto& mesh : model.meshes) {
+        for (const auto& instance : instances) {
+            const auto& mesh = model.meshes[instance.mesh_index];
             for (const auto& primitive : mesh.primitives) {
-                processGltfPrimitive(model, primitive, config, result);
+                processGltfPrimitive(model, primitive, instance.world, config, result);
             }
         }
         
@@ -52,6 +112,12 @@ public:
             if (result.error_message.empty()) {
                 result.error_message = "No usable vertex data found in glTF";
             }
+        } else if (!result.error_message.empty()) {
+            // A validator/converter must never present a partially decoded
+            // asset as wholly valid. Callers may inspect the retained cloud for
+            // diagnostics, but writing a lossy output requires an explicit fix
+            // to the source asset first.
+            result.success = false;
         }
         return result;
     }
@@ -79,6 +145,14 @@ private:
             return nullptr;
         }
         const auto& accessor = model.accessors[accessor_index];
+
+        // Sparse accessors may also carry a base bufferView. Reading only that
+        // base silently discards every sparse override and produces a valid-
+        // looking but incorrect cloud. Reject the whole accessor until sparse
+        // overlay materialization is implemented.
+        if (accessor.sparse.isSparse) {
+            return nullptr;
+        }
 
         if (accessor.bufferView < 0 ||
             static_cast<size_t>(accessor.bufferView) >= model.bufferViews.size()) {
@@ -137,11 +211,13 @@ private:
 
     void processGltfPrimitive(const tinygltf::Model& model,
                               const tinygltf::Primitive& primitive,
+                              const gltf_scene::Matrix& world,
                               const GlbConversionConfig& config,
                               GlbLoadResult& result) {
         // Get position accessor
         auto pos_it = primitive.attributes.find("POSITION");
         if (pos_it == primitive.attributes.end()) {
+            appendError(result, "Skipped primitive: POSITION attribute is missing");
             return;
         }
         
@@ -162,8 +238,9 @@ private:
             return;
         }
 
-        // Try to get color accessor. Invalid or unsupported color data is
-        // ignored (the default color is used instead).
+        // Optional attributes may be absent, but when present they are part of
+        // the source contract. Reject malformed data instead of silently
+        // treating a damaged accessor as an absent attribute.
         const uint8_t* color_data = nullptr;
         size_t color_stride = 0;
         int color_component_type = TINYGLTF_COMPONENT_TYPE_FLOAT;
@@ -174,27 +251,36 @@ private:
                 size_t stride = 0;
                 const uint8_t* data =
                     validateAndGetAccessorData(model, color_it->second, stride);
-                if (data != nullptr) {
-                    const auto& color_accessor = model.accessors[color_it->second];
-                    const bool supported_type =
-                        color_accessor.type == TINYGLTF_TYPE_VEC3 ||
-                        color_accessor.type == TINYGLTF_TYPE_VEC4;
-                    const bool supported_component =
-                        color_accessor.componentType == TINYGLTF_COMPONENT_TYPE_FLOAT ||
-                        color_accessor.componentType == TINYGLTF_COMPONENT_TYPE_UNSIGNED_BYTE ||
-                        color_accessor.componentType == TINYGLTF_COMPONENT_TYPE_UNSIGNED_SHORT;
-                    if (supported_type && supported_component &&
-                        color_accessor.count >= pos_accessor.count) {
-                        color_data = data;
-                        color_stride = stride;
-                        color_component_type = color_accessor.componentType;
-                    }
+                if (data == nullptr) {
+                    appendError(result, "Skipped primitive: COLOR_0 accessor references "
+                                        "out-of-range or inconsistent buffer data");
+                    return;
                 }
+                const auto& color_accessor = model.accessors[color_it->second];
+                const bool supported_type =
+                    color_accessor.type == TINYGLTF_TYPE_VEC3 ||
+                    color_accessor.type == TINYGLTF_TYPE_VEC4;
+                const bool supported_component =
+                    color_accessor.componentType == TINYGLTF_COMPONENT_TYPE_FLOAT ||
+                    color_accessor.componentType == TINYGLTF_COMPONENT_TYPE_UNSIGNED_BYTE ||
+                    color_accessor.componentType == TINYGLTF_COMPONENT_TYPE_UNSIGNED_SHORT;
+                const bool valid_normalization =
+                    color_accessor.componentType == TINYGLTF_COMPONENT_TYPE_FLOAT ||
+                    color_accessor.normalized;
+                if (!supported_type || !supported_component || !valid_normalization ||
+                    color_accessor.count != pos_accessor.count) {
+                    appendError(result, "Skipped primitive: COLOR_0 accessor has an "
+                                        "unsupported type, normalization, or count");
+                    return;
+                }
+                color_data = data;
+                color_stride = stride;
+                color_component_type = color_accessor.componentType;
             }
         }
 
-        // Try to get normal accessor for orientation. Invalid or non-float
-        // normals are ignored (the identity quaternion is used instead).
+        // A missing normal is allowed and uses identity orientation. A normal
+        // attribute that exists must be a complete finite float VEC3 array.
         const uint8_t* normal_data = nullptr;
         size_t normal_stride = 0;
 
@@ -203,33 +289,59 @@ private:
             size_t stride = 0;
             const uint8_t* data =
                 validateAndGetAccessorData(model, normal_it->second, stride);
-            if (data != nullptr) {
-                const auto& normal_accessor = model.accessors[normal_it->second];
-                if (normal_accessor.componentType == TINYGLTF_COMPONENT_TYPE_FLOAT &&
-                    normal_accessor.type == TINYGLTF_TYPE_VEC3 &&
-                    normal_accessor.count >= pos_accessor.count) {
-                    normal_data = data;
-                    normal_stride = stride;
-                }
+            if (data == nullptr) {
+                appendError(result, "Skipped primitive: NORMAL accessor references "
+                                    "out-of-range or inconsistent buffer data");
+                return;
             }
+            const auto& normal_accessor = model.accessors[normal_it->second];
+            if (normal_accessor.componentType != TINYGLTF_COMPONENT_TYPE_FLOAT ||
+                normal_accessor.type != TINYGLTF_TYPE_VEC3 ||
+                normal_accessor.count != pos_accessor.count) {
+                appendError(result, "Skipped primitive: NORMAL accessor must be a complete "
+                                    "float VEC3 array");
+                return;
+            }
+            normal_data = data;
+            normal_stride = stride;
         }
         
         // Process each vertex
+        size_t rejected_positions = 0;
         for (size_t i = 0; i < pos_accessor.count; ++i) {
             GaussianSplat splat;
             
             // Position
-            const float* pos = reinterpret_cast<const float*>(pos_data + i * pos_stride);
+            const uint8_t* pos = pos_data + i * pos_stride;
+            const float local_position[3] = {
+                readUnaligned<float>(pos + 0 * sizeof(float)),
+                readUnaligned<float>(pos + 1 * sizeof(float)),
+                readUnaligned<float>(pos + 2 * sizeof(float)),
+            };
+            float transformed_position[3];
+            if (!std::isfinite(local_position[0]) || !std::isfinite(local_position[1]) ||
+                !std::isfinite(local_position[2]) ||
+                !gltf_scene::transformPoint(world, local_position, transformed_position)) {
+                ++rejected_positions;
+                continue;
+            }
+            const float px = transformed_position[0];
+            const float py = transformed_position[1];
+            const float pz = transformed_position[2];
             
             if (config.convert_coordinate_system) {
                 // Convert from Y-up (glTF) to Z-up (common for 3DGS)
-                splat.x = pos[0] * config.position_scale;
-                splat.y = -pos[2] * config.position_scale;  // -Z becomes Y
-                splat.z = pos[1] * config.position_scale;   // Y becomes Z
+                splat.x = px * config.position_scale;
+                splat.y = -pz * config.position_scale;  // -Z becomes Y
+                splat.z = py * config.position_scale;   // Y becomes Z
             } else {
-                splat.x = pos[0] * config.position_scale;
-                splat.y = pos[1] * config.position_scale;
-                splat.z = pos[2] * config.position_scale;
+                splat.x = px * config.position_scale;
+                splat.y = py * config.position_scale;
+                splat.z = pz * config.position_scale;
+            }
+            if (!std::isfinite(splat.x) || !std::isfinite(splat.y) || !std::isfinite(splat.z)) {
+                ++rejected_positions;
+                continue;
             }
             
             // Color -> SH DC coefficients
@@ -242,16 +354,21 @@ private:
                     g = color_ptr[1] / 255.0f;
                     b = color_ptr[2] / 255.0f;
                 } else if (color_component_type == TINYGLTF_COMPONENT_TYPE_UNSIGNED_SHORT) {
-                    const uint16_t* c16 = reinterpret_cast<const uint16_t*>(color_ptr);
-                    r = c16[0] / 65535.0f;
-                    g = c16[1] / 65535.0f;
-                    b = c16[2] / 65535.0f;
+                    r = readUnaligned<uint16_t>(color_ptr + 0 * sizeof(uint16_t)) / 65535.0f;
+                    g = readUnaligned<uint16_t>(color_ptr + 1 * sizeof(uint16_t)) / 65535.0f;
+                    b = readUnaligned<uint16_t>(color_ptr + 2 * sizeof(uint16_t)) / 65535.0f;
                 } else {
-                    const float* cf = reinterpret_cast<const float*>(color_ptr);
-                    r = cf[0];
-                    g = cf[1];
-                    b = cf[2];
+                    r = readUnaligned<float>(color_ptr + 0 * sizeof(float));
+                    g = readUnaligned<float>(color_ptr + 1 * sizeof(float));
+                    b = readUnaligned<float>(color_ptr + 2 * sizeof(float));
                 }
+                if (!std::isfinite(r) || !std::isfinite(g) || !std::isfinite(b)) {
+                    appendError(result, "Skipped primitive: COLOR_0 contains a non-finite value");
+                    return;
+                }
+                r = std::clamp(r, 0.0f, 1.0f);
+                g = std::clamp(g, 0.0f, 1.0f);
+                b = std::clamp(b, 0.0f, 1.0f);
             } else {
                 r = config.default_color[0];
                 g = config.default_color[1];
@@ -264,7 +381,7 @@ private:
             splat.f_dc_2 = utils::rgbToShDc(b);
             
             // Opacity (in logit space)
-            splat.opacity = utils::logit(std::clamp(config.default_opacity, 0.001f, 0.999f));
+            splat.opacity = utils::logit(config.default_opacity);
             
             // Scale (in log space)
             float log_scale = std::log(config.default_scale);
@@ -274,8 +391,24 @@ private:
             
             // Rotation quaternion from normal (if available)
             if (normal_data) {
-                const float* n = reinterpret_cast<const float*>(normal_data + i * normal_stride);
-                float nx = n[0], ny = n[1], nz = n[2];
+                const uint8_t* n = normal_data + i * normal_stride;
+                const float local_normal[3] = {
+                    readUnaligned<float>(n + 0 * sizeof(float)),
+                    readUnaligned<float>(n + 1 * sizeof(float)),
+                    readUnaligned<float>(n + 2 * sizeof(float)),
+                };
+                float transformed_normal[3] = {0.0f, 0.0f, 1.0f};
+                if (!std::isfinite(local_normal[0]) || !std::isfinite(local_normal[1]) ||
+                    !std::isfinite(local_normal[2]) ||
+                    !gltf_scene::transformNormal(world, local_normal, transformed_normal)) {
+                    appendError(result,
+                                "Skipped primitive: NORMAL contains a non-finite or "
+                                "non-transformable value");
+                    return;
+                }
+                float nx = transformed_normal[0];
+                float ny = transformed_normal[1];
+                float nz = transformed_normal[2];
                 
                 if (config.convert_coordinate_system) {
                     float tmp = ny;
@@ -326,6 +459,10 @@ private:
             
             result.cloud.addSplat(std::move(splat));
         }
+        if (rejected_positions > 0) {
+            appendError(result, "Rejected " + std::to_string(rejected_positions) +
+                                " non-finite or non-transformable POSITION vertices");
+        }
     }
 };
 
@@ -335,14 +472,16 @@ GlbReader::~GlbReader() = default;
 GlbLoadResult GlbReader::loadFromFile(const std::string& filepath,
                                       const GlbConversionConfig& config) {
     GlbLoadResult result;
+    if (!impl_->setInputRoot(filepath, result.error_message)) return result;
     
     tinygltf::Model model;
     std::string err, warn;
     bool success;
     
-    // Check file extension
-    if (filepath.size() >= 4 && 
-        filepath.substr(filepath.size() - 4) == ".glb") {
+    // Detect the container by its standardized magic, not a case-sensitive
+    // filename suffix. This accepts uppercase and extensionless GLBs without
+    // misrouting JSON glTF through the binary loader.
+    if (gltf_scene::fileHasGlbMagic(filepath)) {
         success = impl_->loader.LoadBinaryFromFile(&model, &err, &warn, filepath);
     } else {
         success = impl_->loader.LoadASCIIFromFile(&model, &err, &warn, filepath);
@@ -364,6 +503,16 @@ GlbLoadResult GlbReader::loadFromFile(const std::string& filepath,
 GlbLoadResult GlbReader::loadFromMemory(const uint8_t* data, size_t size,
                                         const GlbConversionConfig& config) {
     GlbLoadResult result;
+
+    // In-memory documents have no trusted asset base directory. Never inherit
+    // one from an earlier file load on the same reader instance.
+    impl_->fs_context.root.clear();
+
+    if (data == nullptr || size == 0 ||
+        size > static_cast<size_t>(std::numeric_limits<unsigned int>::max())) {
+        result.error_message = "Invalid or oversized in-memory glTF buffer";
+        return result;
+    }
     
     tinygltf::Model model;
     std::string err, warn;

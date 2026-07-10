@@ -1,6 +1,10 @@
 #!/bin/bash
 set -euo pipefail
 
+echo "Error: CoreML model export/download is disabled until checkpoint revisions and numerical parity are enforced." >&2
+echo "Use scripts/setup_da3.sh for the supported PyTorch model path." >&2
+exit 2
+
 # Build and convert DA3 CoreML assets for multiple sizes (giant → large → base → small).
 # Defaults use DINOv3-style HF ids; override with per-size env vars if needed.
 # Required: set DA3_CHECKPOINT_<SIZE> (or DA3_CHECKPOINT) to a DA3 checkpoint for the head export.

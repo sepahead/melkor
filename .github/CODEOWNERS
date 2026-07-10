@@ -1,0 +1,6 @@
+# Security-sensitive automation and release policy require maintainer review.
+/.github/workflows/ @sepahead
+/.github/dependabot.yml @sepahead
+/SECURITY.md @sepahead
+/scripts/ @sepahead
+/viewer/src-tauri/ @sepahead

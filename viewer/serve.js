@@ -18,28 +18,49 @@ Bun.serve({
   port,
   hostname: host,
   async fetch(req) {
-    let pathname = decodeURIComponent(new URL(req.url).pathname);
+    if (req.method !== "GET" && req.method !== "HEAD") {
+      return new Response("Method not allowed", { status: 405, headers: { allow: "GET, HEAD" } });
+    }
+    let pathname;
+    try {
+      pathname = decodeURIComponent(new URL(req.url).pathname);
+    } catch {
+      return new Response("Bad request", { status: 400 });
+    }
     if (pathname.endsWith("/")) pathname += "index.html";
-    // Resolve inside root and reject path traversal (portable across separators).
+    // Resolve first, then apply the public-path allowlist to the canonical
+    // relative path. Checking the URL prefix before resolution lets an encoded
+    // slash turn `/vendor/..%2Fpackage.json` into a private in-root file.
     const filePath = resolve(root, "." + pathname);
     const rel = relative(root, filePath);
     if (isAbsolute(rel) || rel === ".." || rel.startsWith(".." + sep)) {
       log(req.method, pathname, 403);
       return new Response("Forbidden", { status: 403 });
     }
-    const file = Bun.file(filePath);
-    if (!(await file.exists())) {
+    const publicPath = rel.split(sep).join("/");
+    if (publicPath !== "index.html" &&
+        !publicPath.startsWith("vendor/") &&
+        !publicPath.startsWith("public/")) {
       log(req.method, pathname, 404);
       return new Response("Not found", { status: 404 });
     }
-    log(req.method, pathname, 200);
-    if (req.method === "HEAD") {
-      return new Response(null, {
-        status: 200,
-        headers: { "content-type": file.type, "content-length": String(file.size) },
-      });
+    try {
+      const file = Bun.file(filePath);
+      if (!(await file.exists())) {
+        log(req.method, pathname, 404);
+        return new Response("Not found", { status: 404 });
+      }
+      log(req.method, pathname, 200);
+      if (req.method === "HEAD") {
+        return new Response(null, {
+          status: 200,
+          headers: { "content-type": file.type, "content-length": String(file.size) },
+        });
+      }
+      return new Response(file); // BunFile Response handles Content-Type + Range
+    } catch {
+      return new Response("Internal server error", { status: 500 });
     }
-    return new Response(file); // BunFile Response handles Content-Type + Range
   },
 });
 

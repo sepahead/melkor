@@ -92,8 +92,8 @@ public:
     // Compute covariance matrices from scale and rotation.
     // Returns flattened upper triangular covariance (6 floats per splat:
     // xx, xy, xz, yy, yz, zz).
-    // NOTE: expects scale in LINEAR space.  GaussianCloud stores scale in log
-    // space; callers must convert (exp) or use processCloud first.
+    // Scale is read in GaussianCloud's native log space and exponentiated
+    // internally before covariance construction.
     virtual std::vector<float> computeCovariances(const GaussianCloud& cloud) = 0;
 
     // Apply all enabled transformations in one batch.

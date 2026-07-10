@@ -1,6 +1,10 @@
 #!/bin/bash
 set -e
 
+echo "Error: the DA3 CoreML conversion pipeline is disabled pending strict checkpoint coverage and PyTorch numerical parity." >&2
+echo "Use scripts/setup_da3.sh and ./da3-infer for supported reconstruction." >&2
+exit 2
+
 # ============================================================================
 # DA3CoreML Setup Script
 # ============================================================================

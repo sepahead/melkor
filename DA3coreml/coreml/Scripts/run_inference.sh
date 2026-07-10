@@ -1,6 +1,10 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+echo "Error: this unvalidated CoreML inference wrapper is disabled pending PyTorch numerical parity." >&2
+echo "Use ./da3-infer for supported inference." >&2
+exit 2
+
 # Convert and compile the *official* DA3 DualDPT head to CoreML.
 #
 # This is a thin wrapper around `Scripts/convert_dualdpt_official_to_coreml.py` plus `xcrun coremlc compile`.
@@ -90,4 +94,3 @@ echo ""
 echo "Done."
 echo "- mlpackage: $OUT_MLPACKAGE"
 echo "- mlmodelc:  $OUT_COMPILED_DIR/$(basename "$OUT_MLPACKAGE" .mlpackage).mlmodelc"
-

@@ -17,20 +17,14 @@ Exit code 0 = pass, nonzero = fail.
 from __future__ import annotations
 
 import importlib.util
+import re
 import struct
 import sys
 import types
 from pathlib import Path
 from types import SimpleNamespace
 
-try:
-    import numpy as np
-except ImportError:
-    # numpy is the only hard runtime dependency. If it's missing, skip
-    # gracefully (exit 0) rather than erroring, so this test never breaks a
-    # minimal build environment that didn't install Python scientific deps.
-    print("SKIP: numpy not installed")
-    sys.exit(0)
+import numpy as np
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 
@@ -97,6 +91,10 @@ def _make_generator(module):
     """Construct a generator without running __init__ (no model load needed)."""
     gen = module.DA3GaussianGenerator.__new__(module.DA3GaussianGenerator)
     gen.last_prediction = None
+    gen.last_ray_origins = []
+    gen.last_confidences = []
+    gen.last_sky_masks = []
+    gen.allow_fallback_depth = False
     return gen
 
 
@@ -134,7 +132,10 @@ def main() -> int:
         harmonics=harmonics,
         opacities=_TensorShim(np.array([[0.9, 0.5]], dtype=np.float32)),
     )
-    gen.last_prediction = SimpleNamespace(gaussians=g, depth=None)
+    gen.last_prediction = SimpleNamespace(
+        gaussians=g,
+        depth=np.ones((1, 1, 2), dtype=np.float32),
+    )
     out = gen.gaussians_from_prediction()
     assert out is not None, "expected dict"
 
@@ -158,9 +159,10 @@ def main() -> int:
     assert np.allclose(out["opacities"], [0.9, 0.5])
     print("case3 opacities (passthrough): PASS")
 
-    # Case 4: subsample strided slice on the dict (as main() does).
-    sel = slice(None, None, 2)
-    sub = {k: v[sel] for k, v in out.items()}
+    # Case 4: direct GS subsampling operates on the 2-D pixel grid, matching
+    # depth-derived splats rather than taking an arbitrary flat stride.
+    sub = gen.gaussians_from_prediction(subsample=2)
+    assert sub is not None
     assert len(sub["positions"]) == 1
     print("case4 subsample slice: PASS")
 
@@ -183,6 +185,60 @@ def main() -> int:
         )
     finally:
         os.unlink(ply_path)
+
+    # Case 6: depth fallback uses the camera origin and camera-Z convention.
+    # A w2c translation of -10 on X means the camera center is world X=10.
+    # With K=I, pixel u=1 has the unnormalized depth vector (1,0,1), so Z-depth
+    # 2 reconstructs points (10,0,2) and (12,0,2), not origin-centered points
+    # or normalized-ray distances.
+    w2c = np.eye(4, dtype=np.float32)
+    w2c[0, 3] = -10.0
+    intrinsics = np.eye(3, dtype=np.float32)
+    origin, depth_vectors = gen._ray_geometry_for_view(
+        0, 1, 2, w2c[None], intrinsics[None]
+    )
+    assert np.allclose(origin, [10, 0, 0])
+    assert np.allclose(depth_vectors[0, 0], [0, 0, 1])
+    assert np.allclose(depth_vectors[0, 1], [1, 0, 1])
+    gen.last_ray_origins = [origin]
+    fallback = gen.depth_rays_to_gaussians(
+        [np.array([[2.0, 2.0]], dtype=np.float32)],
+        [depth_vectors],
+        [np.zeros((1, 2, 3), dtype=np.float32)],
+        min_depth=0.1,
+        max_depth=10.0,
+    )
+    assert np.allclose(fallback["positions"], [[10, 0, 2], [12, 0, 2]])
+    print("case6 (camera-aware depth unprojection): PASS")
+
+    # Case 7: malformed camera arrays fail closed unless preview fallback was
+    # explicitly enabled; reconstruction must never invent a camera silently.
+    bad_intrinsics = np.eye(3, dtype=np.float32)
+    bad_intrinsics[0, 0] = 0.0
+    try:
+        gen._ray_geometry_for_view(0, 1, 1, w2c[None], bad_intrinsics[None])
+        raise AssertionError("malformed intrinsics were accepted")
+    except RuntimeError:
+        pass
+    gen.allow_fallback_depth = True
+    preview_origin, preview_rays = gen._ray_geometry_for_view(
+        0, 1, 1, w2c[None], bad_intrinsics[None]
+    )
+    assert np.allclose(preview_origin, [0, 0, 0]) and preview_rays.shape == (1, 1, 3)
+    print("case7 (malformed cameras fail closed): PASS")
+
+    # Case 8: the installer and runtime must agree on immutable checkpoint
+    # revisions. A drift here would either bypass review or make a valid setup
+    # unusable because inference rejects its marker.
+    setup = (REPO_ROOT / "scripts" / "setup_da3.sh").read_text(encoding="utf-8")
+    setup_revisions = dict(
+        re.findall(r"\s+(DA3[A-Z0-9.-]+)\) revision=\"([0-9a-f]{40})\"", setup)
+    )
+    assert m.DA3GaussianGenerator.MODEL_REVISIONS == {
+        name: setup_revisions[name]
+        for name in m.DA3GaussianGenerator.MODEL_REVISIONS
+    }
+    print("case8 (checkpoint revision contract): PASS")
 
     print("\nALL gaussians_from_prediction TESTS PASSED")
     return 0

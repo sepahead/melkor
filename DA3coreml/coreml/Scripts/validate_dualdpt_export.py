@@ -36,7 +36,9 @@ def _load_head_state_dict(checkpoint_path: Path) -> dict[str, torch.Tensor]:
     if checkpoint_path.suffix == ".safetensors":
         state_dict = load_safetensors(str(checkpoint_path))
     else:
-        checkpoint = torch.load(str(checkpoint_path), map_location="cpu")
+        checkpoint = torch.load(
+            str(checkpoint_path), map_location="cpu", weights_only=True
+        )
         state_dict = checkpoint.get("state_dict", checkpoint.get("model", checkpoint))
 
     head_weights: dict[str, torch.Tensor] = {}
@@ -210,4 +212,3 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
-

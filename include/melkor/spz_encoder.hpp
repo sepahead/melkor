@@ -6,6 +6,13 @@
 
 namespace melkor {
 
+struct SpzDecodeMetadata {
+    size_t declared_points = 0;
+    size_t decoded_points = 0;
+    int sh_degree = 0;
+    bool antialiased = false;
+};
+
 #ifdef MELKOR_HAS_SPZ
 
 // SPZ encoding configuration
@@ -47,11 +54,14 @@ class SpzDecoder {
 public:
     SpzDecoder();
     ~SpzDecoder();
+
+    using Metadata = SpzDecodeMetadata;
     
     struct DecodeResult {
         bool success = false;
         std::string error_message;
         GaussianCloud cloud;
+        Metadata metadata;
     };
     
     // Decode from file
@@ -86,11 +96,14 @@ class SpzDecoder {
 public:
     SpzDecoder() = default;
     ~SpzDecoder() = default;
+
+    using Metadata = SpzDecodeMetadata;
     
     struct DecodeResult {
         bool success = false;
         std::string error_message = "SPZ support not compiled";
         GaussianCloud cloud;
+        Metadata metadata;
     };
     
     template<typename... Args>

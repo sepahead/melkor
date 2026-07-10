@@ -43,7 +43,7 @@ class CameraDec(nn.Module):
 def load_state_dict(path):
     if path.endswith('.safetensors'):
         return load_safetensors(path)
-    ckpt = torch.load(path, map_location='cpu')
+    ckpt = torch.load(path, map_location='cpu', weights_only=True)
     return ckpt.get('state_dict', ckpt.get('model', ckpt))
 
 

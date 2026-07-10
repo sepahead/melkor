@@ -31,7 +31,7 @@ from safetensors.torch import load_file as load_safetensors
 def _load_state_dict(path: str) -> dict[str, Any]:
     if path.endswith(".safetensors"):
         return load_safetensors(path)
-    ckpt = torch.load(path, map_location="cpu")
+    ckpt = torch.load(path, map_location="cpu", weights_only=True)
     return ckpt.get("state_dict", ckpt.get("model", ckpt))
 
 

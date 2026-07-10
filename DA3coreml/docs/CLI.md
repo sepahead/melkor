@@ -652,3 +652,5 @@ da3 auto --help
 da3 image --help
 da3 backend --help
 ```
+> **Vendored snapshot:** this CLI reference describes the captured upstream DA3
+> tree, not Melkor's supported bridge. See `../../docs/DA3_FEEDFORWARD.md`.

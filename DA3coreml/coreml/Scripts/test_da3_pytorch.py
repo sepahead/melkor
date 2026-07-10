@@ -89,7 +89,7 @@ def test_da3_pytorch(checkpoint_path, image_path, output_dir):
     if checkpoint_path.endswith('.safetensors'):
         state_dict = load_safetensors(checkpoint_path)
     else:
-        ckpt = torch.load(checkpoint_path, map_location='cpu')
+        ckpt = torch.load(checkpoint_path, map_location='cpu', weights_only=True)
         state_dict = ckpt.get('state_dict', ckpt.get('model', ckpt))
 
     # Detect model size from checkpoint

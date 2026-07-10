@@ -5,6 +5,8 @@
 #include <cmath>
 #include <chrono>
 #include <iostream>
+#include <algorithm>
+#include <numeric>
 
 // For GLB loading — guard against definitions from the CMake target
 #ifndef TINYGLTF_NO_STB_IMAGE_WRITE
@@ -551,9 +553,9 @@ static void scale_rot_to_cov3d_vjp(float sx, float sy, float sz,
 // position/scale/rotation gradients can be reconstructed without recomputing
 // the EWA projection.
 //
-// NOTE: gaussians are composited in INPUT order (not depth-sorted). For the
-// mesh-fitting use case the source geometry is roughly convex so this is an
-// acceptable approximation; a production renderer would sort per-tile.
+// Gaussians are sorted front-to-back by center depth before compositing. A
+// global order is sufficient for this reference renderer and keeps the blend
+// and its backward pass deterministic.
 // ============================================================================
 
 struct PixelContribution {
@@ -594,6 +596,7 @@ struct RenderState {
     float tan_fovy = 0;
     float view_matrix[16] = {0};
     float view_proj_matrix[16] = {0};
+    float background[3] = {0, 0, 0};
 };
 
 // ForwardResult owns the RenderState via void*. These special members are
@@ -657,11 +660,12 @@ DifferentiableRenderer::ForwardResult DifferentiableRenderer::forward(
     state->tan_fovy = 0.5f * camera.height / state->focal_y;
     memcpy(state->view_matrix, camera.view_matrix, sizeof(float) * 16);
     memcpy(state->view_proj_matrix, camera.view_proj_matrix, sizeof(float) * 16);
+    memcpy(state->background, background, sizeof(float) * 3);
 
     for (size_t i = 0; i < num_pixels; ++i) {
-        result.image[i * 3 + 0] = background[0];
-        result.image[i * 3 + 1] = background[1];
-        result.image[i * 3 + 2] = background[2];
+        result.image[i * 3 + 0] = 0.0f;
+        result.image[i * 3 + 1] = 0.0f;
+        result.image[i * 3 + 2] = 0.0f;
     }
 
     // Focal lengths and FOV tangents (hoisted out of the per-Gaussian loop).
@@ -670,7 +674,20 @@ DifferentiableRenderer::ForwardResult DifferentiableRenderer::forward(
     float tan_fovx = 0.5f * camera.width / focal_x;
     float tan_fovy = 0.5f * camera.height / focal_y;
 
-    for (size_t g_idx = 0; g_idx < num_gaussians; ++g_idx) {
+    std::vector<size_t> render_order(num_gaussians);
+    std::iota(render_order.begin(), render_order.end(), 0);
+    std::stable_sort(render_order.begin(), render_order.end(), [&](size_t a, size_t b) {
+        const auto clip_w = [&](const PackedGaussian& g) {
+            return camera.view_proj_matrix[12] * g.position[0] +
+                   camera.view_proj_matrix[13] * g.position[1] +
+                   camera.view_proj_matrix[14] * g.position[2] +
+                   camera.view_proj_matrix[15];
+        };
+        return clip_w(gaussians[a]) < clip_w(gaussians[b]);
+    });
+
+    for (size_t order_idx = 0; order_idx < num_gaussians; ++order_idx) {
+        const size_t g_idx = render_order[order_idx];
         const auto& g = gaussians[g_idx];
         auto& proj = state->projections[g_idx];
 
@@ -778,6 +795,16 @@ DifferentiableRenderer::ForwardResult DifferentiableRenderer::forward(
         }
     }
 
+    // Composite the background through the final transmittance. Initializing
+    // the image to the background and then adding foreground over-brightens
+    // every non-black render because the background was never attenuated.
+    for (size_t i = 0; i < num_pixels; ++i) {
+        const float transmittance = 1.0f - result.alpha[i];
+        result.image[i * 3 + 0] += transmittance * background[0];
+        result.image[i * 3 + 1] += transmittance * background[1];
+        result.image[i * 3 + 2] += transmittance * background[2];
+    }
+
     result.internal_state = state;
     return result;
 }
@@ -826,6 +853,9 @@ DifferentiableRenderer::BackwardResult DifferentiableRenderer::backward(
         float gx = grad_image[pixel_idx * 3 + 0];
         float gy = grad_image[pixel_idx * 3 + 1];
         float gz = grad_image[pixel_idx * 3 + 2];
+        accum[pixel_idx] = state->background[0] * gx +
+                           state->background[1] * gy +
+                           state->background[2] * gz;
 
         for (auto it = contribs.rbegin(); it != contribs.rend(); ++it) {
             const auto& c = *it;
@@ -1014,6 +1044,17 @@ GaussianFitter::~GaussianFitter() = default;
 GaussianFitResult GaussianFitter::fitFromGlb(
     const std::string& glb_path,
     const GaussianFitConfig& config) {
+    // Fail closed: the historical implementation below only rendered a
+    // vertex-point target, measured initialization loss, performed zero
+    // optimizer steps, and nevertheless returned success. Keep the code as a
+    // reference while the differentiable renderer matures, but do not expose
+    // a result under a fitting contract until a real optimizer and triangle
+    // target renderer are implemented and tested.
+    GaussianFitResult unavailable;
+    unavailable.error_message =
+        "Gaussian fitting is unavailable: no optimization loop is implemented. "
+        "Use OpenSplat for trained fitting.";
+    return unavailable;
     
     auto start_time = std::chrono::high_resolution_clock::now();
     

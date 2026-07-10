@@ -1,0 +1,226 @@
+{
+  "components": [
+    {
+      "distribution": "vendored",
+      "download_location": "https://github.com/ByteDance-Seed/Depth-Anything-3",
+      "license_declared": "Apache-2.0",
+      "license_files": [
+        "DA3coreml/LICENSE"
+      ],
+      "name": "depth-anything-3",
+      "paths": [
+        "DA3coreml"
+      ],
+      "spdx_id": "SPDXRef-Package-depth-anything-3",
+      "supplier": "Organization: ByteDance-Seed",
+      "version": "1.0.0"
+    },
+    {
+      "distribution": "vendored",
+      "download_location": "https://github.com/apple/ml-sharp",
+      "license_declared": "LicenseRef-Apple-Sample-Code",
+      "license_files": [
+        "ml-sharp/LICENSE",
+        "ml-sharp/LICENSE_MODEL"
+      ],
+      "name": "ml-sharp",
+      "paths": [
+        "ml-sharp"
+      ],
+      "spdx_id": "SPDXRef-Package-ml-sharp",
+      "supplier": "Organization: Apple Inc.",
+      "version": "0.1"
+    },
+    {
+      "distribution": "vendored",
+      "download_location": "https://github.com/pierotofy/OpenSplat",
+      "license_declared": "AGPL-3.0-only",
+      "license_files": [
+        "tools/OpenSplat/LICENSE.txt"
+      ],
+      "name": "OpenSplat",
+      "paths": [
+        "tools/OpenSplat"
+      ],
+      "spdx_id": "SPDXRef-Package-OpenSplat",
+      "version": "1.1.5"
+    },
+    {
+      "distribution": "vendored",
+      "download_location": "https://github.com/nianticlabs/spz",
+      "license_declared": "MIT",
+      "license_files": [
+        "third_party/spz/LICENSE"
+      ],
+      "name": "spz",
+      "paths": [
+        "third_party/spz"
+      ],
+      "spdx_id": "SPDXRef-Package-spz",
+      "supplier": "Organization: Niantic Labs",
+      "version": "1.1.0"
+    },
+    {
+      "distribution": "vendored",
+      "download_location": "https://github.com/syoyo/tinygltf",
+      "license_declared": "MIT",
+      "license_files": [
+        "THIRD_PARTY_LICENSES.md"
+      ],
+      "name": "tinygltf",
+      "paths": [
+        "third_party/tinygltf/tiny_gltf.h"
+      ],
+      "spdx_id": "SPDXRef-Package-tinygltf",
+      "version": "NOASSERTION"
+    },
+    {
+      "distribution": "vendored",
+      "download_location": "https://github.com/nlohmann/json",
+      "license_declared": "MIT",
+      "license_files": [
+        "THIRD_PARTY_LICENSES.md"
+      ],
+      "name": "nlohmann-json",
+      "paths": [
+        "third_party/tinygltf/json.hpp"
+      ],
+      "spdx_id": "SPDXRef-Package-nlohmann-json",
+      "version": "3.10.4"
+    },
+    {
+      "distribution": "vendored",
+      "download_location": "NOASSERTION",
+      "license_declared": "NOASSERTION",
+      "license_files": [
+        "THIRD_PARTY_LICENSES.md"
+      ],
+      "name": "rene-nyffenegger-base64",
+      "paths": [
+        "third_party/tinygltf/tiny_gltf.h"
+      ],
+      "spdx_id": "SPDXRef-Package-rene-nyffenegger-base64",
+      "version": "NOASSERTION"
+    },
+    {
+      "distribution": "vendored",
+      "download_location": "https://github.com/davisking/dlib",
+      "license_declared": "BSL-1.0",
+      "license_files": [
+        "THIRD_PARTY_LICENSES.md"
+      ],
+      "name": "dlib-uri-decoder",
+      "paths": [
+        "third_party/tinygltf/tiny_gltf.h"
+      ],
+      "spdx_id": "SPDXRef-Package-dlib-uri-decoder",
+      "version": "NOASSERTION"
+    },
+    {
+      "distribution": "vendored",
+      "download_location": "https://github.com/nothings/stb",
+      "license_declared": "MIT",
+      "license_files": [
+        "THIRD_PARTY_LICENSES.md"
+      ],
+      "name": "stb-image",
+      "paths": [
+        "third_party/stb/stb_image.h"
+      ],
+      "spdx_id": "SPDXRef-Package-stb-image",
+      "version": "NOASSERTION"
+    },
+    {
+      "artifacts": [
+        {
+          "path": "viewer/vendor/spark.module.js",
+          "sha256": "c0355a962f68a6de9b13df69f05b1aba3614d9aec43a4504975daeb349126a8a",
+          "url": "https://sparkjs.dev/releases/spark/2.1.0/spark.module.js"
+        }
+      ],
+      "distribution": "external-runtime",
+      "download_location": "https://github.com/sparkjsdev/spark",
+      "evidence_paths": [
+        "viewer/fetch-assets.sh",
+        "viewer/THIRD_PARTY_NOTICES.md"
+      ],
+      "license_declared": "MIT",
+      "license_files": [
+        "viewer/THIRD_PARTY_NOTICES.md"
+      ],
+      "name": "Spark",
+      "spdx_id": "SPDXRef-Package-Spark",
+      "supplier": "Organization: World Labs Technologies, Inc.",
+      "version": "2.1.0"
+    },
+    {
+      "artifacts": [
+        {
+          "path": "viewer/vendor/three.module.js",
+          "sha256": "c8211c69345d2e9949dc7a8ac969380497aa0600a5a8ac6a459c8cd02dd9cb8a",
+          "url": "https://cdn.jsdelivr.net/npm/three@0.180.0/build/three.module.js"
+        },
+        {
+          "path": "viewer/vendor/three.core.js",
+          "sha256": "eb077d2417f61d3e6d9264c317cabc4ea35769ed6b0ab533067292a550784c20",
+          "url": "https://cdn.jsdelivr.net/npm/three@0.180.0/build/three.core.js"
+        },
+        {
+          "path": "viewer/vendor/addons/postprocessing/Pass.js",
+          "sha256": "444b409c235ead986893c472e720da1b779a56985c7d10b279c7944b52bd61c5",
+          "url": "https://cdn.jsdelivr.net/npm/three@0.180.0/examples/jsm/postprocessing/Pass.js"
+        }
+      ],
+      "distribution": "external-runtime",
+      "download_location": "https://github.com/mrdoob/three.js",
+      "evidence_paths": [
+        "viewer/fetch-assets.sh",
+        "viewer/THIRD_PARTY_NOTICES.md"
+      ],
+      "license_declared": "MIT",
+      "license_files": [
+        "viewer/THIRD_PARTY_NOTICES.md"
+      ],
+      "name": "three.js",
+      "spdx_id": "SPDXRef-Package-three.js",
+      "version": "r180"
+    }
+  ],
+  "dependency_manifests": [
+    "DA3coreml/coreml/Package.resolved",
+    "DA3coreml/da3_streaming/requirements.txt",
+    "DA3coreml/pyproject.toml",
+    "DA3coreml/requirements.txt",
+    "ml-sharp/pyproject.toml",
+    "ml-sharp/requirements.txt",
+    "third_party/spz/pyproject.toml",
+    "viewer/package-lock.json",
+    "viewer/src-tauri/Cargo.lock"
+  ],
+  "extracted_licenses": [
+    {
+      "license_id": "LicenseRef-Apple-Sample-Code",
+      "name": "Apple Sample Code License",
+      "see_also": [
+        "https://developer.apple.com/support/downloads/terms/apple-sample-code/Apple-Sample-Code-License.pdf"
+      ],
+      "text_file": "ml-sharp/LICENSE"
+    },
+    {
+      "license_id": "LicenseRef-Apple-ML-Research-Model",
+      "name": "Apple Machine Learning Research Model License Agreement",
+      "text_file": "ml-sharp/LICENSE_MODEL"
+    }
+  ],
+  "generator_path": "scripts/build_release_evidence.py",
+  "project": {
+    "download_location": "https://github.com/sepahead/melkor",
+    "evidence_builder": "https://github.com/sepahead/melkor/blob/main/scripts/build_release_evidence.py",
+    "license_declared": "MIT",
+    "name": "melkor",
+    "spdx_id": "SPDXRef-Package-melkor",
+    "supplier": "Person: Sepehr Mahmoudian",
+    "version_source": "CMakeLists.txt"
+  },
+  "schema_version": 1
+}

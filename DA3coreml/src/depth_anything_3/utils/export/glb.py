@@ -15,6 +15,7 @@
 from __future__ import annotations
 
 import os
+import shutil
 import numpy as np
 import trimesh
 
@@ -180,7 +181,10 @@ def export_to_glb(
 
     if export_depth_vis:
         export_to_depth_vis(prediction, export_dir)
-        os.system(f"cp -r {export_dir}/depth_vis/0000.jpg {export_dir}/scene.jpg")
+        shutil.copyfile(
+            os.path.join(export_dir, "depth_vis", "0000.jpg"),
+            os.path.join(export_dir, "scene.jpg"),
+        )
     return out_path
 
 

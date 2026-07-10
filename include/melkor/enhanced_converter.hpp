@@ -10,6 +10,8 @@ namespace melkor {
 
 // Configuration for enhanced conversion
 struct EnhancedConversionConfig {
+    bool use_gpu = true;                  // Allow Metal/CUDA acceleration
+
     // Adaptive scale estimation
     int knn_neighbors = 8;              // Number of neighbors for density estimation
     float scale_factor = 0.5f;          // Multiplier for computed scale

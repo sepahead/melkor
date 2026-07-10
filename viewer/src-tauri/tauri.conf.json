@@ -1,13 +1,13 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
   "productName": "melkor-viewer",
-  "version": "0.1.0",
+  "version": "2.0.0-rc.1",
   "identifier": "dev.melkor.viewer",
   "build": {
     "frontendDist": "../dist",
     "devUrl": "http://localhost:8771",
     "beforeDevCommand": "bun serve.js",
-    "beforeBuildCommand": "bun stage-dist.js"
+    "beforeBuildCommand": "bun make-static-demo.js && bun make-4d-demo.js && bun stage-dist.js"
   },
   "app": {
     "windows": [
@@ -16,11 +16,25 @@
         "width": 1280,
         "height": 800,
         "resizable": true,
-        "fullscreen": false
+        "fullscreen": false,
+        "dragDropEnabled": false
       }
     ],
     "security": {
-      "csp": null
+      "csp": {
+        "default-src": "'self' customprotocol: asset:",
+        "base-uri": "'none'",
+        "connect-src": "'self' ipc: http://ipc.localhost",
+        "font-src": "'self' data:",
+        "img-src": "'self' asset: http://asset.localhost blob: data:",
+        "object-src": "'none'",
+        "script-src": "'self' 'wasm-unsafe-eval'",
+        "style-src": "'self' 'unsafe-inline'",
+        "worker-src": "'self' blob: data:"
+      },
+      "headers": {
+        "X-Content-Type-Options": "nosniff"
+      }
     }
   },
   "bundle": {

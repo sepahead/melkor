@@ -16,6 +16,7 @@
 
 #include "melkor/enhanced_converter.hpp"
 #include "melkor/gaussian_data.hpp"
+#include "melkor/glb_reader.hpp"
 #include "melkor/ply_writer.hpp"
 
 #ifdef MELKOR_HAS_SPZ
@@ -30,6 +31,9 @@
 #include <cstdlib>
 #include <cstring>
 #include <filesystem>
+#include <fstream>
+#include <iterator>
+#include <limits>
 #include <string>
 #include <vector>
 
@@ -164,6 +168,13 @@ bool test_spz_sh_channel_order() {
 
     // Melkor's own decoder must transpose back to channel-major.
     SpzDecoder dec;
+    check(!dec.decodeFromBuffer(nullptr, 0).success &&
+          !dec.decodeFromBuffer(nullptr, 1).success,
+          "SPZ decoder rejects null and empty buffers");
+    const uint8_t dummy = 0;
+    check(!dec.decodeFromBuffer(
+              &dummy, static_cast<size_t>(std::numeric_limits<int32_t>::max()) + 1).success,
+          "SPZ decoder rejects sizes that would narrow to int32");
     auto round = dec.decodeFromFile(spz_path);
     bool round_ok = round.success && round.cloud.size() == 1 &&
                     round.cloud[0].sh_rest.size() == 9;
@@ -175,6 +186,218 @@ bool test_spz_sh_channel_order() {
     }
     check(round_ok, "melkor decode restores channel-major sh_rest");
     std::filesystem::remove(spz_path);
+    return true;
+}
+
+bool test_spz_encoder_input_validation() {
+    printf("[test] SPZ encoder rejects unsafe public-API inputs\n");
+    using namespace melkor;
+
+    SpzEncoder encoder;
+    SpzEncodeConfig config;
+    std::vector<uint8_t> buffer = {1, 2, 3};
+
+    GaussianCloud empty;
+    auto empty_result = encoder.encodeToBuffer(buffer, empty, config);
+    check(!empty_result.success && buffer.empty(),
+          "SPZ encoder rejects an empty cloud and clears stale output");
+
+    GaussianCloud cloud;
+    GaussianSplat splat{};
+    splat.opacity = 0.0f;
+    splat.scale_0 = splat.scale_1 = splat.scale_2 = -2.0f;
+    splat.rot_0 = 1.0f;
+    cloud.addSplat(splat);
+    cloud.setShDegree(0);
+
+    config.sh_degree = -1;
+    buffer = {9};
+    auto negative_degree = encoder.encodeToBuffer(buffer, cloud, config);
+    check(!negative_degree.success && buffer.empty() &&
+              negative_degree.error_message.find("requested SH degree") != std::string::npos,
+          "SPZ encoder rejects a negative requested SH degree");
+
+    config.sh_degree = 4;
+    auto high_degree = encoder.encodeToBuffer(buffer, cloud, config);
+    check(!high_degree.success &&
+              high_degree.error_message.find("requested SH degree") != std::string::npos,
+          "SPZ encoder rejects a requested SH degree above three");
+
+    config.sh_degree = 0;
+    cloud[0].x = std::numeric_limits<float>::quiet_NaN();
+    auto nonfinite = encoder.encodeToBuffer(buffer, cloud, config);
+    check(!nonfinite.success &&
+              nonfinite.error_message.find("nonfinite_position") != std::string::npos,
+          "SPZ encoder rejects non-finite positions before integer quantization");
+
+    const std::string preserved_path =
+        (std::filesystem::temp_directory_path() /
+         ("melkor_spz_preserve_" + std::to_string(getpid()) + ".spz")).string();
+    {
+        std::ofstream existing(preserved_path, std::ios::binary | std::ios::trunc);
+        existing << "preserve-existing-output";
+    }
+    auto invalid_file = encoder.encodeToFile(preserved_path, cloud, config);
+    std::ifstream preserved_stream(preserved_path, std::ios::binary);
+    const std::string preserved((std::istreambuf_iterator<char>(preserved_stream)),
+                                std::istreambuf_iterator<char>());
+    check(!invalid_file.success && preserved == "preserve-existing-output",
+          "SPZ validation failure preserves an existing destination file");
+    std::filesystem::remove(preserved_path);
+    cloud[0].x = 0.0f;
+
+    cloud[0].x = std::numeric_limits<float>::max();
+    auto position_range = encoder.encodeToBuffer(buffer, cloud, config);
+    check(!position_range.success &&
+              position_range.error_message.find("24-bit fixed-point range") != std::string::npos,
+          "SPZ encoder rejects finite positions that would overflow or wrap quantization");
+    cloud[0].x = 0.0f;
+
+    cloud[0].rot_0 = 0.0f;
+    auto zero_rotation = encoder.encodeToBuffer(buffer, cloud, config);
+    check(!zero_rotation.success &&
+              zero_rotation.error_message.find("zero_quaternion") != std::string::npos,
+          "SPZ encoder rejects a zero quaternion");
+    cloud[0].rot_0 = 1.0f;
+
+    cloud.setShDegree(1);
+    config.sh_degree = 1;
+    auto short_sh = encoder.encodeToBuffer(buffer, cloud, config);
+    check(!short_sh.success &&
+              short_sh.error_message.find("sh_count_mismatch") != std::string::npos,
+          "SPZ encoder rejects SH arrays that do not match the cloud degree");
+
+    cloud[0].sh_rest.assign(9, 0.0f);
+    cloud[0].sh_rest[0] = std::numeric_limits<float>::max();
+    auto unsafe_sh = encoder.encodeToBuffer(buffer, cloud, config);
+    check(!unsafe_sh.success &&
+              unsafe_sh.error_message.find("safe quantization range") != std::string::npos,
+          "SPZ encoder rejects finite SH values that would overflow float-to-int conversion");
+
+    // Lower-degree export must retain the first coefficients from each source
+    // channel, not treat the shortened destination stride as the source stride.
+    GaussianCloud degree_three;
+    GaussianSplat degree_three_splat = splat;
+    degree_three_splat.sh_rest.resize(45);
+    for (int coefficient = 0; coefficient < 15; ++coefficient) {
+        degree_three_splat.sh_rest[coefficient] = -0.8f + 0.03f * coefficient;
+        degree_three_splat.sh_rest[15 + coefficient] = -0.2f + 0.02f * coefficient;
+        degree_three_splat.sh_rest[30 + coefficient] = 0.3f - 0.01f * coefficient;
+    }
+    degree_three.addSplat(degree_three_splat);
+    degree_three.setShDegree(3);
+    config.sh_degree = 1;
+    auto truncated_degree = encoder.encodeToBuffer(buffer, degree_three, config);
+    spz::UnpackOptions unpack_options;
+    unpack_options.to = spz::CoordinateSystem::RDF;
+    const auto truncated_cloud = truncated_degree.success
+        ? spz::loadSpz(buffer.data(), static_cast<int32_t>(buffer.size()), unpack_options)
+        : spz::GaussianCloud{};
+    bool truncated_channels_ok = truncated_cloud.numPoints == 1 &&
+                                 truncated_cloud.shDegree == 1 &&
+                                 truncated_cloud.sh.size() == 9;
+    if (truncated_channels_ok) {
+        const float expected[9] = {
+            degree_three_splat.sh_rest[0], degree_three_splat.sh_rest[15],
+            degree_three_splat.sh_rest[30], degree_three_splat.sh_rest[1],
+            degree_three_splat.sh_rest[16], degree_three_splat.sh_rest[31],
+            degree_three_splat.sh_rest[2], degree_three_splat.sh_rest[17],
+            degree_three_splat.sh_rest[32],
+        };
+        for (int coefficient = 0; coefficient < 9; ++coefficient) {
+            if (std::abs(truncated_cloud.sh[coefficient] - expected[coefficient]) > 0.09f) {
+                truncated_channels_ok = false;
+            }
+        }
+    }
+    check(truncated_degree.success && truncated_channels_ok,
+          "SPZ lower-degree export preserves source channel strides");
+
+    cloud[0].sh_rest.clear();
+    cloud.setShDegree(4);
+    config.sh_degree = 3;
+    auto invalid_cloud_degree = encoder.encodeToBuffer(buffer, cloud, config);
+    check(!invalid_cloud_degree.success &&
+              invalid_cloud_degree.error_message.find("cloud SH degree") != std::string::npos,
+          "SPZ encoder rejects an invalid cloud SH degree");
+
+    cloud.setShDegree(0);
+    config.sh_degree = 0;
+    cloud[0].rot_0 = cloud[0].rot_1 = cloud[0].rot_2 = cloud[0].rot_3 =
+        std::numeric_limits<float>::max();
+    auto valid = encoder.encodeToBuffer(buffer, cloud, config);
+    const auto normalized_cloud = valid.success
+        ? spz::loadSpz(buffer.data(), static_cast<int32_t>(buffer.size()), unpack_options)
+        : spz::GaussianCloud{};
+    bool normalized_finite = normalized_cloud.numPoints == 1 &&
+                             normalized_cloud.rotations.size() == 4;
+    if (normalized_finite) {
+        for (float component : normalized_cloud.rotations) {
+            normalized_finite &= std::isfinite(component);
+        }
+    }
+    check(valid.success && !buffer.empty() && normalized_finite,
+          "SPZ encoder safely normalizes a finite large quaternion");
+
+    GaussianCloud alpha_endpoints;
+    for (const float probability : {0.0f, 1.0f}) {
+        GaussianSplat endpoint = splat;
+        endpoint.opacity = utils::logit(probability);
+        alpha_endpoints.addSplat(endpoint);
+    }
+    alpha_endpoints.setShDegree(0);
+    auto endpoint_encode = encoder.encodeToBuffer(buffer, alpha_endpoints, config);
+    auto endpoint_decode = endpoint_encode.success
+        ? SpzDecoder{}.decodeFromBuffer(buffer.data(), buffer.size())
+        : SpzDecoder::DecodeResult{};
+    const bool finite_endpoints = endpoint_decode.success &&
+                                  endpoint_decode.cloud.size() == 2 &&
+                                  std::isfinite(endpoint_decode.cloud[0].opacity) &&
+                                  std::isfinite(endpoint_decode.cloud[1].opacity);
+    check(finite_endpoints,
+          "SPZ alpha bytes 0 and 255 decode to finite endpoint logits");
+    return true;
+}
+
+bool test_spz_fractional_bits_validation() {
+    printf("[test] SPZ fixed-point fractional-bit validation\n");
+    using namespace melkor;
+
+    auto make_spz = [](uint8_t fractional_bits) {
+        // v3, one degree-0 point: 16-byte header followed by 20 bytes of
+        // positions/alpha/color/scale/smallest-three rotation data.
+        std::vector<uint8_t> unpacked(16 + 20, 0);
+        auto write_le32 = [&](size_t offset, uint32_t value) {
+            for (size_t byte = 0; byte < 4; ++byte) {
+                unpacked[offset + byte] =
+                    static_cast<uint8_t>((value >> (byte * 8)) & 0xffu);
+            }
+        };
+        write_le32(0, 0x5053474eu);
+        write_le32(4, 3u);
+        write_le32(8, 1u);
+        unpacked[12] = 0;  // SH degree
+        unpacked[13] = fractional_bits;
+
+        std::vector<uint8_t> compressed;
+        const bool compressed_ok =
+            spz::compressGzipped(unpacked.data(), unpacked.size(), &compressed);
+        check(compressed_ok, "crafted SPZ fixture compresses");
+        return compressed;
+    };
+
+    const auto boundary = make_spz(23);
+    const auto boundary_result =
+        SpzDecoder{}.decodeFromBuffer(boundary.data(), boundary.size());
+    check(boundary_result.success && boundary_result.cloud.size() == 1 &&
+              std::isfinite(boundary_result.cloud[0].x),
+          "23 fractional bits are accepted for a signed 24-bit coordinate");
+
+    const auto invalid = make_spz(255);
+    const auto invalid_result =
+        SpzDecoder{}.decodeFromBuffer(invalid.data(), invalid.size());
+    check(!invalid_result.success && invalid_result.cloud.empty(),
+          "fractional-bit counts wider than the signed 24-bit field are rejected");
     return true;
 }
 #endif
@@ -224,6 +447,220 @@ bool test_enhanced_converter_short_attributes() {
     check(single.success && single.cloud.size() == 1 &&
           std::isfinite(single.cloud[0].scale_0),
           "single-point input yields one finite splat");
+
+    // Grid coordinates must be relative to the cloud origin. Absolute hashing
+    // casts a large finite translation to int (undefined behavior) even when
+    // the local shape and distances are completely ordinary.
+    auto translated = converter.convertFromMesh(
+        {1.0e30f, 0.0f, 0.0f, 1.0e30f, 1.0f, 0.0f}, {}, {}, {}, cfg);
+    check(translated.success && translated.cloud.size() == 2 &&
+              std::isfinite(translated.cloud[0].scale_0) &&
+              std::isfinite(translated.cloud[1].scale_0),
+          "large finite translations are hashed without integer overflow");
+    return true;
+}
+
+// ---- Test 1d: enhanced glTF extraction validates untrusted accessors ------
+bool test_enhanced_converter_accessor_validation() {
+    printf("[test] enhanced converter glTF accessor validation\n");
+    using namespace melkor;
+
+    const auto base = std::filesystem::temp_directory_path() /
+        ("melkor_enhanced_accessor_" + std::to_string(getpid()));
+    const auto gltf_path = base.string() + ".gltf";
+    const auto bin_path = base.string() + ".bin";
+    const auto bin_name = std::filesystem::path(bin_path).filename().string();
+
+    // TinyGLTF accepts the container, but the accessor claims 100 VEC3 values
+    // in a 12-byte buffer. The enhanced path must reject it before reading.
+    {
+        std::ofstream bin(bin_path, std::ios::binary);
+        const float point[3] = {1.0f, 2.0f, 3.0f};
+        bin.write(reinterpret_cast<const char*>(point), sizeof(point));
+    }
+    {
+        std::ofstream gltf(gltf_path);
+        gltf << "{\"asset\":{\"version\":\"2.0\"},"
+                "\"buffers\":[{\"uri\":\"" << bin_name << "\",\"byteLength\":12}],"
+                "\"bufferViews\":[{\"buffer\":0,\"byteOffset\":0,\"byteLength\":12}],"
+                "\"accessors\":[{\"bufferView\":0,\"componentType\":5126,"
+                "\"count\":100,\"type\":\"VEC3\"}],"
+                "\"meshes\":[{\"primitives\":[{\"attributes\":{\"POSITION\":0}}]}],"
+                "\"nodes\":[{\"mesh\":0}],\"scenes\":[{\"nodes\":[0]}],\"scene\":0}";
+    }
+
+    EnhancedConverter converter(nullptr);
+    EnhancedConversionConfig cfg;
+    cfg.knn_neighbors = 1;
+    auto malformed = converter.convertFromFile(gltf_path, cfg);
+    check(!malformed.success && malformed.cloud.empty(),
+          "oversized accessor span is rejected without producing splats");
+    GlbReader basic_reader;
+    auto malformed_basic = basic_reader.loadFromFile(gltf_path);
+    check(!malformed_basic.success && malformed_basic.cloud.empty(),
+          "basic reader rejects the same oversized accessor span");
+
+    // Exercise alignment-safe scalar decoding with a valid point beginning at
+    // byte offset 1. memcpy-based reads are defined even when the source is not
+    // naturally aligned; a reinterpret_cast<float*> read is not.
+    {
+        std::ofstream bin(bin_path, std::ios::binary | std::ios::trunc);
+        const char prefix = 0;
+        const float point[3] = {1.0f, 2.0f, 3.0f};
+        bin.write(&prefix, 1);
+        bin.write(reinterpret_cast<const char*>(point), sizeof(point));
+    }
+    {
+        std::ofstream gltf(gltf_path, std::ios::trunc);
+        gltf << "{\"asset\":{\"version\":\"2.0\"},"
+                "\"buffers\":[{\"uri\":\"" << bin_name << "\",\"byteLength\":13}],"
+                "\"bufferViews\":[{\"buffer\":0,\"byteOffset\":1,\"byteLength\":12}],"
+                "\"accessors\":[{\"bufferView\":0,\"componentType\":5126,"
+                "\"count\":1,\"type\":\"VEC3\"}],"
+                "\"meshes\":[{\"primitives\":[{\"attributes\":{\"POSITION\":0}}]}],"
+                "\"nodes\":[{\"mesh\":0}],\"scenes\":[{\"nodes\":[0]}],\"scene\":0}";
+    }
+    auto unaligned = converter.convertFromFile(gltf_path, cfg);
+    check(unaligned.success && unaligned.cloud.size() == 1 &&
+          std::abs(unaligned.cloud[0].x - 1.0f) < 1e-6f &&
+          std::abs(unaligned.cloud[0].y + 3.0f) < 1e-6f &&
+          std::abs(unaligned.cloud[0].z - 2.0f) < 1e-6f,
+          "unaligned float accessor is decoded safely");
+
+    auto basic_unaligned = basic_reader.loadFromFile(gltf_path);
+    check(basic_unaligned.success && basic_unaligned.cloud.size() == 1 &&
+          std::abs(basic_unaligned.cloud[0].x - 1.0f) < 1e-6f,
+          "basic reader decodes an unaligned float accessor safely");
+    auto null_memory = basic_reader.loadFromMemory(nullptr, 0);
+    check(!null_memory.success, "null in-memory glTF input is rejected");
+    const std::string external_memory_gltf =
+        "{\"asset\":{\"version\":\"2.0\"},"
+        "\"buffers\":[{\"uri\":\"" + bin_name + "\",\"byteLength\":13}],"
+        "\"bufferViews\":[{\"buffer\":0,\"byteOffset\":1,\"byteLength\":12}],"
+        "\"accessors\":[{\"bufferView\":0,\"componentType\":5126,"
+        "\"count\":1,\"type\":\"VEC3\"}],"
+        "\"meshes\":[{\"primitives\":[{\"attributes\":{\"POSITION\":0}}]}]}";
+    auto inherited_root = basic_reader.loadFromMemory(
+        reinterpret_cast<const uint8_t*>(external_memory_gltf.data()),
+        external_memory_gltf.size());
+    check(!inherited_root.success,
+          "in-memory glTF cannot inherit an external-file root from a prior load");
+    GlbConversionConfig invalid_cfg;
+    invalid_cfg.default_scale = 0.0f;
+    auto invalid_config = basic_reader.loadFromFile(gltf_path, invalid_cfg);
+    check(!invalid_config.success, "invalid GLB conversion configuration is rejected");
+
+    // Active-scene traversal must apply node TRS, preserve mesh instancing,
+    // ignore inactive scenes, and transform normals with inverse transpose.
+    {
+        std::ofstream bin(bin_path, std::ios::binary | std::ios::trunc);
+        const float values[6] = {1.0f, 2.0f, 3.0f, 1.0f, 1.0f, 0.0f};
+        bin.write(reinterpret_cast<const char*>(values), sizeof(values));
+    }
+    {
+        std::ofstream gltf(gltf_path, std::ios::trunc);
+        gltf << "{\"asset\":{\"version\":\"2.0\"},"
+                "\"buffers\":[{\"uri\":\"" << bin_name << "\",\"byteLength\":24}],"
+                "\"bufferViews\":[{\"buffer\":0,\"byteOffset\":0,\"byteLength\":12},"
+                "{\"buffer\":0,\"byteOffset\":12,\"byteLength\":12}],"
+                "\"accessors\":[{\"bufferView\":0,\"componentType\":5126,\"count\":1,\"type\":\"VEC3\"},"
+                "{\"bufferView\":1,\"componentType\":5126,\"count\":1,\"type\":\"VEC3\"}],"
+                "\"meshes\":[{\"primitives\":[{\"attributes\":{\"POSITION\":0,\"NORMAL\":1}}]}],"
+                "\"nodes\":[{\"mesh\":0,\"translation\":[10,0,0]},"
+                "{\"mesh\":0,\"translation\":[0,5,0],\"scale\":[2,1,1]},"
+                "{\"mesh\":0,\"translation\":[100,0,0]}],"
+                "\"scenes\":[{\"nodes\":[0,1]},{\"nodes\":[2]}],\"scene\":0}";
+    }
+    auto transformed = converter.convertFromFile(gltf_path, cfg);
+    check(transformed.success && transformed.cloud.size() == 2,
+          "enhanced reader traverses active scene and preserves mesh instances");
+    if (transformed.cloud.size() == 2) {
+        check(std::abs(transformed.cloud[0].x - 11.0f) < 1e-5f &&
+              std::abs(transformed.cloud[0].y + 3.0f) < 1e-5f &&
+              std::abs(transformed.cloud[0].z - 2.0f) < 1e-5f &&
+              std::abs(transformed.cloud[1].x - 2.0f) < 1e-5f &&
+              std::abs(transformed.cloud[1].y + 3.0f) < 1e-5f &&
+              std::abs(transformed.cloud[1].z - 7.0f) < 1e-5f,
+              "node translations and non-uniform scale affect positions");
+        float rotation[9];
+        utils::quatToRotationMatrix(transformed.cloud[1].rot_0,
+                                    transformed.cloud[1].rot_1,
+                                    transformed.cloud[1].rot_2,
+                                    transformed.cloud[1].rot_3, rotation);
+        check(std::abs(rotation[2] - 0.4472136f) < 1e-4f &&
+              std::abs(rotation[5]) < 1e-4f &&
+              std::abs(rotation[8] - 0.8944272f) < 1e-4f,
+              "non-uniform node scale uses inverse-transpose normal transform");
+    }
+    auto transformed_basic = basic_reader.loadFromFile(gltf_path);
+    check(transformed_basic.success && transformed_basic.cloud.size() == 2 &&
+          std::abs(transformed_basic.cloud[0].x - 11.0f) < 1e-5f &&
+          std::abs(transformed_basic.cloud[1].z - 7.0f) < 1e-5f,
+          "basic reader applies active-scene node transforms and instancing");
+
+    // A malformed primitive after a valid one must fail the complete asset;
+    // enhanced conversion may not silently emit only the valid prefix.
+    {
+        std::ofstream gltf(gltf_path, std::ios::trunc);
+        gltf << "{\"asset\":{\"version\":\"2.0\"},"
+                "\"buffers\":[{\"uri\":\"" << bin_name << "\",\"byteLength\":24}],"
+                "\"bufferViews\":[{\"buffer\":0,\"byteOffset\":0,\"byteLength\":12}],"
+                "\"accessors\":[{\"bufferView\":0,\"componentType\":5126,"
+                "\"count\":1,\"type\":\"VEC3\"}],"
+                "\"meshes\":[{\"primitives\":[{\"attributes\":{\"POSITION\":0}},"
+                "{\"attributes\":{\"POSITION\":99}}]}],"
+                "\"nodes\":[{\"mesh\":0}],\"scenes\":[{\"nodes\":[0]}],\"scene\":0}";
+    }
+    auto partial_enhanced = converter.convertFromFile(gltf_path, cfg);
+    auto partial_basic = basic_reader.loadFromFile(gltf_path);
+    check(!partial_enhanced.success && !partial_basic.success,
+          "basic and enhanced readers reject a partially malformed mesh");
+
+    const auto write_invalid_optional_attribute = [&](const char* attribute) {
+        std::ofstream gltf(gltf_path, std::ios::trunc);
+        gltf << "{\"asset\":{\"version\":\"2.0\"},"
+                "\"buffers\":[{\"uri\":\"" << bin_name << "\",\"byteLength\":24}],"
+                "\"bufferViews\":[{\"buffer\":0,\"byteOffset\":0,\"byteLength\":12}],"
+                "\"accessors\":[{\"bufferView\":0,\"componentType\":5126,"
+                "\"count\":1,\"type\":\"VEC3\"}],"
+                "\"meshes\":[{\"primitives\":[{\"attributes\":{\"POSITION\":0,\""
+             << attribute << "\":99}}]}],"
+                "\"nodes\":[{\"mesh\":0}],\"scenes\":[{\"nodes\":[0]}],\"scene\":0}";
+    };
+    for (const char* attribute : {"COLOR_0", "NORMAL"}) {
+        write_invalid_optional_attribute(attribute);
+        const std::string message = std::string("malformed ") + attribute +
+                                    " is rejected consistently by both readers";
+        check(!converter.convertFromFile(gltf_path, cfg).success &&
+                  !basic_reader.loadFromFile(gltf_path).success,
+              message.c_str());
+    }
+
+    const auto write_graph_fixture = [&](const std::string& nodes,
+                                         const std::string& scene = "{\"nodes\":[0]}") {
+        std::ofstream gltf(gltf_path, std::ios::trunc);
+        gltf << "{\"asset\":{\"version\":\"2.0\"},"
+                "\"buffers\":[{\"uri\":\"" << bin_name << "\",\"byteLength\":24}],"
+                "\"bufferViews\":[{\"buffer\":0,\"byteOffset\":0,\"byteLength\":12}],"
+                "\"accessors\":[{\"bufferView\":0,\"componentType\":5126,"
+                "\"count\":1,\"type\":\"VEC3\"}],"
+                "\"meshes\":[{\"primitives\":[{\"attributes\":{\"POSITION\":0}}]}],"
+                "\"nodes\":" << nodes << ",\"scenes\":[" << scene << "],\"scene\":0}";
+    };
+    const auto graph_is_rejected = [&]() {
+        return !converter.convertFromFile(gltf_path, cfg).success &&
+               !basic_reader.loadFromFile(gltf_path).success;
+    };
+
+    write_graph_fixture("[{\"mesh\":0,\"children\":[1]},{\"children\":[0]}]");
+    check(graph_is_rejected(), "cyclic node graphs are rejected by both readers");
+    write_graph_fixture("[{\"mesh\":0,\"children\":[99]}]");
+    check(graph_is_rejected(), "out-of-range child nodes are rejected by both readers");
+    write_graph_fixture("[{\"mesh\":99}]");
+    check(graph_is_rejected(), "out-of-range node meshes are rejected by both readers");
+
+    std::filesystem::remove(gltf_path);
+    std::filesystem::remove(bin_path);
     return true;
 }
 
@@ -231,6 +668,11 @@ bool test_enhanced_converter_short_attributes() {
 bool test_ply_reader() {
     printf("[test] header-driven PLY reader\n");
     using namespace melkor;
+
+    PlyReader invalid_buffer_reader;
+    check(!invalid_buffer_reader.readFromBuffer(nullptr, 0).success &&
+          !invalid_buffer_reader.readFromBuffer(nullptr, 1).success,
+          "null and empty PLY buffers fail closed");
 
     // 2a: classic 3DGS ascii.
     const char* hdr1 =
@@ -435,9 +877,12 @@ int main() {
     test_ply_reader();
     test_pca_normals();
     test_enhanced_converter_short_attributes();
+    test_enhanced_converter_accessor_validation();
 #ifdef MELKOR_HAS_SPZ
     test_spz_quaternion_order();
     test_spz_sh_channel_order();
+    test_spz_encoder_input_validation();
+    test_spz_fractional_bits_validation();
 #else
     printf("[skip] SPZ tests (built without MELKOR_HAS_SPZ)\n");
 #endif
