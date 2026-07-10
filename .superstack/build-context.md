@@ -9,8 +9,8 @@
 |---|---|
 | Template | Polyglot native/ML/viewer repository |
 | Architecture pattern | C++17 core and CLI, CPU/Metal/CUDA providers, Python DA3 bridge, Spark/Three web viewer, Tauri desktop shell |
-| Completed at | 2026-07-10T23:20:34Z |
-| Reviewed baseline | Full repository history and complete `2.0.0-rc.1` candidate tree; commit IDs intentionally deferred until the owner-attribution rewrite |
+| Completed at | 2026-07-10T23:49:18Z |
+| Reviewed baseline | Rewritten 43-commit history and complete `2.0.0-rc.1` candidate tree; final handoff commit follows the rewritten RC tree |
 
 ### Skills Installed
 
@@ -26,7 +26,7 @@
 | Maintained source surfaces reviewed | Yes |
 | Local test matrix passing | Yes |
 | CI matrix hardened | Yes; ordinary CI and source-evidence workflow now run for `v*-rc.*` tags and must pass remotely after commit |
-| Source release candidate | Code-ready at `2.0.0-rc.1`; cut requires clean commit, annotated tag, and green tag CI |
+| Source release candidate | Code-ready at `2.0.0-rc.1`; rewritten `main` is pushed, while the annotated tag remains gated on final main CI |
 | Signed/notarized production bundles | No; RC evidence is deliberately unsigned and production signing remains an explicit gate |
 | Devnet deployed | No; not applicable to this non-Solana project |
 | Mainnet deployed | No; not applicable to this non-Solana project |
@@ -51,7 +51,8 @@
 - [x] Apply viewer allowlisting after canonical path resolution and cover encoded prefix traversal.
 - [x] Make release-evidence fixture commits independent of developers' global GPG-signing configuration.
 - [x] Correct project owner attribution to Sepehr Mahmoudian across license, notice, release metadata, desktop metadata, staged assets, and rebuilt binaries.
-- [ ] Rewrite every reachable commit and both existing annotated tags to remove the incorrect historical attribution, then verify fresh-clone objects.
+- [x] Rewrite every reachable commit and both existing annotated tags to remove the incorrect historical attribution; local and fresh GitHub mirror object scans pass.
+- [ ] Obtain GitHub Support cache garbage collection: obsolete unreferenced SHAs/blobs remain directly addressable even though no advertised branch, tag, pull request, or fork contains them.
 - [ ] Add tag-protected binary signing, notarization, binary SBOM, and artifact attestation.
 - [ ] Qualify CUDA at runtime on representative NVIDIA hardware.
 - [ ] Lock DA3 transitive Python packages per supported CUDA/Python matrix.
@@ -74,7 +75,8 @@
 
 | Severity | Area | Finding | Required action |
 |---|---|---|---|
-| Medium | RC cut | The reviewed tree is still dirty and tag CI cannot run before commit | Review/commit, create annotated `v2.0.0-rc.1`, and require all tag CI/evidence jobs green |
+| Medium | GitHub object cache | Advertised refs, fresh clones, current PRs, and all forks are clean, but GitHub still serves the obsolete unreferenced commit and two replaced blobs by SHA | With explicit authorization, request GitHub Support cache removal/server GC using first changed commit `e815eae05d07b2416009b3ea23d92465be542fa2`; affected pre-rewrite PRs: 0; forks: 0 |
+| Medium | RC tag | The annotated RC tag is intentionally not cut before the rewritten main tip is green | Require final main CI green, then create annotated `v2.0.0-rc.1` and require all tag CI/evidence jobs green |
 | Medium | Distribution | RC source evidence is unsigned; there is no production binary signing/notarization/SBOM/attestation pipeline | Implement and verify the production gates in `docs/RELEASE.md` before publishing desktop bundles |
 | Medium | Hardware validation | CUDA is compile-gated but was not runtime-tested in this Apple-hosted review | Run provider parity and representative workloads on a real NVIDIA matrix |
 | Medium | ML reproducibility | DA3 source/checkpoints are immutable, but upstream Python transitive packages still resolve dynamically | Publish tested lockfiles per Python, PyTorch, and CUDA combination |

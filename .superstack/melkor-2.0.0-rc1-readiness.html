@@ -13,7 +13,7 @@
   <header>
     <div class="eyebrow">Release readiness · 11 July 2026</div>
     <h1>2.0.0-rc.1 is code-ready.</h1>
-    <p class="lede">The source candidate has two meaningful user-facing additions, closes every hostile-input finding discovered across three independent review passes, and produces deterministic release evidence. The annotated tag remains a deliberate post-push action after the rewritten main history and remote CI are verified.</p>
+    <p class="lede">The source candidate has two meaningful user-facing additions, closes every hostile-input finding discovered across three independent review passes, and produces deterministic release evidence. Rewritten GitHub refs and fresh clones are clean; a GitHub Support cache purge and green final main CI remain before the annotated tag.</p>
   </header>
   <main>
     <section class="verdict">
@@ -69,6 +69,7 @@
         <table>
           <thead><tr><th>Scope</th><th>Status</th><th>Closure</th></tr></thead>
           <tbody>
+            <tr><td>Cached old Git objects</td><td class="pending">Support purge required</td><td>No branch, tag, pull request, fork, local object, or fresh-clone object contains the incorrect attribution. GitHub still serves the obsolete unreferenced SHA/blobs through cached direct URLs; server GC/cache removal requires a Support request.</td></tr>
             <tr><td>RC tag</td><td class="pending">Deliberately not cut</td><td>Verify rewritten <code>main</code> and its remote CI first; then push annotated <code>v2.0.0-rc.1</code> and require every tag CI/evidence job green.</td></tr>
             <tr><td>CUDA support claim</td><td class="pending">Compile-gated only</td><td>Run provider parity and representative workloads on advertised NVIDIA compute capabilities.</td></tr>
             <tr><td>Desktop production release</td><td class="pending">Unsigned</td><td>Add protected identities, macOS notarization, platform signing, binary SBOMs, attestations, and clean-environment verification.</td></tr>
@@ -78,6 +79,6 @@
       </div>
     </section>
   </main>
-  <footer>Review scope: full repository history and the complete 2.0.0-rc.1 candidate tree. Commit identifiers are intentionally omitted because the owner-attribution history rewrite changes every reachable commit. Host-qualified locally: macOS / Apple Metal. Final matrix completed 11 July 2026 (CEST).</footer>
+  <footer>Review scope: rewritten 43-commit repository history and the complete 2.0.0-rc.1 candidate tree. Advertised GitHub refs and fresh-mirror objects were verified clean after the owner-attribution rewrite; obsolete cached SHA pages still require GitHub Support removal. Host-qualified locally: macOS / Apple Metal. Final matrix completed 11 July 2026 (CEST).</footer>
 </body>
 </html>
