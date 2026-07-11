@@ -13,12 +13,12 @@
   <header>
     <div class="eyebrow">Release readiness · 11 July 2026</div>
     <h1>2.0.0-rc.1 is code-ready.</h1>
-    <p class="lede">The source candidate has two meaningful user-facing additions, closes every hostile-input finding discovered across three independent review passes, and produces deterministic release evidence. Rewritten GitHub refs and fresh clones are clean; a GitHub Support cache purge and green final main CI remain before the annotated tag.</p>
+    <p class="lede">The source candidate adds meaningful diagnostics and viewer workflows, closes every hostile-input finding discovered across three independent review passes, and produces deterministic release evidence. The code-candidate main CI is green and the annotated tag is ready to cut; GitHub's obsolete-object cache remains Support-pending without blocking the clean current refs.</p>
   </header>
   <main>
     <section class="verdict">
       <h2>Verdict</h2>
-      <p><strong>Locally ready as the first source release candidate.</strong> No known critical or high-severity code findings remain in the maintained surface. This verdict does not authorize publishing unsigned desktop binaries: signing/notarization, NVIDIA runtime qualification, and locked DA3 environments remain production gates.</p>
+      <p><strong>Ready as the first source release candidate, validated locally and by <a href="https://github.com/sepahead/melkor/actions/runs/29142366926">code-candidate main CI 29142366926</a>.</strong> No known critical or high-severity code findings remain in the maintained surface. This verdict does not authorize publishing unsigned desktop binaries: signing/notarization, NVIDIA runtime qualification, and locked DA3 environments remain production gates.</p>
       <span class="pill">0 critical</span><span class="pill">0 high</span><span class="pill warn">3 external/production gates</span>
     </section>
 
@@ -33,7 +33,7 @@
     </section>
 
     <section>
-      <h2>Final local evidence</h2>
+      <h2>Final validation evidence</h2>
       <div class="table" role="region" aria-label="Release validation matrix" tabindex="0">
         <table>
           <thead><tr><th>Gate</th><th>Result</th><th>Evidence</th></tr></thead>
@@ -41,13 +41,13 @@
             <tr><td>Metal release + warnings-as-errors</td><td class="pass">13 / 13</td><td>Core, inspector, no-SPZ API, format fuzz, providers, densifier, CLI, gradients, Python, metadata, evidence.</td></tr>
             <tr><td>ASan + UBSan</td><td class="pass">13 / 13</td><td>Fail-fast execution covers malformed graphs/records, sparse accessors, large translated clouds, SPZ alpha endpoints/fractional-bit bounds, and finite/non-finite quantization boundaries; leak detection is disabled because Apple ASan does not support it.</td></tr>
             <tr><td>CPU/stub release + warnings-as-errors</td><td class="pass">12 / 12</td><td>Portable link topology and no-GPU inspector behavior.</td></tr>
-            <tr><td>Viewer / Chromium</td><td class="pass">23 / 23</td><td>All scene formats, local offline open, repeat-open, drag/drop, canonical private-path rejection, transactional replacement/recovery, mobile, cameras, and 4D buffering/seek/retry.</td></tr>
+            <tr><td>Viewer / Chromium</td><td class="pass">Local 23 / 23; CI 21 pass + 2 skip</td><td>Full local browser rendering covers every scene format. Hosted SwiftShader software-compositor CI passes all 21 available tests and intentionally skips the optional native-generated PLY and SPZ-packed 4D asset cases. Coverage includes bundled <code>?scene=&lt;id&gt;</code> deep links and URL synchronization, local offline open/repeat-open/drag/drop, canonical private-path rejection, transactional replacement/recovery, mobile, cameras, and 4D buffering/seek/retry.</td></tr>
             <tr><td>Tauri / Rust 1.88</td><td class="pass">Pass</td><td>fmt, clippy −D warnings, locked check, cargo-deny, regenerated notices, release binary, and unsigned macOS <code>.app</code> bundle at 2.0.0-rc.1.</td></tr>
             <tr><td>Swift CoreML quarantine</td><td class="pass">Build + 4 tests</td><td>Only infer and benchmark remain exposed.</td></tr>
-            <tr><td>Python, shell, workflows</td><td class="pass">Pass</td><td>Ruff 0.15.18, Bash syntax, actionlint 1.7.7, hermetic signed-commit fixture coverage, and diff whitespace.</td></tr>
+            <tr><td>Python, shell, workflows</td><td class="pass">Pass</td><td>Ruff 0.15.18, Bash syntax, actionlint 1.7.11, hermetic signed-commit fixture coverage, and diff whitespace.</td></tr>
             <tr><td>Dependency policy</td><td class="pass">Pass</td><td>npm audit reports zero vulnerabilities; cargo-deny advisories/bans/licenses/sources passes.</td></tr>
             <tr><td>Native install</td><td class="pass">Pass</td><td>CLI, Metal library, SPZ tools, project license, notice, and third-party licenses installed; version reports 2.0.0-rc.1.</td></tr>
-            <tr><td>Release evidence contract</td><td class="pass">9 / 9</td><td>Generator/ref binding, reproducibility, annotated-tag binding, inventory/license completeness, LFS rejection, and nested/unlisted payload detection. Exact-commit build and self-verification are repeated after the final history rewrite.</td></tr>
+            <tr><td>Release evidence contract</td><td class="pass">9 / 9</td><td>Generator/ref binding, reproducibility, annotated-tag binding, inventory/license completeness, LFS rejection, and nested/unlisted payload detection. Exact-commit evidence for <code>cfdc6fe3e3d4a6cdde2a38e8b94f74a32f36ac7d</code> contains 496 source files and self-verifies.</td></tr>
           </tbody>
         </table>
       </div>
@@ -57,9 +57,9 @@
       <h2>Material RC changes</h2>
       <div class="grid">
         <article class="card"><h3>Inspect</h3><p><code>melkor inspect</code> emits deterministic human or <code>melkor.inspect.v1</code> JSON diagnostics without provider/GPU initialization or source mutation.</p></article>
-        <article class="card"><h3>Local viewer</h3><p>Picker and drag/drop open private local splats offline; failed candidates preserve the active static or 4D scene, while canonical server allowlisting blocks encoded prefix traversal.</p></article>
+        <article class="card"><h3>Viewer</h3><p>Picker and drag/drop open private local splats offline; bundled <code>?scene=&lt;id&gt;</code> links synchronize successful scene choices into the URL; failed candidates preserve the active static or 4D scene; canonical server allowlisting blocks encoded prefix traversal.</p></article>
         <article class="card"><h3>Input boundaries</h3><p>glTF resource containment and sparse-accessor rejection, required-extension/version rejection, PLY typed scalars/SH semantics, and format-derived SPZ inflation/fixed-point bounds.</p></article>
-        <article class="card"><h3>Release evidence</h3><p>A tag-bound source archive, file manifest, SPDX 2.3 SBOM, unsigned provenance, and aggregate checksums verify themselves deterministically.</p></article>
+        <article class="card"><h3>Release evidence</h3><p>The tag workflow generates a tag-bound source archive, file manifest, SPDX 2.3 SBOM, unsigned provenance, and aggregate checksums that verify themselves deterministically.</p></article>
       </div>
     </section>
 
@@ -69,8 +69,8 @@
         <table>
           <thead><tr><th>Scope</th><th>Status</th><th>Closure</th></tr></thead>
           <tbody>
-            <tr><td>Cached old Git objects</td><td class="pending">Support purge required</td><td>No branch, tag, pull request, fork, local object, or fresh-clone object contains the incorrect attribution. GitHub still serves the obsolete unreferenced SHA/blobs through cached direct URLs; server GC/cache removal requires a Support request.</td></tr>
-            <tr><td>RC tag</td><td class="pending">Deliberately not cut</td><td>Verify rewritten <code>main</code> and its remote CI first; then push annotated <code>v2.0.0-rc.1</code> and require every tag CI/evidence job green.</td></tr>
+            <tr><td>Cached old Git objects</td><td class="pending">Support purge required</td><td>No branch, tag, pull request, fork, local object, or fresh-clone object contains the incorrect attribution. GitHub still directly serves two obsolete pre-rewrite commits, two replaced attribution blobs, and two old annotated-tag objects; server GC/cache removal requires an authorized Support request.</td></tr>
+            <tr><td>RC tag</td><td class="pending">Ready to cut</td><td>Code-candidate <code>cfdc6fe3e3d4a6cdde2a38e8b94f74a32f36ac7d</code> passed <a href="https://github.com/sepahead/melkor/actions/runs/29142366926">main CI 29142366926</a>. Push signed annotated <code>v2.0.0-rc.1</code> on the final handoff commit and require both tag CI and release-evidence workflows green.</td></tr>
             <tr><td>CUDA support claim</td><td class="pending">Compile-gated only</td><td>Run provider parity and representative workloads on advertised NVIDIA compute capabilities.</td></tr>
             <tr><td>Desktop production release</td><td class="pending">Unsigned</td><td>Add protected identities, macOS notarization, platform signing, binary SBOMs, attestations, and clean-environment verification.</td></tr>
             <tr><td>DA3 reproducibility</td><td class="pending">Source/checkpoints pinned</td><td>Publish transitive Python locks for each supported Python/PyTorch/CUDA matrix before production support claims.</td></tr>
@@ -79,6 +79,6 @@
       </div>
     </section>
   </main>
-  <footer>Review scope: rewritten 43-commit repository history and the complete 2.0.0-rc.1 candidate tree. Advertised GitHub refs and fresh-mirror objects were verified clean after the owner-attribution rewrite; obsolete cached SHA pages still require GitHub Support removal. Host-qualified locally: macOS / Apple Metal. Final matrix completed 11 July 2026 (CEST).</footer>
+  <footer>Review scope: rewritten 48-commit code candidate <code>cfdc6fe3e3d4a6cdde2a38e8b94f74a32f36ac7d</code> plus this 49th signed handoff/tag-target commit; 12 GitHub entries were advertised before the RC tag. Code-candidate CI 29142366926 passed. Advertised refs and fresh-mirror objects were verified clean after the owner-attribution rewrite; cached pre-rewrite commit, blob, and tag-object URLs still require GitHub Support removal. Host-qualified locally: macOS / Apple Metal. Final matrix completed 11 July 2026 (CEST).</footer>
 </body>
 </html>
