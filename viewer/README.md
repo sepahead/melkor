@@ -41,6 +41,10 @@ the project-owned generated demos. See
 [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
 
 At startup, the viewer probes every scene and hides files that are absent.
+Successful bundled-scene selections are reflected in the `?scene=<id>` query
+parameter, so the current scene can be bookmarked or shared. Unknown or
+unavailable IDs fall back to the first available scene. Opening a local file
+removes the parameter so a private filename never enters the URL.
 
 ## Setup
 
@@ -185,6 +189,11 @@ The Playwright suite checks:
 - optional producer-to-player SPZ playback.
 
 Screenshots are written to the gitignored `screenshots/` directory.
+On GPU-less CI runners, every container format is still decoded and awaited
+through a rendered frame, while the generated 4K Wave fixture carries the
+framebuffer and multi-camera assertions under SwiftShader. Local runs retain
+the full four-view visual matrix for every fixture; set
+`VIEWER_FULL_RENDER=1` to force that matrix in CI-like environments.
 
 ## Adding an asset
 

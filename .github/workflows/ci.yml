@@ -50,19 +50,26 @@ jobs:
       - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
         with:
           persist-credentials: false
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6.3.0
+        with:
+          python-version: "3.11"
       - name: Install dependencies
         run: |
           brew install cmake
+          python -m pip install --disable-pip-version-check --only-binary=:all: numpy==2.4.6
           ./scripts/setup_deps.sh
       - name: Build
         run: |
-          cmake -B build -DMELKOR_WERROR=ON
+          cmake -B build -DMELKOR_WERROR=ON \
+            -DPython3_EXECUTABLE="$(command -v python)"
           cmake --build build -j$(sysctl -n hw.ncpu)
       - name: Test
         run: |
+          set -o pipefail
           # Run the real correctness test suite (SPZ quaternion order + SH
           # channel order, PLY parsing, PCA normals, provider parity, scene
           # completion) plus the smoke checks.
+          ctest --test-dir build -N | grep -F 'gaussians_from_prediction_tests' >/dev/null
           ctest --test-dir build --output-on-failure --no-tests=error
           ./build/melkor --info
           ./build/melkor --version
@@ -74,7 +81,8 @@ jobs:
         run: |
           # Same link shape as Linux CPU builds; catches missing Metal-stub
           # symbols that the default macOS configuration cannot see.
-          cmake -B build-cpu -DMELKOR_USE_METAL=OFF -DMELKOR_WERROR=ON
+          cmake -B build-cpu -DMELKOR_USE_METAL=OFF -DMELKOR_WERROR=ON \
+            -DPython3_EXECUTABLE="$(command -v python)"
           cmake --build build-cpu -j$(sysctl -n hw.ncpu)
           cd build-cpu && ctest --output-on-failure
       - name: Build and test quarantined CoreML surface
@@ -96,9 +104,13 @@ jobs:
       - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
         with:
           persist-credentials: false
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6.3.0
+        with:
+          python-version: "3.11"
       - name: Install dependencies
         run: |
           brew install cmake
+          python -m pip install --disable-pip-version-check --only-binary=:all: numpy==2.4.6
           ./scripts/setup_deps.sh
       - name: Build with ASan+UBSan
         run: |
@@ -106,11 +118,15 @@ jobs:
           cmake .. \
             -DCMAKE_CXX_FLAGS="-fsanitize=address,undefined -fno-omit-frame-pointer -g" \
             -DCMAKE_EXE_LINKER_FLAGS="-fsanitize=address,undefined" \
-            -DCMAKE_OSX_DEPLOYMENT_TARGET="13.0"
+            -DCMAKE_OSX_DEPLOYMENT_TARGET="13.0" \
+            -DPython3_EXECUTABLE="$(command -v python)"
           make -j$(sysctl -n hw.ncpu)
       - name: Test under sanitizers
         run: |
-          cd build && ctest --output-on-failure
+          set -o pipefail
+          cd build
+          ctest -N | grep -F 'gaussians_from_prediction_tests' >/dev/null
+          ctest --output-on-failure
 
   build-linux:
     runs-on: ubuntu-latest
@@ -119,6 +135,9 @@ jobs:
       - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
         with:
           persist-credentials: false
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6.3.0
+        with:
+          python-version: "3.11"
       - name: Install dependencies
         run: |
           # The GitHub Ubuntu runner preinstalls Microsoft/azure-cli apt
@@ -128,14 +147,19 @@ jobs:
                      /etc/apt/sources.list.d/azure-cli.list \
                      /etc/apt/sources.list.d/azure-cli.sources || true
           sudo apt-get update && sudo apt-get install -y cmake build-essential
+          python -m pip install --disable-pip-version-check --only-binary=:all: numpy==2.4.6
           ./scripts/setup_deps.sh
       - name: Build
         run: |
-          cmake -B build -DMELKOR_WERROR=ON
+          cmake -B build -DMELKOR_WERROR=ON \
+            -DPython3_EXECUTABLE="$(command -v python)"
           cmake --build build -j$(nproc)
       - name: Test
         run: |
-          cd build && ctest --output-on-failure
+          set -o pipefail
+          cd build
+          ctest -N | grep -F 'gaussians_from_prediction_tests' >/dev/null
+          ctest --output-on-failure
           ./melkor --info
           ./melkor --version
 
@@ -179,7 +203,9 @@ jobs:
         with:
           python-version: "3.11"
       - name: Install test tooling
-        run: python -m pip install --disable-pip-version-check numpy ruff==0.15.18
+        run: >-
+          python -m pip install --disable-pip-version-check --only-binary=:all:
+          numpy==2.4.6 ruff==0.15.18
       - name: Lint maintained Python
         run: |
           # Lint Melkor-authored Python only. The root pyproject.toml excludes
@@ -220,6 +246,14 @@ jobs:
       - name: Run viewer tests
         working-directory: viewer
         run: bun run test -- --project=chromium
+      - name: Upload viewer failure artifacts
+        if: failure()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: viewer-test-results-${{ github.run_id }}-${{ github.run_attempt }}
+          path: viewer/test-results/
+          if-no-files-found: ignore
+          retention-days: 7
 
   tauri-check:
     name: Tauri / Rust 1.88

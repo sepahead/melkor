@@ -6,6 +6,14 @@ import { mkdirSync } from "node:fs";
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const SHOT_DIR = join(__dirname, "..", "screenshots");
 const LOCAL_SPLAT = join(__dirname, "..", "public", "splats", "generated", "wave.splat");
+const IS_CI = /^(1|true)$/i.test(process.env.CI ?? "");
+const FULL_RENDER = !IS_CI || /^(1|true)$/i.test(process.env.VIEWER_FULL_RENDER ?? "");
+const DEFAULT_TEST_SCENE = IS_CI ? "wave-static" : null;
+const RENDER_CAPTURE_STYLE = `
+  #hud, #scenes, #bar, #tl, #overlay, #dropTarget {
+    visibility: hidden !important;
+  }
+`;
 mkdirSync(SHOT_DIR, { recursive: true });
 
 // City / area scenes in public/splats/. `min` = sane lower bound on splat count.
@@ -25,30 +33,51 @@ async function served(request, file) {
   return r.status() === 200;
 }
 
-// Read back the WebGL framebuffer: fraction of non-background pixels + luminance
-// std-dev. A blank or broken render scores ~0 on both.
+// Sample a compositor screenshot rather than WebGL's transient drawing buffer.
+// With preserveDrawingBuffer=false, readPixels can legally observe a cleared
+// buffer even while Chromium displays a valid frame. The screenshot measures
+// what the user actually sees: coverage, tonal variance, and a spatial hash.
 async function pixelStats(page) {
-  return await page.evaluate(() => {
-    const cv = document.querySelector("canvas");
-    const g = cv.getContext("webgl2") || cv.getContext("webgl");
-    const w = cv.width, h = cv.height, buf = new Uint8Array(w * h * 4);
-    g.readPixels(0, 0, w, h, g.RGBA, g.UNSIGNED_BYTE, buf);
-    let nonBg = 0, n = 0, sum = 0, sum2 = 0;
+  const png = await page.locator("canvas").screenshot({
+    type: "png",
+    style: RENDER_CAPTURE_STYLE,
+  });
+  const dataUrl = `data:image/png;base64,${png.toString("base64")}`;
+  return await page.evaluate(async (src) => {
+    const image = new Image();
+    image.src = src;
+    await image.decode();
+    const canvas = document.createElement("canvas");
+    canvas.width = image.naturalWidth;
+    canvas.height = image.naturalHeight;
+    const context = canvas.getContext("2d", { willReadFrequently: true });
+    context.drawImage(image, 0, 0);
+    const buf = context.getImageData(0, 0, canvas.width, canvas.height).data;
+    let nonBg = 0, n = 0, sum = 0, sum2 = 0, signature = 2166136261;
     for (let i = 0; i < buf.length; i += 4 * 131) {
       const r = buf[i], gg = buf[i + 1], b = buf[i + 2];
       const lum = 0.299 * r + 0.587 * gg + 0.114 * b;
       sum += lum; sum2 += lum * lum; n++;
       if (Math.abs(r - 11) + Math.abs(gg - 12) + Math.abs(b - 16) > 24) nonBg++;
+      signature ^= (r | (gg << 8) | (b << 16)) ^ i;
+      signature = Math.imul(signature, 16777619) >>> 0;
     }
     const mean = sum / n;
-    return { nonBgFrac: nonBg / n, lumStd: Math.sqrt(Math.max(sum2 / n - mean * mean, 0)) };
-  });
+    return {
+      nonBgFrac: nonBg / n,
+      lumStd: Math.sqrt(Math.max(sum2 / n - mean * mean, 0)),
+      signature: signature.toString(16).padStart(8, "0"),
+    };
+  }, dataUrl);
 }
 
-async function boot(page) {
+async function boot(page, initialScene = DEFAULT_TEST_SCENE) {
   const errors = [];
   page.on("pageerror", (e) => errors.push(e.message));
-  await page.goto("/index.html");
+  const path = initialScene
+    ? `/index.html?scene=${encodeURIComponent(initialScene)}`
+    : "/index.html";
+  await page.goto(path);
   await page.waitForFunction(() => window.__viewer?.state?.ready === true, undefined, { timeout: 20_000 });
   expect(await page.evaluate(() => !!document.querySelector("canvas")?.getContext("webgl2")),
     "WebGL2 available").toBe(true);
@@ -65,7 +94,7 @@ test.describe("Melkor · SparkJS splat viewer", () => {
   });
 
   test("development server fails closed on malformed and private paths", async ({ request }) => {
-    const malformed = await request.fetch("http://127.0.0.1:8771/%");
+    const malformed = await request.fetch("/%");
     expect(malformed.status()).toBe(400);
     expect((await request.fetch("/package.json")).status()).toBe(404);
     for (const path of [
@@ -105,6 +134,10 @@ test.describe("Melkor · SparkJS splat viewer", () => {
       expect(first.source).toBe("local");
       expect(first.fileBytes).toBeGreaterThan(0);
       expect(first.splatCount).toBeGreaterThanOrEqual(4_000);
+      expect(new URL(page.url()).searchParams.has("scene"), "local file names stay out of the URL")
+        .toBe(false);
+      expect(decodeURIComponent(page.url()), "the local filename stays out of the entire URL")
+        .not.toContain("wave.splat");
       expect(await pixelStats(page)).toMatchObject({ nonBgFrac: expect.any(Number) });
       expect((await pixelStats(page)).nonBgFrac, "local scene renders while offline")
         .toBeGreaterThan(0.001);
@@ -224,40 +257,58 @@ test.describe("Melkor · SparkJS splat viewer", () => {
   });
 
   for (const sc of SCENES) {
-    test(`renders ${sc.id} (${sc.fmt}) and drives camera feeds`, async ({ page, request }) => {
+    const drivesCamera = FULL_RENDER || sc.id === "wave-static";
+    const action = drivesCamera ? "renders" : "loads";
+    const suffix = drivesCamera ? " and drives camera feeds" : " in software-renderer smoke mode";
+    test(`${action} ${sc.id} (${sc.fmt})${suffix}`, async ({ page, request }) => {
       test.skip(sc.optional && !(await served(request, sc.file)), `${sc.file} not generated (optional)`);
-      const errors = await boot(page);
+      const renderTimeout = IS_CI
+        ? (sc.id === "sutro" ? 210_000 : 150_000)
+        : 120_000;
+      if (IS_CI) test.setTimeout(renderTimeout + (drivesCamera ? 180_000 : 30_000));
+      const errors = await boot(page, sc.id);
 
-      const stats = await page.evaluate(async (id) => {
-        await window.__viewer.load(id);
-        return await window.__viewer.waitRendered(120_000);
-      }, sc.id);
+      const stats = await page.evaluate(async (timeout) =>
+        await window.__viewer.waitRendered(timeout), renderTimeout);
 
       expect(stats.error, `no load error for ${sc.id}`).toBeFalsy();
+      expect(stats.scene, `selected scene for ${sc.id}`).toBe(sc.id);
       expect(stats.format, `format for ${sc.id}`).toBe(sc.fmt);
       expect(stats.splatCount, `splat count for ${sc.id}`).toBeGreaterThanOrEqual(sc.min);
 
+      // CI loads every format and waits for rendered frames, but reserves
+      // compositor pixel sampling/sorting for the small project-owned
+      // fixture. VIEWER_FULL_RENDER=1 restores the full hardware matrix.
+      if (!drivesCamera) {
+        expect(errors, `no runtime errors for ${sc.id}`).toEqual([]);
+        return;
+      }
+
       // Drive each named camera feed: distinct viewpoint, non-blank frame, screenshot.
-      const cams = [];
+      const cams = [], frameSignatures = [];
       for (const view of VIEWS) {
         await page.evaluate((v) => window.__viewer.setView(v), view);
-        await page.waitForTimeout(800); // let the splat sort settle for this viewpoint
+        await page.waitForTimeout(IS_CI ? 1200 : 800); // let the splat sort settle for this viewpoint
         const px = await pixelStats(page);
         expect(px.nonBgFrac, `${sc.id}/${view} renders content`).toBeGreaterThan(0.012);
-        expect(px.lumStd, `${sc.id}/${view} has tonal variance`).toBeGreaterThan(4);
+        expect(px.lumStd, `${sc.id}/${view} is not a uniform framebuffer`)
+          .toBeGreaterThan(FULL_RENDER ? 4 : 0.5);
+        frameSignatures.push(px.signature);
         cams.push((await page.evaluate(() => window.__viewer.getStats().camera)).join(","));
         await page.screenshot({ path: join(SHOT_DIR, `${sc.id}-${view}.png`) });
       }
 
       // Camera controls actually changed the viewpoint across feeds.
       expect(new Set(cams).size, `distinct camera positions for ${sc.id}`).toBeGreaterThan(1);
+      expect(new Set(frameSignatures).size, `camera feeds change pixels for ${sc.id}`)
+        .toBeGreaterThan(1);
       expect(errors, `no runtime errors for ${sc.id}`).toEqual([]);
     });
   }
 
   test("auto-orbit animates the camera over time", async ({ page }) => {
-    await boot(page);
-    await page.evaluate(async () => { await window.__viewer.load("sutro"); await window.__viewer.waitRendered(120_000); });
+    await boot(page, "wave-static");
+    await page.evaluate(() => window.__viewer.waitRendered(30_000));
     await page.evaluate(() => window.__viewer.setOrbit(true));
     const a = await page.evaluate(() => window.__viewer.getStats().camera);
     await page.waitForTimeout(1500);
@@ -267,8 +318,8 @@ test.describe("Melkor · SparkJS splat viewer", () => {
   });
 
   test("setAngles repositions the camera deterministically", async ({ page }) => {
-    await boot(page);
-    await page.evaluate(async () => { await window.__viewer.load("snow-street"); await window.__viewer.waitRendered(120_000); });
+    await boot(page, "wave-static");
+    await page.evaluate(() => window.__viewer.waitRendered(30_000));
     const left = await page.evaluate(() => { window.__viewer.setAngles(0, 12); return window.__viewer.getStats().camera; });
     const right = await page.evaluate(() => { window.__viewer.setAngles(180, 12); return window.__viewer.getStats().camera; });
     expect(Math.hypot(left[0] - right[0], left[2] - right[2]), "azimuth sweep moves camera").toBeGreaterThan(1);
@@ -289,15 +340,16 @@ test.describe("Melkor · SparkJS splat viewer", () => {
     // Kick off a switch to a different scene and sample state mid-load: the
     // previous scene must still be the one displayed (not progressive), and
     // the previous mesh stays in the scene until the new one is ready.
-    const midLoad = await page.evaluate(async () => {
-      const p = window.__viewer.load("valley");        // do not await
+    const replacementScene = IS_CI ? "wave-static" : "valley";
+    const midLoad = await page.evaluate(async (sceneId) => {
+      const p = window.__viewer.load(sceneId);          // do not await
       // poll until loading flips true, then read the streaming decision
       for (let i = 0; i < 200 && !window.__viewer.state.loading; i++)
         await new Promise((r) => setTimeout(r, 5));
       const snap = { progressive: window.__viewer.state.progressive, loading: window.__viewer.state.loading };
       await p;
       return snap;
-    });
+    }, replacementScene);
     expect(midLoad.loading, "load actually started").toBe(true);
     expect(midLoad.progressive, "scene switch keeps old scene (not progressive)").toBe(false);
   });
@@ -392,6 +444,8 @@ test.describe("Melkor · SparkJS splat viewer", () => {
     });
 
     const st = await page.evaluate(() => window.__viewer.get4DState());
+    expect(new URL(page.url()).searchParams.get("scene"), "selected scene is shareable")
+      .toBe("wave-4d");
     expect(st.count, "sequence has multiple frames").toBeGreaterThan(1);
     expect(st.playing, "playback started on load").toBe(true);
 
@@ -408,20 +462,30 @@ test.describe("Melkor · SparkJS splat viewer", () => {
     expect(a === b ? -1 : 1, "active frame advanced while playing").toBe(1);
 
     // The rendered image differs between two distinct frames (real motion).
-    const shot = async (frame) => page.evaluate(async (f) => {
-      await window.__viewer.seek4D(f);
-      await new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r)));
-      const cv = document.querySelector("canvas");
-      const g = cv.getContext("webgl2") || cv.getContext("webgl");
-      const w = cv.width, h = cv.height, buf = new Uint8Array(w * h * 4);
-      g.readPixels(0, 0, w, h, g.RGBA, g.UNSIGNED_BYTE, buf);
-      let s = 0; for (let i = 0; i < buf.length; i += 4 * 131) s += buf[i] + buf[i + 1] * 2 + buf[i + 2] * 3;
-      return s;
-    }, frame);
+    const shot = async (frame, previousSignature = null) => {
+      await page.evaluate(async (f) => {
+        await window.__viewer.seek4D(f);
+        await new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+      }, frame);
+      // SwiftShader can complete the asynchronous splat sort after the first
+      // compositor frames. Poll the visible output for the requested new frame
+      // instead of relying on a fixed machine-dependent delay.
+      const deadline = Date.now() + (IS_CI ? 5_000 : 2_000);
+      let stats;
+      do {
+        stats = await pixelStats(page);
+        if (stats.lumStd > 0.5 &&
+            (previousSignature === null || stats.signature !== previousSignature)) return stats;
+        await page.waitForTimeout(100);
+      } while (Date.now() < deadline);
+      return stats;
+    };
     const count = await page.evaluate(() => window.__viewer.get4DState().count);
     const s0 = await shot(0);
-    const sMid = await shot(Math.floor(count / 2));
-    expect(Math.abs(s0 - sMid), "frames render differently (temporal motion)").toBeGreaterThan(0);
+    const sMid = await shot(Math.floor(count / 2), s0.signature);
+    expect(s0.lumStd, "first temporal frame is nonblank").toBeGreaterThan(0.5);
+    expect(sMid.lumStd, "middle temporal frame is nonblank").toBeGreaterThan(0.5);
+    expect(s0.signature, "frames render differently (temporal motion)").not.toBe(sMid.signature);
 
     // Seek to a far frame (outside the initial window) still works: the
     // player loads it on demand — proves streaming, not preloaded.
@@ -453,10 +517,11 @@ test.describe("Melkor · SparkJS splat viewer", () => {
 
     // Switch from the 4D sequence back to a normal scene: must clear the
     // frames cleanly (no double-dispose) and render the new scene.
-    await page.evaluate(async () => {
-      await window.__viewer.load("snow-street");
+    const staticScene = IS_CI ? "wave-static" : "snow-street";
+    await page.evaluate(async (sceneId) => {
+      await window.__viewer.load(sceneId);
       await window.__viewer.waitRendered(120_000);
-    });
+    }, staticScene);
     const after = await page.evaluate(() => window.__viewer.get4DState().count);
     expect(after, "4D frames cleared on switch to normal scene").toBe(0);
     // Poll: a large scene loaded progressively may need a few extra frames

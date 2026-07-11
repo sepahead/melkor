@@ -417,6 +417,13 @@ function splatCountOf(mesh) {
   } catch { return 0; }
 }
 
+function syncSceneURL(definition) {
+  const url = new URL(window.location.href);
+  if (definition.localFile) url.searchParams.delete("scene");
+  else url.searchParams.set("scene", definition.id);
+  window.history.replaceState(null, "", url);
+}
+
 async function loadScene(id, candidateDefinition = null) {
   const def = candidateDefinition
     ?? (localSceneDef?.id === id ? localSceneDef : SCENES.find((s) => s.id === id));
@@ -520,6 +527,7 @@ async function loadScene(id, candidateDefinition = null) {
   }
   updateHud();
   updateSceneButtons();
+  syncSceneURL(def);
   hideOverlay();
   return mesh;
 }
@@ -809,6 +817,7 @@ async function load4DSequence(def) {
   state.loading = false;
   frameCountSinceLoad = 0;
   updateHud(); updateSceneButtons();
+  syncSceneURL(def);
   hideOverlay();
   return seq4d;
 }
@@ -1138,7 +1147,9 @@ window.__viewer = {
   } catch { /* keep full list on probe failure */ }
   buildSceneButtons();
   state.ready = true;
-  if (SCENES[0]) loadScene(SCENES[0].id).catch((e) => console.error(e));
+  const requestedScene = new URLSearchParams(window.location.search).get("scene");
+  const initialScene = SCENES.find((sceneDef) => sceneDef.id === requestedScene) ?? SCENES[0];
+  if (initialScene) loadScene(initialScene.id).catch((e) => console.error(e));
 })();
 </script>
 </body>
