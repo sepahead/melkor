@@ -9,11 +9,7 @@ const LOCAL_SPLAT = join(__dirname, "..", "public", "splats", "generated", "wave
 const IS_CI = /^(1|true)$/i.test(process.env.CI ?? "");
 const FULL_RENDER = !IS_CI || /^(1|true)$/i.test(process.env.VIEWER_FULL_RENDER ?? "");
 const DEFAULT_TEST_SCENE = IS_CI ? "wave-static" : null;
-const RENDER_CAPTURE_STYLE = `
-  #hud, #scenes, #bar, #tl, #overlay, #dropTarget {
-    visibility: hidden !important;
-  }
-`;
+const RENDER_UI_SELECTORS = ["#hud", "#scenes", "#bar", "#tl", "#overlay", "#dropTarget"];
 mkdirSync(SHOT_DIR, { recursive: true });
 
 // City / area scenes in public/splats/. `min` = sane lower bound on splat count.
@@ -38,10 +34,39 @@ async function served(request, file) {
 // buffer even while Chromium displays a valid frame. The screenshot measures
 // what the user actually sees: coverage, tonal variance, and a spatial hash.
 async function pixelStats(page) {
-  const png = await page.locator("canvas").screenshot({
-    type: "png",
-    style: RENDER_CAPTURE_STYLE,
-  });
+  // Hide fixed UI for two compositor frames before capturing. Playwright's
+  // atomic `style` screenshot option can snapshot a cleared GPU layer on slow
+  // software renderers when a backdrop-filter is removed in the same frame.
+  await page.evaluate((selectors) => {
+    window.__melkorRenderCapture = selectors.flatMap((selector) => {
+      const element = document.querySelector(selector);
+      if (!element) return [];
+      const prior = {
+        element,
+        value: element.style.getPropertyValue("visibility"),
+        priority: element.style.getPropertyPriority("visibility"),
+      };
+      element.style.setProperty("visibility", "hidden", "important");
+      return [prior];
+    });
+  }, RENDER_UI_SELECTORS);
+
+  let png;
+  try {
+    await page.evaluate(() => new Promise((resolve) =>
+      requestAnimationFrame(() => requestAnimationFrame(resolve))));
+    png = await page.locator("canvas").screenshot({ type: "png" });
+  } finally {
+    await page.evaluate(() => {
+      for (const { element, value, priority } of window.__melkorRenderCapture ?? []) {
+        if (value) element.style.setProperty("visibility", value, priority);
+        else element.style.removeProperty("visibility");
+      }
+      delete window.__melkorRenderCapture;
+    });
+    await page.evaluate(() => new Promise((resolve) => requestAnimationFrame(resolve)));
+  }
+
   const dataUrl = `data:image/png;base64,${png.toString("base64")}`;
   return await page.evaluate(async (src) => {
     const image = new Image();
