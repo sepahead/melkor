@@ -238,7 +238,8 @@ jobs:
             librsvg2-dev
       - name: Install Rust 1.88
         run: |
-          rustup toolchain install 1.88.0 --profile minimal --component rustfmt clippy
+          rustup toolchain install 1.88.0 --profile minimal \
+            --component rustfmt --component clippy
           rustup run 1.88.0 rustc --version
           rustup run 1.88.0 cargo --version
       - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
