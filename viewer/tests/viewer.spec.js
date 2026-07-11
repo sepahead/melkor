@@ -9,7 +9,9 @@ const LOCAL_SPLAT = join(__dirname, "..", "public", "splats", "generated", "wave
 const IS_CI = /^(1|true)$/i.test(process.env.CI ?? "");
 const FULL_RENDER = !IS_CI || /^(1|true)$/i.test(process.env.VIEWER_FULL_RENDER ?? "");
 const DEFAULT_TEST_SCENE = IS_CI ? "wave-static" : null;
-const RENDER_UI_SELECTORS = ["#hud", "#scenes", "#bar", "#tl", "#overlay", "#dropTarget"];
+const RENDER_MASK_SELECTORS = [
+  "#hud", "#scenes", "#bar", "#tl", "#overlay .card", "#dropTarget .card",
+];
 mkdirSync(SHOT_DIR, { recursive: true });
 
 // City / area scenes in public/splats/. `min` = sane lower bound on splat count.
@@ -34,41 +36,33 @@ async function served(request, file) {
 // buffer even while Chromium displays a valid frame. The screenshot measures
 // what the user actually sees: coverage, tonal variance, and a spatial hash.
 async function pixelStats(page) {
-  // Hide fixed UI for two compositor frames before capturing. Playwright's
-  // atomic `style` screenshot option can snapshot a cleared GPU layer on slow
-  // software renderers when a backdrop-filter is removed in the same frame.
-  await page.evaluate((selectors) => {
-    window.__melkorRenderCapture = selectors.flatMap((selector) => {
+  // Capture the actual compositor output without changing page styles. On
+  // SwiftShader, hiding a backdrop-filter can invalidate the WebGL layer in
+  // the same frame and expose the cleared drawing buffer. Instead, mask the
+  // exact UI/card rectangles during pixel analysis; a uniform error backdrop
+  // remains part of the sample and cannot make a blank scene look rendered.
+  const capture = await page.evaluate((selectors) => ({
+    width: window.innerWidth,
+    height: window.innerHeight,
+    masks: selectors.flatMap((selector) => {
       const element = document.querySelector(selector);
       if (!element) return [];
-      const prior = {
-        element,
-        value: element.style.getPropertyValue("visibility"),
-        priority: element.style.getPropertyPriority("visibility"),
-      };
-      element.style.setProperty("visibility", "hidden", "important");
-      return [prior];
-    });
-  }, RENDER_UI_SELECTORS);
-
-  let png;
-  try {
-    await page.evaluate(() => new Promise((resolve) =>
-      requestAnimationFrame(() => requestAnimationFrame(resolve))));
-    png = await page.locator("canvas").screenshot({ type: "png" });
-  } finally {
-    await page.evaluate(() => {
-      for (const { element, value, priority } of window.__melkorRenderCapture ?? []) {
-        if (value) element.style.setProperty("visibility", value, priority);
-        else element.style.removeProperty("visibility");
-      }
-      delete window.__melkorRenderCapture;
-    });
-    await page.evaluate(() => new Promise((resolve) => requestAnimationFrame(resolve)));
-  }
-
+      const style = getComputedStyle(element);
+      const rect = element.getBoundingClientRect();
+      if (style.display === "none" || style.visibility === "hidden" ||
+          rect.width <= 0 || rect.height <= 0) return [];
+      const margin = 8; // cover borders and the error backdrop's 2px blur bleed
+      return [{
+        left: Math.max(0, rect.left - margin),
+        top: Math.max(0, rect.top - margin),
+        right: Math.min(window.innerWidth, rect.right + margin),
+        bottom: Math.min(window.innerHeight, rect.bottom + margin),
+      }];
+    }),
+  }), RENDER_MASK_SELECTORS);
+  const png = await page.screenshot({ type: "png" });
   const dataUrl = `data:image/png;base64,${png.toString("base64")}`;
-  return await page.evaluate(async (src) => {
+  return await page.evaluate(async ({ src, capture }) => {
     const image = new Image();
     image.src = src;
     await image.decode();
@@ -78,8 +72,15 @@ async function pixelStats(page) {
     const context = canvas.getContext("2d", { willReadFrequently: true });
     context.drawImage(image, 0, 0);
     const buf = context.getImageData(0, 0, canvas.width, canvas.height).data;
+    const scaleX = canvas.width / capture.width;
+    const scaleY = canvas.height / capture.height;
     let nonBg = 0, n = 0, sum = 0, sum2 = 0, signature = 2166136261;
     for (let i = 0; i < buf.length; i += 4 * 131) {
+      const pixel = i / 4;
+      const x = (pixel % canvas.width) / scaleX;
+      const y = Math.floor(pixel / canvas.width) / scaleY;
+      if (capture.masks.some((rect) =>
+        x >= rect.left && x <= rect.right && y >= rect.top && y <= rect.bottom)) continue;
       const r = buf[i], gg = buf[i + 1], b = buf[i + 2];
       const lum = 0.299 * r + 0.587 * gg + 0.114 * b;
       sum += lum; sum2 += lum * lum; n++;
@@ -87,13 +88,25 @@ async function pixelStats(page) {
       signature ^= (r | (gg << 8) | (b << 16)) ^ i;
       signature = Math.imul(signature, 16777619) >>> 0;
     }
+    if (n === 0) throw new Error("render capture left no unmasked pixels");
     const mean = sum / n;
     return {
       nonBgFrac: nonBg / n,
       lumStd: Math.sqrt(Math.max(sum2 / n - mean * mean, 0)),
       signature: signature.toString(16).padStart(8, "0"),
     };
-  }, dataUrl);
+  }, { src: dataUrl, capture });
+}
+
+async function settledPixelStats(page, timeoutMs = 5_000) {
+  const deadline = Date.now() + timeoutMs;
+  let stats;
+  do {
+    stats = await pixelStats(page);
+    if (stats.nonBgFrac > 0.001 && stats.lumStd > 0.5) return stats;
+    await page.waitForTimeout(100);
+  } while (Date.now() < deadline);
+  return stats;
 }
 
 async function boot(page, initialScene = DEFAULT_TEST_SCENE) {
@@ -265,8 +278,10 @@ test.describe("Melkor · SparkJS splat viewer", () => {
 
     await page.getByRole("button", { name: "Dismiss" }).click();
     expect((await page.evaluate(() => window.__viewer.getStats())).error).toBeNull();
-    expect((await pixelStats(page)).nonBgFrac, "last good local scene stays visible")
+    const visible = await settledPixelStats(page);
+    expect(visible.nonBgFrac, "last good local scene stays visible")
       .toBeGreaterThan(0.001);
+    expect(visible.lumStd, "last good local scene is not a uniform frame").toBeGreaterThan(0.5);
   });
 
   test("reduced-motion preference disables automatic orbit", async ({ page }) => {
@@ -410,8 +425,10 @@ test.describe("Melkor · SparkJS splat viewer", () => {
     }));
     expect(retained.stats.scene).toBe(before.scene);
     expect(retained.sequence.count).toBe(0);
-    expect((await pixelStats(page)).nonBgFrac, "active static scene remains visible")
+    const visible = await settledPixelStats(page);
+    expect(visible.nonBgFrac, "active static scene remains visible")
       .toBeGreaterThan(0.001);
+    expect(visible.lumStd, "active static scene is not a uniform frame").toBeGreaterThan(0.5);
 
     await page.getByRole("button", { name: "Dismiss" }).click();
     await page.waitForFunction(() => window.__viewer.getStats().rendered === true);
@@ -449,8 +466,10 @@ test.describe("Melkor · SparkJS splat viewer", () => {
     expect(retained.stats.scene).toBe(before.scene);
     expect(retained.sequence.count).toBe(before.sequence.count);
     expect(retained.sequence.buffered).toBeGreaterThan(0);
-    expect((await pixelStats(page)).nonBgFrac, "active 4D scene remains visible")
+    const visible = await settledPixelStats(page);
+    expect(visible.nonBgFrac, "active 4D scene remains visible")
       .toBeGreaterThan(0.001);
+    expect(visible.lumStd, "active 4D scene is not a uniform frame").toBeGreaterThan(0.5);
 
     await page.getByRole("button", { name: "Dismiss" }).click();
     await expect(page.locator("#overlay")).not.toHaveClass(/show/);
