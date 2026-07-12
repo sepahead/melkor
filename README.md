@@ -1,6 +1,9 @@
 <div align="center">
 
-<img src="assets/melkor-logo.svg" alt="Melkor obsidian forge plate — an ember-lit machined hexagon containing a faceted, M-shaped twin-peak massif." width="200" height="200" />
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="assets/logo-dark.svg">
+  <img src="assets/logo-light.svg" alt="Melkor obsidian forge plate — an ember-lit machined hexagon containing a faceted, M-shaped twin-peak massif rendered as Gaussian splats." width="200" />
+</picture>
 
 # Melkor
 
