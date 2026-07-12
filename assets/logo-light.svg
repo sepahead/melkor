@@ -255,13 +255,12 @@
       <polygon class="mel-tin" points="678,228 690,248 684,274" fill="#2a1509"/>
       <polygon class="mel-tin" points="690,248 692,274 684,274" fill="#1c0e07"/>
       <polygon class="mel-tin" points="690,248 702,216 692,274" fill="#5c3117"/>
-      <polygon class="mel-tin" points="702,216 702,274 692,274" fill="#331a0c"/></g>
+      <polygon class="mel-tin" points="702,216 702,274 692,274" fill="#331a0c"/><path d="M660 274 L678 228 L690 248 L702 216 L720 274" class="mel-ridge"/></g>
       <g clip-path="url(#melBuild)"><path d="M660 274 L678 228 L690 248 L702 216 L720 274 Z" class="mel-rock"/><path d="M702 216 L720 274 L702 274 Z" class="mel-facet"/><polygon class="mel-tin" points="660,274 678,228 684,274" fill="#4a2712"/>
       <polygon class="mel-tin" points="678,228 690,248 684,274" fill="#2a1509"/>
       <polygon class="mel-tin" points="690,248 692,274 684,274" fill="#1c0e07"/>
       <polygon class="mel-tin" points="690,248 702,216 692,274" fill="#5c3117"/>
-      <polygon class="mel-tin" points="702,216 702,274 692,274" fill="#331a0c"/></g>
-      <path d="M660 274 L678 228 L690 248 L702 216 L720 274" class="mel-ridge"/>
+      <polygon class="mel-tin" points="702,216 702,274 692,274" fill="#331a0c"/><path d="M660 274 L678 228 L690 248 L702 216 L720 274" class="mel-ridge"/></g>
       <g clip-path="url(#melMassif)"><rect class="mel-front" x="656" y="274" width="68" height="3.4" opacity="0"><animate attributeName="y" values="274;274;215;215;274" keyTimes="0;0.32;0.72;0.74;1" dur="6s" repeatCount="indefinite"/><animate attributeName="opacity" values="0;0;0.9;0.9;0;0" keyTimes="0;0.32;0.37;0.67;0.72;1" dur="6s" repeatCount="indefinite"/></rect></g>
     </g>
     <path d="M690 202 L731.6 226 L731.6 274 L690 298 L648.4 274 L648.4 226 Z" class="mel-edge"/>
