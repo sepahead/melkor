@@ -102,11 +102,10 @@
     .seat-gate     { fill: url(#gateGrad); }
     .seat-vox      { fill: url(#voxGrad); }
     .mel-plate    { fill: url(#melPlate); }
-    .mel-rock     { fill: #050302; }
+    .mel-rock     { fill: url(#melRock); }
     .mel-ridge    { fill: none; stroke: #fdba74; stroke-opacity: 0.7; stroke-width: 1.3; stroke-linejoin: round; stroke-linecap: round; }
-    .mel-facet    { fill: #070302; }
-    .mel-tin      { stroke: #000000; stroke-opacity: 0.4; stroke-width: 0.6; stroke-linejoin: round; }
-    .mel-splat    { fill: url(#melSplat); }
+    .mel-facet    { fill: #1a0e08; }
+    .mel-tin      { stroke: #000000; stroke-opacity: 0.35; stroke-width: 0.6; stroke-linejoin: round; }
     .mel-front    { fill: #ffedd5; filter: url(#edgeGlow); }
     .mel-edge     { fill: none; stroke: url(#melBezel); stroke-width: 2.4; stroke-linejoin: miter; }
     .mel-groove   { fill: none; stroke: #05070b; stroke-opacity: 0.5; stroke-width: 1; }
@@ -237,9 +236,9 @@
       <linearGradient id="melPlate" x1="0" y1="202" x2="0" y2="298" gradientUnits="userSpaceOnUse">
         <stop offset="0%" stop-color="#2b1a10"/><stop offset="55%" stop-color="#170d07"/><stop offset="100%" stop-color="#0b0604"/>
       </linearGradient>
-      <radialGradient id="melSplat">
-        <stop offset="0%" stop-color="#fed7aa" stop-opacity="0.9"/><stop offset="42%" stop-color="#f97316" stop-opacity="0.5"/><stop offset="100%" stop-color="#ea580c" stop-opacity="0"/>
-      </radialGradient>
+      <linearGradient id="melRock" x1="0" y1="214" x2="0" y2="274" gradientUnits="userSpaceOnUse">
+        <stop offset="0%" stop-color="#241209"/><stop offset="55%" stop-color="#3a1e0e"/><stop offset="100%" stop-color="#582d15"/>
+      </linearGradient>
       <radialGradient id="melHeat" gradientUnits="userSpaceOnUse" cx="690" cy="272" r="62">
         <stop offset="0%" stop-color="#c2410c" stop-opacity="0.72"/><stop offset="45%" stop-color="#9a3412" stop-opacity="0.38"/><stop offset="100%" stop-color="#7c2d12" stop-opacity="0"/>
       </radialGradient>
@@ -248,77 +247,21 @@
       </linearGradient>
       <clipPath id="melClip"><path d="M690 202 L731.6 226 L731.6 274 L690 298 L648.4 274 L648.4 226 Z"/></clipPath>
       <clipPath id="melMassif"><path d="M660 274 L678 228 L690 248 L702 216 L720 274 Z"/></clipPath>
+      <clipPath id="melBuild"><rect x="638" y="210" width="104" height="92"><animate attributeName="y" values="210;210;276;276;210;210" keyTimes="0;0.12;0.2;0.32;0.72;1" dur="6s" repeatCount="indefinite"/><animate attributeName="height" values="92;92;26;26;92;92" keyTimes="0;0.12;0.2;0.32;0.72;1" dur="6s" repeatCount="indefinite"/></rect></clipPath>
     </defs>
     <g filter="url(#nodeShadow)"><path d="M690 202 L731.6 226 L731.6 274 L690 298 L648.4 274 L648.4 226 Z" class="mel-plate"/></g>
     <g clip-path="url(#melClip)">
       <path d="M690 202 L731.6 226 L731.6 274 L690 298 L648.4 274 L648.4 226 Z" fill="url(#melHeat)"/>
-      <path d="M660 274 L678 228 L690 248 L702 216 L720 274 Z" class="mel-rock"/>
-      <path d="M702 216 L720 274 L702 274 Z" class="mel-facet"/>
-      <polygon class="mel-tin" points="660,274 678,228 684,274" fill="#170b05"/>
-      <polygon class="mel-tin" points="678,228 690,248 684,274" fill="#0e0703"/>
-      <polygon class="mel-tin" points="690,248 692,274 684,274" fill="#241109"/>
-      <polygon class="mel-tin" points="690,248 702,216 692,274" fill="#331A0d"/>
-      <polygon class="mel-tin" points="702,216 702,274 692,274" fill="#20100a"/>
+      <g clip-path="url(#melBuild)">
+        <path d="M660 274 L678 228 L690 248 L702 216 L720 274 Z" class="mel-rock"/>
+        <path d="M702 216 L720 274 L702 274 Z" class="mel-facet"/>
+        <polygon class="mel-tin" points="660,274 678,228 684,274" fill="#4a2712"/>
+      <polygon class="mel-tin" points="678,228 690,248 684,274" fill="#2a1509"/>
+      <polygon class="mel-tin" points="690,248 692,274 684,274" fill="#1c0e07"/>
+      <polygon class="mel-tin" points="690,248 702,216 692,274" fill="#5c3117"/>
+      <polygon class="mel-tin" points="702,216 702,274 692,274" fill="#331a0c"/>
+      </g>
       <path d="M660 274 L678 228 L690 248 L702 216 L720 274" class="mel-ridge"/>
-      <circle class="mel-splat" cx="681.1" cy="270.6" r="1.7"><animate attributeName="r" values="1.7;1.7;0;0;1.7;1.7" keyTimes="0;0.12;0.2;0.3;0.4;1" dur="6s" repeatCount="indefinite"/></circle>
-      <circle class="mel-splat" cx="691.8" cy="270.3" r="1.7"><animate attributeName="r" values="1.7;1.7;0;0;1.7;1.7" keyTimes="0;0.12;0.2;0.3;0.4;1" dur="6s" repeatCount="indefinite"/></circle>
-      <circle class="mel-splat" cx="702.5" cy="270" r="1.7"><animate attributeName="r" values="1.7;1.7;0;0;1.7;1.7" keyTimes="0;0.12;0.2;0.3;0.4;1" dur="6s" repeatCount="indefinite"/></circle>
-      <circle class="mel-splat" cx="663.9" cy="269.9" r="1.7"><animate attributeName="r" values="1.7;1.7;0;0;1.7;1.7" keyTimes="0;0.12;0.2;0.3;0.4;1" dur="6s" repeatCount="indefinite"/></circle>
-      <circle class="mel-splat" cx="713.1" cy="269.7" r="1.7"><animate attributeName="r" values="1.7;1.7;0;0;1.7;1.7" keyTimes="0;0.12;0.2;0.3;0.4;1" dur="6s" repeatCount="indefinite"/></circle>
-      <circle class="mel-splat" cx="674.6" cy="269.6" r="1.7"><animate attributeName="r" values="1.7;1.7;0;0;1.7;1.7" keyTimes="0;0.12;0.2;0.4;0.4;1" dur="6s" repeatCount="indefinite"/></circle>
-      <circle class="mel-splat" cx="685.2" cy="269.3" r="1.7"><animate attributeName="r" values="1.7;1.7;0;0;1.7;1.7" keyTimes="0;0.12;0.2;0.4;0.4;1" dur="6s" repeatCount="indefinite"/></circle>
-      <circle class="mel-splat" cx="695.9" cy="268.9" r="1.7"><animate attributeName="r" values="1.7;1.7;0;0;1.7;1.7" keyTimes="0;0.12;0.2;0.4;0.4;1" dur="6s" repeatCount="indefinite"/></circle>
-      <circle class="mel-splat" cx="709" cy="268.6" r="1.7"><animate attributeName="r" values="1.7;1.7;0;0;1.7;1.7" keyTimes="0;0.12;0.2;0.4;0.4;1" dur="6s" repeatCount="indefinite"/></circle>
-      <circle class="mel-splat" cx="670.4" cy="268.5" r="1.7"><animate attributeName="r" values="1.7;1.7;0;0;1.7;1.7" keyTimes="0;0.12;0.2;0.4;0.4;1" dur="6s" repeatCount="indefinite"/></circle>
-      <circle class="mel-splat" cx="697.5" cy="265" r="1.7"><animate attributeName="r" values="1.7;1.7;0;0;1.7;1.7" keyTimes="0;0.12;0.2;0.4;0.4;1" dur="6s" repeatCount="indefinite"/></circle>
-      <circle class="mel-splat" cx="708.2" cy="264.7" r="1.7"><animate attributeName="r" values="1.7;1.7;0;0;1.7;1.7" keyTimes="0;0.12;0.2;0.4;0.4;1" dur="6s" repeatCount="indefinite"/></circle>
-      <circle class="mel-splat" cx="669.6" cy="264.6" r="1.7"><animate attributeName="r" values="1.7;1.7;0;0;1.7;1.7" keyTimes="0;0.12;0.2;0.4;0.4;1" dur="6s" repeatCount="indefinite"/></circle>
-      <circle class="mel-splat" cx="680.3" cy="264.3" r="1.7"><animate attributeName="r" values="1.7;1.7;0;0;1.7;1.7" keyTimes="0;0.12;0.2;0.4;0.5;1" dur="6s" repeatCount="indefinite"/></circle>
-      <circle class="mel-splat" cx="691" cy="264" r="1.7"><animate attributeName="r" values="1.7;1.7;0;0;1.7;1.7" keyTimes="0;0.12;0.2;0.4;0.5;1" dur="6s" repeatCount="indefinite"/></circle>
-      <circle class="mel-splat" cx="701.7" cy="263.7" r="1.7"><animate attributeName="r" values="1.7;1.7;0;0;1.7;1.7" keyTimes="0;0.12;0.2;0.4;0.5;1" dur="6s" repeatCount="indefinite"/></circle>
-      <circle class="mel-splat" cx="663.1" cy="263.6" r="1.7"><animate attributeName="r" values="1.7;1.7;0;0;1.7;1.7" keyTimes="0;0.12;0.2;0.4;0.5;1" dur="6s" repeatCount="indefinite"/></circle>
-      <circle class="mel-splat" cx="712.3" cy="263.4" r="1.7"><animate attributeName="r" values="1.7;1.7;0;0;1.7;1.7" keyTimes="0;0.12;0.2;0.4;0.5;1" dur="6s" repeatCount="indefinite"/></circle>
-      <circle class="mel-splat" cx="676.2" cy="263.3" r="1.7"><animate attributeName="r" values="1.7;1.7;0;0;1.7;1.7" keyTimes="0;0.12;0.2;0.4;0.5;1" dur="6s" repeatCount="indefinite"/></circle>
-      <circle class="mel-splat" cx="686.8" cy="263" r="1.7"><animate attributeName="r" values="1.7;1.7;0;0;1.7;1.7" keyTimes="0;0.12;0.2;0.4;0.5;1" dur="6s" repeatCount="indefinite"/></circle>
-      <circle class="mel-splat" cx="713.9" cy="259.5" r="1.7"><animate attributeName="r" values="1.7;1.7;0;0;1.7;1.7" keyTimes="0;0.12;0.2;0.5;0.5;1" dur="6s" repeatCount="indefinite"/></circle>
-      <circle class="mel-splat" cx="675.4" cy="259.4" r="1.7"><animate attributeName="r" values="1.7;1.7;0;0;1.7;1.7" keyTimes="0;0.12;0.2;0.5;0.5;1" dur="6s" repeatCount="indefinite"/></circle>
-      <circle class="mel-splat" cx="686" cy="259.1" r="1.7"><animate attributeName="r" values="1.7;1.7;0;0;1.7;1.7" keyTimes="0;0.12;0.2;0.5;0.5;1" dur="6s" repeatCount="indefinite"/></circle>
-      <circle class="mel-splat" cx="696.7" cy="258.7" r="1.7"><animate attributeName="r" values="1.7;1.7;0;0;1.7;1.7" keyTimes="0;0.12;0.2;0.5;0.5;1" dur="6s" repeatCount="indefinite"/></circle>
-      <circle class="mel-splat" cx="707.4" cy="258.4" r="1.7"><animate attributeName="r" values="1.7;1.7;0;0;1.7;1.7" keyTimes="0;0.12;0.2;0.5;0.5;1" dur="6s" repeatCount="indefinite"/></circle>
-      <circle class="mel-splat" cx="668.8" cy="258.3" r="1.7"><animate attributeName="r" values="1.7;1.7;0;0;1.7;1.7" keyTimes="0;0.12;0.2;0.5;0.5;1" dur="6s" repeatCount="indefinite"/></circle>
-      <circle class="mel-splat" cx="679.5" cy="258" r="1.7"><animate attributeName="r" values="1.7;1.7;0;0;1.7;1.7" keyTimes="0;0.12;0.2;0.5;0.5;1" dur="6s" repeatCount="indefinite"/></circle>
-      <circle class="mel-splat" cx="692.6" cy="257.7" r="1.7"><animate attributeName="r" values="1.7;1.7;0;0;1.7;1.7" keyTimes="0;0.12;0.2;0.5;0.5;1" dur="6s" repeatCount="indefinite"/></circle>
-      <circle class="mel-splat" cx="703.3" cy="257.4" r="1.7"><animate attributeName="r" values="1.7;1.7;0;0;1.7;1.7" keyTimes="0;0.12;0.2;0.5;0.6;1" dur="6s" repeatCount="indefinite"/></circle>
-      <circle class="mel-splat" cx="670.1" cy="254.1" r="1.7"><animate attributeName="r" values="1.7;1.7;0;0;1.7;1.7" keyTimes="0;0.12;0.2;0.5;0.6;1" dur="6s" repeatCount="indefinite"/></circle>
-      <circle class="mel-splat" cx="680.8" cy="253.8" r="1.7"><animate attributeName="r" values="1.7;1.7;0;0;1.7;1.7" keyTimes="0;0.12;0.2;0.5;0.6;1" dur="6s" repeatCount="indefinite"/></circle>
-      <circle class="mel-splat" cx="691.5" cy="253.5" r="1.7"><animate attributeName="r" values="1.7;1.7;0;0;1.7;1.7" keyTimes="0;0.12;0.2;0.5;0.6;1" dur="6s" repeatCount="indefinite"/></circle>
-      <circle class="mel-splat" cx="702.1" cy="253.2" r="1.7"><animate attributeName="r" values="1.7;1.7;0;0;1.7;1.7" keyTimes="0;0.12;0.2;0.5;0.6;1" dur="6s" repeatCount="indefinite"/></circle>
-      <circle class="mel-splat" cx="674.2" cy="252.8" r="1.7"><animate attributeName="r" values="1.7;1.7;0;0;1.7;1.7" keyTimes="0;0.12;0.2;0.5;0.6;1" dur="6s" repeatCount="indefinite"/></circle>
-      <circle class="mel-splat" cx="684.9" cy="252.4" r="1.7"><animate attributeName="r" values="1.7;1.7;0;0;1.7;1.7" keyTimes="0;0.12;0.2;0.6;0.6;1" dur="6s" repeatCount="indefinite"/></circle>
-      <circle class="mel-splat" cx="698" cy="252.1" r="1.7"><animate attributeName="r" values="1.7;1.7;0;0;1.7;1.7" keyTimes="0;0.12;0.2;0.6;0.6;1" dur="6s" repeatCount="indefinite"/></circle>
-      <circle class="mel-splat" cx="708.7" cy="251.8" r="1.7"><animate attributeName="r" values="1.7;1.7;0;0;1.7;1.7" keyTimes="0;0.12;0.2;0.6;0.6;1" dur="6s" repeatCount="indefinite"/></circle>
-      <circle class="mel-splat" cx="675.5" cy="248.5" r="1.7"><animate attributeName="r" values="1.7;1.7;0;0;1.7;1.7" keyTimes="0;0.12;0.2;0.6;0.6;1" dur="6s" repeatCount="indefinite"/></circle>
-      <circle class="mel-splat" cx="686.2" cy="248.2" r="1.7"><animate attributeName="r" values="1.7;1.7;0;0;1.7;1.7" keyTimes="0;0.12;0.2;0.6;0.6;1" dur="6s" repeatCount="indefinite"/></circle>
-      <circle class="mel-splat" cx="696.9" cy="247.9" r="1.7"><animate attributeName="r" values="1.7;1.7;0;0;1.7;1.7" keyTimes="0;0.12;0.2;0.6;0.6;1" dur="6s" repeatCount="indefinite"/></circle>
-      <circle class="mel-splat" cx="707.6" cy="247.6" r="1.7"><animate attributeName="r" values="1.7;1.7;0;0;1.7;1.7" keyTimes="0;0.12;0.2;0.6;0.6;1" dur="6s" repeatCount="indefinite"/></circle>
-      <circle class="mel-splat" cx="679.7" cy="247.2" r="1.7"><animate attributeName="r" values="1.7;1.7;0;0;1.7;1.7" keyTimes="0;0.12;0.2;0.6;0.6;1" dur="6s" repeatCount="indefinite"/></circle>
-      <circle class="mel-splat" cx="690.3" cy="246.9" r="1.7"><animate attributeName="r" values="1.7;1.7;0;0;1.7;1.7" keyTimes="0;0.12;0.2;0.6;0.6;1" dur="6s" repeatCount="indefinite"/></circle>
-      <circle class="mel-splat" cx="703.4" cy="246.5" r="1.7"><animate attributeName="r" values="1.7;1.7;0;0;1.7;1.7" keyTimes="0;0.12;0.2;0.6;0.7;1" dur="6s" repeatCount="indefinite"/></circle>
-      <circle class="mel-splat" cx="680.6" cy="242.6" r="1.7"><animate attributeName="r" values="1.7;1.7;0;0;1.7;1.7" keyTimes="0;0.12;0.2;0.6;0.7;1" dur="6s" repeatCount="indefinite"/></circle>
-      <circle class="mel-splat" cx="696.8" cy="242.3" r="1.7"><animate attributeName="r" values="1.7;1.7;0;0;1.7;1.7" keyTimes="0;0.12;0.2;0.6;0.7;1" dur="6s" repeatCount="indefinite"/></circle>
-      <circle class="mel-splat" cx="707.5" cy="242" r="1.7"><animate attributeName="r" values="1.7;1.7;0;0;1.7;1.7" keyTimes="0;0.12;0.2;0.6;0.7;1" dur="6s" repeatCount="indefinite"/></circle>
-      <circle class="mel-splat" cx="674.1" cy="241.6" r="1.7"><animate attributeName="r" values="1.7;1.7;0;0;1.7;1.7" keyTimes="0;0.12;0.2;0.6;0.7;1" dur="6s" repeatCount="indefinite"/></circle>
-      <circle class="mel-splat" cx="687.2" cy="241.3" r="1.7"><animate attributeName="r" values="1.7;1.7;0;0;1.7;1.7" keyTimes="0;0.12;0.2;0.6;0.7;1" dur="6s" repeatCount="indefinite"/></circle>
-      <circle class="mel-splat" cx="703.3" cy="241" r="1.7"><animate attributeName="r" values="1.7;1.7;0;0;1.7;1.7" keyTimes="0;0.12;0.2;0.7;0.7;1" dur="6s" repeatCount="indefinite"/></circle>
-      <circle class="mel-splat" cx="708.4" cy="237.5" r="1.7"><animate attributeName="r" values="1.7;1.7;0;0;1.7;1.7" keyTimes="0;0.12;0.2;0.7;0.7;1" dur="6s" repeatCount="indefinite"/></circle>
-      <circle class="mel-splat" cx="680.2" cy="236.7" r="1.7"><animate attributeName="r" values="1.7;1.7;0;0;1.7;1.7" keyTimes="0;0.12;0.2;0.7;0.7;1" dur="6s" repeatCount="indefinite"/></circle>
-      <circle class="mel-splat" cx="701.9" cy="236.4" r="1.7"><animate attributeName="r" values="1.7;1.7;0;0;1.7;1.7" keyTimes="0;0.12;0.2;0.7;0.7;1" dur="6s" repeatCount="indefinite"/></circle>
-      <circle class="mel-splat" cx="676.1" cy="235.7" r="1.7"><animate attributeName="r" values="1.7;1.7;0;0;1.7;1.7" keyTimes="0;0.12;0.2;0.7;0.7;1" dur="6s" repeatCount="indefinite"/></circle>
-      <circle class="mel-splat" cx="697.8" cy="235.4" r="1.7"><animate attributeName="r" values="1.7;1.7;0;0;1.7;1.7" keyTimes="0;0.12;0.2;0.7;0.7;1" dur="6s" repeatCount="indefinite"/></circle>
-      <circle class="mel-splat" cx="702.5" cy="231.6" r="1.7"><animate attributeName="r" values="1.7;1.7;0;0;1.7;1.7" keyTimes="0;0.12;0.2;0.7;0.7;1" dur="6s" repeatCount="indefinite"/></circle>
-      <circle class="mel-splat" cx="696" cy="230.5" r="1.7"><animate attributeName="r" values="1.7;1.7;0;0;1.7;1.7" keyTimes="0;0.12;0.2;0.7;0.7;1" dur="6s" repeatCount="indefinite"/></circle>
-      <circle class="mel-splat" cx="702.9" cy="226.4" r="1.7"><animate attributeName="r" values="1.7;1.7;0;0;1.7;1.7" keyTimes="0;0.12;0.2;0.7;0.8;1" dur="6s" repeatCount="indefinite"/></circle>
-      <circle class="mel-splat" cx="701.8" cy="219.8" r="1.7"><animate attributeName="r" values="1.7;1.7;0;0;1.7;1.7" keyTimes="0;0.12;0.2;0.7;0.8;1" dur="6s" repeatCount="indefinite"/></circle>
       <g clip-path="url(#melMassif)"><rect class="mel-front" x="656" y="274" width="68" height="3.4" opacity="0"><animate attributeName="y" values="274;274;215;215;274" keyTimes="0;0.32;0.72;0.74;1" dur="6s" repeatCount="indefinite"/><animate attributeName="opacity" values="0;0;0.9;0.9;0;0" keyTimes="0;0.32;0.37;0.67;0.72;1" dur="6s" repeatCount="indefinite"/></rect></g>
     </g>
     <path d="M690 202 L731.6 226 L731.6 274 L690 298 L648.4 274 L648.4 226 Z" class="mel-edge"/>
