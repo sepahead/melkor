@@ -107,6 +107,7 @@
     .mel-facet    { fill: #070302; }
     .mel-tin      { stroke: #000000; stroke-opacity: 0.4; stroke-width: 0.6; stroke-linejoin: round; }
     .mel-splat    { fill: url(#melSplat); }
+    .mel-front    { fill: #ffedd5; filter: url(#edgeGlow); }
     .mel-edge     { fill: none; stroke: url(#melBezel); stroke-width: 2.4; stroke-linejoin: miter; }
     .mel-groove   { fill: none; stroke: #05070b; stroke-opacity: 0.5; stroke-width: 1; }
     .mel-hairline { fill: none; stroke: #2b333d; stroke-opacity: 0.55; stroke-width: 1; }
@@ -163,6 +164,8 @@
     .mw-blade-sh  { fill: none; stroke: #05070b; stroke-opacity: 0.7; stroke-width: 1.2; }
     .mw-inner     { fill: none; stroke: url(#mwBezel); stroke-width: 1.6; stroke-opacity: 0.9; stroke-linecap: round; }
     .mw-notch     { fill: none; stroke: #bae6fd; stroke-width: 1.4; stroke-linejoin: round; stroke-linecap: round; }
+    .mw-tick      { stroke: #38bdf8; stroke-opacity: 0.4; stroke-width: 1; }
+    .mw-dot       { fill: #7dd3fc; fill-opacity: 0.16; }
     .mw-lock      { fill: none; stroke: #ef4444; stroke-width: 1.2; stroke-linecap: round; stroke-linejoin: round; }
     .mw-lock-dot  { fill: #ff6b5e; }
     .mw-drone-arm { fill: none; stroke: #7dd3fc; stroke-width: 1.4; stroke-linecap: round; }
@@ -222,6 +225,7 @@
         <stop offset="0%" stop-color="#fed7aa"/><stop offset="45%" stop-color="#b45309"/><stop offset="100%" stop-color="#571c07"/>
       </linearGradient>
       <clipPath id="melClip"><path d="M690 202 L731.6 226 L731.6 274 L690 298 L648.4 274 L648.4 226 Z"/></clipPath>
+      <clipPath id="melMassif"><path d="M660 274 L678 228 L690 248 L702 216 L720 274 Z"/></clipPath>
     </defs>
     <g filter="url(#nodeShadow)"><path d="M690 202 L731.6 226 L731.6 274 L690 298 L648.4 274 L648.4 226 Z" class="mel-plate"/></g>
     <g clip-path="url(#melClip)">
@@ -234,39 +238,66 @@
       <polygon class="mel-tin" points="690,248 702,216 692,274" fill="#331A0d"/>
       <polygon class="mel-tin" points="702,216 702,274 692,274" fill="#20100a"/>
       <path d="M660 274 L678 228 L690 248 L702 216 L720 274" class="mel-ridge"/>
-      <circle class="mel-splat" cx="700.7" cy="219.8" r="2.6" opacity="1"><animate attributeName="opacity" values="1;1;0;0;1;1" keyTimes="0;0.14;0.24;0.5;0.6;1" dur="6s" repeatCount="indefinite"/></circle>
-      <circle class="mel-splat" cx="702" cy="228.1" r="2.6" opacity="1"><animate attributeName="opacity" values="1;1;0;0;1;1" keyTimes="0;0.14;0.24;0.5;0.6;1" dur="6s" repeatCount="indefinite"/></circle>
-      <circle class="mel-splat" cx="677.8" cy="233.4" r="2.6" opacity="1"><animate attributeName="opacity" values="1;1;0;0;1;1" keyTimes="0;0.14;0.24;0.5;0.6;1" dur="6s" repeatCount="indefinite"/></circle>
-      <circle class="mel-splat" cx="701.6" cy="234.7" r="2.6" opacity="1"><animate attributeName="opacity" values="1;1;0;0;1;1" keyTimes="0;0.14;0.24;0.5;0.6;1" dur="6s" repeatCount="indefinite"/></circle>
-      <circle class="mel-splat" cx="680.4" cy="240" r="2.6" opacity="1"><animate attributeName="opacity" values="1;1;0;0;1;1" keyTimes="0;0.14;0.24;0.4;0.5;1" dur="6s" repeatCount="indefinite"/></circle>
-      <circle class="mel-splat" cx="693.7" cy="241.3" r="2.6" opacity="1"><animate attributeName="opacity" values="1;1;0;0;1;1" keyTimes="0;0.14;0.24;0.4;0.5;1" dur="6s" repeatCount="indefinite"/></circle>
-      <circle class="mel-splat" cx="702.5" cy="239.6" r="2.6" opacity="1"><animate attributeName="opacity" values="1;1;0;0;1;1" keyTimes="0;0.14;0.24;0.5;0.6;1" dur="6s" repeatCount="indefinite"/></circle>
-      <circle class="mel-splat" cx="708.3" cy="240.9" r="2.6" opacity="1"><animate attributeName="opacity" values="1;1;0;0;1;1" keyTimes="0;0.14;0.24;0.4;0.5;1" dur="6s" repeatCount="indefinite"/></circle>
-      <circle class="mel-splat" cx="672.1" cy="249.2" r="2.6" opacity="1"><animate attributeName="opacity" values="1;1;0;0;1;1" keyTimes="0;0.14;0.24;0.4;0.5;1" dur="6s" repeatCount="indefinite"/></circle>
-      <circle class="mel-splat" cx="677.9" cy="247.5" r="2.6" opacity="1"><animate attributeName="opacity" values="1;1;0;0;1;1" keyTimes="0;0.14;0.24;0.4;0.5;1" dur="6s" repeatCount="indefinite"/></circle>
-      <circle class="mel-splat" cx="686.7" cy="248.8" r="2.6" opacity="1"><animate attributeName="opacity" values="1;1;0;0;1;1" keyTimes="0;0.14;0.24;0.4;0.5;1" dur="6s" repeatCount="indefinite"/></circle>
-      <circle class="mel-splat" cx="695.5" cy="247.1" r="2.6" opacity="1"><animate attributeName="opacity" values="1;1;0;0;1;1" keyTimes="0;0.14;0.24;0.4;0.5;1" dur="6s" repeatCount="indefinite"/></circle>
-      <circle class="mel-splat" cx="701.3" cy="248.4" r="2.6" opacity="1"><animate attributeName="opacity" values="1;1;0;0;1;1" keyTimes="0;0.14;0.24;0.4;0.5;1" dur="6s" repeatCount="indefinite"/></circle>
-      <circle class="mel-splat" cx="710.1" cy="246.7" r="2.6" opacity="1"><animate attributeName="opacity" values="1;1;0;0;1;1" keyTimes="0;0.14;0.24;0.4;0.5;1" dur="6s" repeatCount="indefinite"/></circle>
-      <circle class="mel-splat" cx="670.9" cy="255" r="2.6" opacity="1"><animate attributeName="opacity" values="1;1;0;0;1;1" keyTimes="0;0.14;0.24;0.4;0.4;1" dur="6s" repeatCount="indefinite"/></circle>
-      <circle class="mel-splat" cx="679.7" cy="256.3" r="2.6" opacity="1"><animate attributeName="opacity" values="1;1;0;0;1;1" keyTimes="0;0.14;0.24;0.4;0.4;1" dur="6s" repeatCount="indefinite"/></circle>
-      <circle class="mel-splat" cx="685.5" cy="254.6" r="2.6" opacity="1"><animate attributeName="opacity" values="1;1;0;0;1;1" keyTimes="0;0.14;0.24;0.4;0.4;1" dur="6s" repeatCount="indefinite"/></circle>
-      <circle class="mel-splat" cx="694.3" cy="255.9" r="2.6" opacity="1"><animate attributeName="opacity" values="1;1;0;0;1;1" keyTimes="0;0.14;0.24;0.4;0.4;1" dur="6s" repeatCount="indefinite"/></circle>
-      <circle class="mel-splat" cx="700.1" cy="254.2" r="2.6" opacity="1"><animate attributeName="opacity" values="1;1;0;0;1;1" keyTimes="0;0.14;0.24;0.4;0.4;1" dur="6s" repeatCount="indefinite"/></circle>
-      <circle class="mel-splat" cx="708.9" cy="255.5" r="2.6" opacity="1"><animate attributeName="opacity" values="1;1;0;0;1;1" keyTimes="0;0.14;0.24;0.4;0.4;1" dur="6s" repeatCount="indefinite"/></circle>
-      <circle class="mel-splat" cx="672.7" cy="260.8" r="2.6" opacity="1"><animate attributeName="opacity" values="1;1;0;0;1;1" keyTimes="0;0.14;0.24;0.3;0.4;1" dur="6s" repeatCount="indefinite"/></circle>
-      <circle class="mel-splat" cx="678.5" cy="262.1" r="2.6" opacity="1"><animate attributeName="opacity" values="1;1;0;0;1;1" keyTimes="0;0.14;0.24;0.3;0.4;1" dur="6s" repeatCount="indefinite"/></circle>
-      <circle class="mel-splat" cx="687.3" cy="263.4" r="2.6" opacity="1"><animate attributeName="opacity" values="1;1;0;0;1;1" keyTimes="0;0.14;0.24;0.3;0.4;1" dur="6s" repeatCount="indefinite"/></circle>
-      <circle class="mel-splat" cx="693.1" cy="261.7" r="2.6" opacity="1"><animate attributeName="opacity" values="1;1;0;0;1;1" keyTimes="0;0.14;0.24;0.3;0.4;1" dur="6s" repeatCount="indefinite"/></circle>
-      <circle class="mel-splat" cx="701.9" cy="263" r="2.6" opacity="1"><animate attributeName="opacity" values="1;1;0;0;1;1" keyTimes="0;0.14;0.24;0.3;0.4;1" dur="6s" repeatCount="indefinite"/></circle>
-      <circle class="mel-splat" cx="707.7" cy="261.3" r="2.6" opacity="1"><animate attributeName="opacity" values="1;1;0;0;1;1" keyTimes="0;0.14;0.24;0.3;0.4;1" dur="6s" repeatCount="indefinite"/></circle>
-      <circle class="mel-splat" cx="664" cy="269.6" r="2.6" opacity="1"><animate attributeName="opacity" values="1;1;0;0;1;1" keyTimes="0;0.14;0.24;0.3;0.4;1" dur="6s" repeatCount="indefinite"/></circle>
-      <circle class="mel-splat" cx="672.8" cy="267.9" r="2.6" opacity="1"><animate attributeName="opacity" values="1;1;0;0;1;1" keyTimes="0;0.14;0.24;0.3;0.4;1" dur="6s" repeatCount="indefinite"/></circle>
-      <circle class="mel-splat" cx="678.6" cy="269.2" r="2.6" opacity="1"><animate attributeName="opacity" values="1;1;0;0;1;1" keyTimes="0;0.14;0.24;0.3;0.4;1" dur="6s" repeatCount="indefinite"/></circle>
-      <circle class="mel-splat" cx="687.4" cy="267.5" r="2.6" opacity="1"><animate attributeName="opacity" values="1;1;0;0;1;1" keyTimes="0;0.14;0.24;0.3;0.4;1" dur="6s" repeatCount="indefinite"/></circle>
-      <circle class="mel-splat" cx="693.2" cy="268.8" r="2.6" opacity="1"><animate attributeName="opacity" values="1;1;0;0;1;1" keyTimes="0;0.14;0.24;0.3;0.4;1" dur="6s" repeatCount="indefinite"/></circle>
-      <circle class="mel-splat" cx="702" cy="270.1" r="2.6" opacity="1"><animate attributeName="opacity" values="1;1;0;0;1;1" keyTimes="0;0.14;0.24;0.3;0.4;1" dur="6s" repeatCount="indefinite"/></circle>
-      <circle class="mel-splat" cx="707.8" cy="268.4" r="2.6" opacity="1"><animate attributeName="opacity" values="1;1;0;0;1;1" keyTimes="0;0.14;0.24;0.3;0.4;1" dur="6s" repeatCount="indefinite"/></circle>
+      <circle class="mel-splat" cx="681.1" cy="270.6" r="1.7"><animate attributeName="r" values="1.7;1.7;0;0;1.7;1.7" keyTimes="0;0.12;0.2;0.3;0.4;1" dur="6s" repeatCount="indefinite"/></circle>
+      <circle class="mel-splat" cx="691.8" cy="270.3" r="1.7"><animate attributeName="r" values="1.7;1.7;0;0;1.7;1.7" keyTimes="0;0.12;0.2;0.3;0.4;1" dur="6s" repeatCount="indefinite"/></circle>
+      <circle class="mel-splat" cx="702.5" cy="270" r="1.7"><animate attributeName="r" values="1.7;1.7;0;0;1.7;1.7" keyTimes="0;0.12;0.2;0.3;0.4;1" dur="6s" repeatCount="indefinite"/></circle>
+      <circle class="mel-splat" cx="663.9" cy="269.9" r="1.7"><animate attributeName="r" values="1.7;1.7;0;0;1.7;1.7" keyTimes="0;0.12;0.2;0.3;0.4;1" dur="6s" repeatCount="indefinite"/></circle>
+      <circle class="mel-splat" cx="713.1" cy="269.7" r="1.7"><animate attributeName="r" values="1.7;1.7;0;0;1.7;1.7" keyTimes="0;0.12;0.2;0.3;0.4;1" dur="6s" repeatCount="indefinite"/></circle>
+      <circle class="mel-splat" cx="674.6" cy="269.6" r="1.7"><animate attributeName="r" values="1.7;1.7;0;0;1.7;1.7" keyTimes="0;0.12;0.2;0.4;0.4;1" dur="6s" repeatCount="indefinite"/></circle>
+      <circle class="mel-splat" cx="685.2" cy="269.3" r="1.7"><animate attributeName="r" values="1.7;1.7;0;0;1.7;1.7" keyTimes="0;0.12;0.2;0.4;0.4;1" dur="6s" repeatCount="indefinite"/></circle>
+      <circle class="mel-splat" cx="695.9" cy="268.9" r="1.7"><animate attributeName="r" values="1.7;1.7;0;0;1.7;1.7" keyTimes="0;0.12;0.2;0.4;0.4;1" dur="6s" repeatCount="indefinite"/></circle>
+      <circle class="mel-splat" cx="709" cy="268.6" r="1.7"><animate attributeName="r" values="1.7;1.7;0;0;1.7;1.7" keyTimes="0;0.12;0.2;0.4;0.4;1" dur="6s" repeatCount="indefinite"/></circle>
+      <circle class="mel-splat" cx="670.4" cy="268.5" r="1.7"><animate attributeName="r" values="1.7;1.7;0;0;1.7;1.7" keyTimes="0;0.12;0.2;0.4;0.4;1" dur="6s" repeatCount="indefinite"/></circle>
+      <circle class="mel-splat" cx="697.5" cy="265" r="1.7"><animate attributeName="r" values="1.7;1.7;0;0;1.7;1.7" keyTimes="0;0.12;0.2;0.4;0.4;1" dur="6s" repeatCount="indefinite"/></circle>
+      <circle class="mel-splat" cx="708.2" cy="264.7" r="1.7"><animate attributeName="r" values="1.7;1.7;0;0;1.7;1.7" keyTimes="0;0.12;0.2;0.4;0.4;1" dur="6s" repeatCount="indefinite"/></circle>
+      <circle class="mel-splat" cx="669.6" cy="264.6" r="1.7"><animate attributeName="r" values="1.7;1.7;0;0;1.7;1.7" keyTimes="0;0.12;0.2;0.4;0.4;1" dur="6s" repeatCount="indefinite"/></circle>
+      <circle class="mel-splat" cx="680.3" cy="264.3" r="1.7"><animate attributeName="r" values="1.7;1.7;0;0;1.7;1.7" keyTimes="0;0.12;0.2;0.4;0.5;1" dur="6s" repeatCount="indefinite"/></circle>
+      <circle class="mel-splat" cx="691" cy="264" r="1.7"><animate attributeName="r" values="1.7;1.7;0;0;1.7;1.7" keyTimes="0;0.12;0.2;0.4;0.5;1" dur="6s" repeatCount="indefinite"/></circle>
+      <circle class="mel-splat" cx="701.7" cy="263.7" r="1.7"><animate attributeName="r" values="1.7;1.7;0;0;1.7;1.7" keyTimes="0;0.12;0.2;0.4;0.5;1" dur="6s" repeatCount="indefinite"/></circle>
+      <circle class="mel-splat" cx="663.1" cy="263.6" r="1.7"><animate attributeName="r" values="1.7;1.7;0;0;1.7;1.7" keyTimes="0;0.12;0.2;0.4;0.5;1" dur="6s" repeatCount="indefinite"/></circle>
+      <circle class="mel-splat" cx="712.3" cy="263.4" r="1.7"><animate attributeName="r" values="1.7;1.7;0;0;1.7;1.7" keyTimes="0;0.12;0.2;0.4;0.5;1" dur="6s" repeatCount="indefinite"/></circle>
+      <circle class="mel-splat" cx="676.2" cy="263.3" r="1.7"><animate attributeName="r" values="1.7;1.7;0;0;1.7;1.7" keyTimes="0;0.12;0.2;0.4;0.5;1" dur="6s" repeatCount="indefinite"/></circle>
+      <circle class="mel-splat" cx="686.8" cy="263" r="1.7"><animate attributeName="r" values="1.7;1.7;0;0;1.7;1.7" keyTimes="0;0.12;0.2;0.4;0.5;1" dur="6s" repeatCount="indefinite"/></circle>
+      <circle class="mel-splat" cx="713.9" cy="259.5" r="1.7"><animate attributeName="r" values="1.7;1.7;0;0;1.7;1.7" keyTimes="0;0.12;0.2;0.5;0.5;1" dur="6s" repeatCount="indefinite"/></circle>
+      <circle class="mel-splat" cx="675.4" cy="259.4" r="1.7"><animate attributeName="r" values="1.7;1.7;0;0;1.7;1.7" keyTimes="0;0.12;0.2;0.5;0.5;1" dur="6s" repeatCount="indefinite"/></circle>
+      <circle class="mel-splat" cx="686" cy="259.1" r="1.7"><animate attributeName="r" values="1.7;1.7;0;0;1.7;1.7" keyTimes="0;0.12;0.2;0.5;0.5;1" dur="6s" repeatCount="indefinite"/></circle>
+      <circle class="mel-splat" cx="696.7" cy="258.7" r="1.7"><animate attributeName="r" values="1.7;1.7;0;0;1.7;1.7" keyTimes="0;0.12;0.2;0.5;0.5;1" dur="6s" repeatCount="indefinite"/></circle>
+      <circle class="mel-splat" cx="707.4" cy="258.4" r="1.7"><animate attributeName="r" values="1.7;1.7;0;0;1.7;1.7" keyTimes="0;0.12;0.2;0.5;0.5;1" dur="6s" repeatCount="indefinite"/></circle>
+      <circle class="mel-splat" cx="668.8" cy="258.3" r="1.7"><animate attributeName="r" values="1.7;1.7;0;0;1.7;1.7" keyTimes="0;0.12;0.2;0.5;0.5;1" dur="6s" repeatCount="indefinite"/></circle>
+      <circle class="mel-splat" cx="679.5" cy="258" r="1.7"><animate attributeName="r" values="1.7;1.7;0;0;1.7;1.7" keyTimes="0;0.12;0.2;0.5;0.5;1" dur="6s" repeatCount="indefinite"/></circle>
+      <circle class="mel-splat" cx="692.6" cy="257.7" r="1.7"><animate attributeName="r" values="1.7;1.7;0;0;1.7;1.7" keyTimes="0;0.12;0.2;0.5;0.5;1" dur="6s" repeatCount="indefinite"/></circle>
+      <circle class="mel-splat" cx="703.3" cy="257.4" r="1.7"><animate attributeName="r" values="1.7;1.7;0;0;1.7;1.7" keyTimes="0;0.12;0.2;0.5;0.6;1" dur="6s" repeatCount="indefinite"/></circle>
+      <circle class="mel-splat" cx="670.1" cy="254.1" r="1.7"><animate attributeName="r" values="1.7;1.7;0;0;1.7;1.7" keyTimes="0;0.12;0.2;0.5;0.6;1" dur="6s" repeatCount="indefinite"/></circle>
+      <circle class="mel-splat" cx="680.8" cy="253.8" r="1.7"><animate attributeName="r" values="1.7;1.7;0;0;1.7;1.7" keyTimes="0;0.12;0.2;0.5;0.6;1" dur="6s" repeatCount="indefinite"/></circle>
+      <circle class="mel-splat" cx="691.5" cy="253.5" r="1.7"><animate attributeName="r" values="1.7;1.7;0;0;1.7;1.7" keyTimes="0;0.12;0.2;0.5;0.6;1" dur="6s" repeatCount="indefinite"/></circle>
+      <circle class="mel-splat" cx="702.1" cy="253.2" r="1.7"><animate attributeName="r" values="1.7;1.7;0;0;1.7;1.7" keyTimes="0;0.12;0.2;0.5;0.6;1" dur="6s" repeatCount="indefinite"/></circle>
+      <circle class="mel-splat" cx="674.2" cy="252.8" r="1.7"><animate attributeName="r" values="1.7;1.7;0;0;1.7;1.7" keyTimes="0;0.12;0.2;0.5;0.6;1" dur="6s" repeatCount="indefinite"/></circle>
+      <circle class="mel-splat" cx="684.9" cy="252.4" r="1.7"><animate attributeName="r" values="1.7;1.7;0;0;1.7;1.7" keyTimes="0;0.12;0.2;0.6;0.6;1" dur="6s" repeatCount="indefinite"/></circle>
+      <circle class="mel-splat" cx="698" cy="252.1" r="1.7"><animate attributeName="r" values="1.7;1.7;0;0;1.7;1.7" keyTimes="0;0.12;0.2;0.6;0.6;1" dur="6s" repeatCount="indefinite"/></circle>
+      <circle class="mel-splat" cx="708.7" cy="251.8" r="1.7"><animate attributeName="r" values="1.7;1.7;0;0;1.7;1.7" keyTimes="0;0.12;0.2;0.6;0.6;1" dur="6s" repeatCount="indefinite"/></circle>
+      <circle class="mel-splat" cx="675.5" cy="248.5" r="1.7"><animate attributeName="r" values="1.7;1.7;0;0;1.7;1.7" keyTimes="0;0.12;0.2;0.6;0.6;1" dur="6s" repeatCount="indefinite"/></circle>
+      <circle class="mel-splat" cx="686.2" cy="248.2" r="1.7"><animate attributeName="r" values="1.7;1.7;0;0;1.7;1.7" keyTimes="0;0.12;0.2;0.6;0.6;1" dur="6s" repeatCount="indefinite"/></circle>
+      <circle class="mel-splat" cx="696.9" cy="247.9" r="1.7"><animate attributeName="r" values="1.7;1.7;0;0;1.7;1.7" keyTimes="0;0.12;0.2;0.6;0.6;1" dur="6s" repeatCount="indefinite"/></circle>
+      <circle class="mel-splat" cx="707.6" cy="247.6" r="1.7"><animate attributeName="r" values="1.7;1.7;0;0;1.7;1.7" keyTimes="0;0.12;0.2;0.6;0.6;1" dur="6s" repeatCount="indefinite"/></circle>
+      <circle class="mel-splat" cx="679.7" cy="247.2" r="1.7"><animate attributeName="r" values="1.7;1.7;0;0;1.7;1.7" keyTimes="0;0.12;0.2;0.6;0.6;1" dur="6s" repeatCount="indefinite"/></circle>
+      <circle class="mel-splat" cx="690.3" cy="246.9" r="1.7"><animate attributeName="r" values="1.7;1.7;0;0;1.7;1.7" keyTimes="0;0.12;0.2;0.6;0.6;1" dur="6s" repeatCount="indefinite"/></circle>
+      <circle class="mel-splat" cx="703.4" cy="246.5" r="1.7"><animate attributeName="r" values="1.7;1.7;0;0;1.7;1.7" keyTimes="0;0.12;0.2;0.6;0.7;1" dur="6s" repeatCount="indefinite"/></circle>
+      <circle class="mel-splat" cx="680.6" cy="242.6" r="1.7"><animate attributeName="r" values="1.7;1.7;0;0;1.7;1.7" keyTimes="0;0.12;0.2;0.6;0.7;1" dur="6s" repeatCount="indefinite"/></circle>
+      <circle class="mel-splat" cx="696.8" cy="242.3" r="1.7"><animate attributeName="r" values="1.7;1.7;0;0;1.7;1.7" keyTimes="0;0.12;0.2;0.6;0.7;1" dur="6s" repeatCount="indefinite"/></circle>
+      <circle class="mel-splat" cx="707.5" cy="242" r="1.7"><animate attributeName="r" values="1.7;1.7;0;0;1.7;1.7" keyTimes="0;0.12;0.2;0.6;0.7;1" dur="6s" repeatCount="indefinite"/></circle>
+      <circle class="mel-splat" cx="674.1" cy="241.6" r="1.7"><animate attributeName="r" values="1.7;1.7;0;0;1.7;1.7" keyTimes="0;0.12;0.2;0.6;0.7;1" dur="6s" repeatCount="indefinite"/></circle>
+      <circle class="mel-splat" cx="687.2" cy="241.3" r="1.7"><animate attributeName="r" values="1.7;1.7;0;0;1.7;1.7" keyTimes="0;0.12;0.2;0.6;0.7;1" dur="6s" repeatCount="indefinite"/></circle>
+      <circle class="mel-splat" cx="703.3" cy="241" r="1.7"><animate attributeName="r" values="1.7;1.7;0;0;1.7;1.7" keyTimes="0;0.12;0.2;0.7;0.7;1" dur="6s" repeatCount="indefinite"/></circle>
+      <circle class="mel-splat" cx="708.4" cy="237.5" r="1.7"><animate attributeName="r" values="1.7;1.7;0;0;1.7;1.7" keyTimes="0;0.12;0.2;0.7;0.7;1" dur="6s" repeatCount="indefinite"/></circle>
+      <circle class="mel-splat" cx="680.2" cy="236.7" r="1.7"><animate attributeName="r" values="1.7;1.7;0;0;1.7;1.7" keyTimes="0;0.12;0.2;0.7;0.7;1" dur="6s" repeatCount="indefinite"/></circle>
+      <circle class="mel-splat" cx="701.9" cy="236.4" r="1.7"><animate attributeName="r" values="1.7;1.7;0;0;1.7;1.7" keyTimes="0;0.12;0.2;0.7;0.7;1" dur="6s" repeatCount="indefinite"/></circle>
+      <circle class="mel-splat" cx="676.1" cy="235.7" r="1.7"><animate attributeName="r" values="1.7;1.7;0;0;1.7;1.7" keyTimes="0;0.12;0.2;0.7;0.7;1" dur="6s" repeatCount="indefinite"/></circle>
+      <circle class="mel-splat" cx="697.8" cy="235.4" r="1.7"><animate attributeName="r" values="1.7;1.7;0;0;1.7;1.7" keyTimes="0;0.12;0.2;0.7;0.7;1" dur="6s" repeatCount="indefinite"/></circle>
+      <circle class="mel-splat" cx="702.5" cy="231.6" r="1.7"><animate attributeName="r" values="1.7;1.7;0;0;1.7;1.7" keyTimes="0;0.12;0.2;0.7;0.7;1" dur="6s" repeatCount="indefinite"/></circle>
+      <circle class="mel-splat" cx="696" cy="230.5" r="1.7"><animate attributeName="r" values="1.7;1.7;0;0;1.7;1.7" keyTimes="0;0.12;0.2;0.7;0.7;1" dur="6s" repeatCount="indefinite"/></circle>
+      <circle class="mel-splat" cx="702.9" cy="226.4" r="1.7"><animate attributeName="r" values="1.7;1.7;0;0;1.7;1.7" keyTimes="0;0.12;0.2;0.7;0.8;1" dur="6s" repeatCount="indefinite"/></circle>
+      <circle class="mel-splat" cx="701.8" cy="219.8" r="1.7"><animate attributeName="r" values="1.7;1.7;0;0;1.7;1.7" keyTimes="0;0.12;0.2;0.7;0.8;1" dur="6s" repeatCount="indefinite"/></circle>
+      <g clip-path="url(#melMassif)"><rect class="mel-front" x="656" y="274" width="68" height="3.4" opacity="0"><animate attributeName="y" values="274;274;215;215;274" keyTimes="0;0.32;0.72;0.74;1" dur="6s" repeatCount="indefinite"/><animate attributeName="opacity" values="0;0;0.9;0.9;0;0" keyTimes="0;0.32;0.37;0.67;0.72;1" dur="6s" repeatCount="indefinite"/></rect></g>
     </g>
     <path d="M690 202 L731.6 226 L731.6 274 L690 298 L648.4 274 L648.4 226 Z" class="mel-edge"/>
     <path d="M690 204.8 L729.2 227.4 L729.2 272.6 L690 295.2 L650.8 272.6 L650.8 227.4 Z" class="mel-groove"/>
