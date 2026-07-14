@@ -85,17 +85,8 @@ jobs:
             -DPython3_EXECUTABLE="$(command -v python)"
           cmake --build build-cpu -j$(sysctl -n hw.ncpu)
           cd build-cpu && ctest --output-on-failure
-      - name: Build and test quarantined CoreML surface
-        working-directory: DA3coreml/coreml
-        run: |
-          swift package resolve
-          git diff --exit-code -- Package.resolved
-          swift build -c release
-          swift test --parallel
-          help="$(.build/release/da3-coreml --help)"
-          grep -q 'infer' <<<"$help"
-          grep -q 'benchmark' <<<"$help"
-          ! grep -Eq 'fuse|stream|convert|to-3dgs' <<<"$help"
+      - name: Verify third-party dependency lock
+        run: python3 tools/verify_third_party.py --check
 
   sanitize-macos:
     runs-on: macos-14
@@ -208,12 +199,20 @@ jobs:
           numpy==2.4.6 ruff==0.15.18
       - name: Lint maintained Python
         run: |
-          # Lint Melkor-authored Python only. The root pyproject.toml excludes
-          # vendored upstream snapshots (DA3coreml/src is ByteDance code with its
-          # own .flake8; ml-sharp is Apple research code). Running ruff with no
-          # explicit paths makes it pick up the root config and respect those
-          # excludes.
+          # Lint Melkor-authored Python only. The root pyproject.toml excludes the
+          # vendored third_party tree, which is never Melkor's to lint. Running ruff
+          # with no explicit paths picks up the root config and respects that exclude.
           ruff check . --no-unsafe-fixes
+      - name: Verify dependency lock, notices, and version sync
+        run: |
+          # The lock records the exact upstream revision and a content digest of every
+          # vendored tree, plus every local patch. Drift here means either an undeclared
+          # fork or a stale notice -- both are licence problems, not style problems.
+          python3 tools/verify_third_party.py --check
+          python3 tools/generate_notices.py --check
+          python3 tools/check_version_sync.py --check
+      - name: Verify source-bundle allowlist
+        run: python3 tools/build_source_bundle.py --check
       - name: Test DA3 synthetic Gaussian conversion
         run: |
           python -c "import numpy; print(f'NumPy {numpy.__version__}')"

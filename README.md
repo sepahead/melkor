@@ -118,12 +118,16 @@ See [Streaming and 4D](docs/STREAMING.md).
 committed to this repository. It does not install system packages or download
 live dependencies.
 
-The Melkor core is MIT-licensed, but the complete repository and optional
-toolchain contain components under other terms: tracked OpenSplat is AGPL-3.0,
-Apple model weights are research-only, and some optional checkpoints are
-non-commercial or do not publish clear terms. Review
-[Third-party licenses](THIRD_PARTY_LICENSES.md) before redistribution or model
-use.
+The Melkor core is MIT-licensed, and as of 2026-07-14 it no longer vendors any copyleft or
+research-only source. What it redistributes — SPZ, tinygltf, stb — is permissively licensed
+and pinned in `third_party/manifest.lock.json`.
+
+External reconstruction and training systems remain under **their own terms**, which are not
+Melkor's terms. OpenSplat is AGPL-3.0-only, and several model checkpoints are research-only,
+non-commercial, or publish no clear terms at all. Melkor invokes those programs; it does not
+ship them, and it cannot grant you rights to them. Review
+[Third-party licences](THIRD_PARTY_LICENSES.md) and [External adapters](docs/adapters/index.md)
+before redistribution or model use.
 
 ## Quick Start
 
@@ -398,13 +402,17 @@ melkor/
 ├── viewer/            SparkJS viewer, optional Tauri shell, Playwright tests
 ├── scripts/           Setup, SfM, training, and validation scripts
 ├── docs/              Component and workflow documentation
-├── tools/da3/         Reviewed DA3 inference bridge
-├── tools/OpenSplat/   Tracked AGPL-3.0 OpenSplat snapshot
-├── DA3coreml/         Experimental CoreML research port
-├── ml-sharp/          Quarantined Apple research snapshot
+├── tools/             Repository tooling: version sync, notices, dependency lock
 ├── release/           Deterministic source-RC evidence
-└── third_party/       Pinned tinygltf, stb, and SPZ sources
+└── third_party/       Pinned tinygltf, stb, and SPZ sources, with a lock manifest
 ```
+
+External reconstruction and training systems are **not** vendored here. They are separate
+programs, reached through pinned adapter manifests, and their licences are not Melkor's
+licence. The AGPL OpenSplat snapshot, the Depth Anything 3 CoreML port, and the Apple
+`ml-sharp` snapshot were removed from the MIT core on 2026-07-14; their attribution and the
+reasoning are in [External adapters](docs/adapters/index.md), and the tree that contained
+them is preserved under the tag `archive/pre-v2-research-bundle-20260714`.
 
 ## Contributing
 

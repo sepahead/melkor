@@ -25,7 +25,6 @@ Makefile
 
 # Large directories installed by setup scripts
 tools/libtorch/
-tools/OpenSplat/build/
 tools/gsplat-mps/
 # Model/tool clones from setup_feedforward_sota.sh and setup_streaming.sh
 # (multi-GB repos + venvs; the setup scripts and docs stay tracked)
@@ -116,14 +115,7 @@ database.db
 .aider*
 .factory/
 
-# DA3coreml working artifacts
-DA3coreml/coreml/output*
-DA3coreml/coreml/tmp_*
-DA3coreml/coreml/sampled_*
-DA3coreml/coreml/Models/
 
-# ml-sharp data outputs
-ml-sharp/data/
 
 # Downloaded test datasets
 test_data/
@@ -143,3 +135,14 @@ viewer/dist/
 # Tauri desktop shell: Rust build output + generated bindings (src-tauri source stays tracked)
 viewer/src-tauri/target/
 viewer/src-tauri/gen/
+
+# External tool trees created by scripts/setup_*.sh. These are cloned at setup time into
+# the working tree; they are NOT part of the MIT core distribution and must never be
+# committed. tools/OpenSplat in particular is AGPL-3.0-only -- tracking it inside an MIT
+# repository is release blocker P0-16, and it was removed from the tree on 2026-07-14.
+tools/OpenSplat/
+tools/da3/
+tools/lichtfeld/
+tools/gsplat/
+tools/glomap/
+tools/colmap/

@@ -191,7 +191,8 @@ DifferentiableRenderer::~DifferentiableRenderer() = default;
 // These port the gsplat/gsplat-metal EWA projection and its VJPs to plain C++.
 // All 3x3 matrices are row-major: M[r*3+c] = element at (row r, col c).
 // Reference: gsplat mathematical supplement (arXiv:2312.02121) and the
-// gsplat_metal.metal kernels in tools/OpenSplat/rasterizer/gsplat-metal/.
+// gsplat_metal.metal kernels in OpenSplat's rasterizer/gsplat-metal/.
+// OpenSplat is an external AGPL-3.0 program, not vendored here; see docs/adapters/index.md.
 // ============================================================================
 
 struct Mat3 {

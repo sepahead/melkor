@@ -175,7 +175,9 @@ or production pipelines.
 
 ## CoreML status
 
-`DA3coreml/coreml/` is an experimental single-image port. Its inference and
+The CoreML port was an experimental single-image surface. It was removed from this
+repository on 2026-07-14 (see docs/adapters/index.md); the notes below describe its
+behaviour for historical reference. Its inference and
 benchmark commands remain available for research, but its multi-view fusion,
 streaming, conversion, and Gaussian-export commands are disabled until they
 match official DA3 semantics end to end. It is not the supported replacement

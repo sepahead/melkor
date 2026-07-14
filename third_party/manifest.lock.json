@@ -1,0 +1,156 @@
+{
+  "schema_version": 1,
+  "_comment": [
+    "Immutable identity for every third-party source compiled into Melkor.",
+    "",
+    "'revision' is the authoritative pin: a git commit SHA is a cryptographic commitment",
+    "to a source tree. 'archive.sha256' is recorded for offline dependency caches, but it",
+    "is NOT authoritative -- GitHub's generated archive endpoint recompresses on the fly and",
+    "has changed its compression before, silently invalidating pinned hashes. A digest that",
+    "can change while the source does not is worse than no digest.",
+    "",
+    "'vendored.content_sha256' is what CI actually verifies: a digest over the vendored file",
+    "contents (sorted path, length, bytes), independent of archive format and timestamps. It",
+    "covers the tree that really gets compiled.",
+    "",
+    "Local patches are declared, digested, and carry a rationale. An undocumented fork is",
+    "indistinguishable from a supply-chain compromise and makes upgrading a guessing game.",
+    "",
+    "Verified by tools/verify_third_party.py --check."
+  ],
+  "dependencies": [
+    {
+      "id": "spz",
+      "kind": "source",
+      "purpose": "Niantic SPZ Gaussian-splat codec: read and write the .spz container.",
+      "upstream": "https://github.com/nianticlabs/spz",
+      "revision": "2cf0be04d86b5f9632d9073ccbbe3b1e6a609f31",
+      "release": "v2.1.0",
+      "archive": {
+        "url": "https://github.com/nianticlabs/spz/archive/2cf0be04d86b5f9632d9073ccbbe3b1e6a609f31.tar.gz",
+        "sha256": null,
+        "note": "Not recorded: GitHub-generated archives are not byte-stable. The revision is authoritative."
+      },
+      "license": "MIT",
+      "license_file": "third_party/spz/LICENSE",
+      "vendored": {
+        "path": "third_party/spz",
+        "content_sha256": "0495153e784694228da0974686f8e70b601fd60119e6f7ec6b956778114959fd",
+        "file_count": 23
+      },
+      "patches": [
+        {
+          "file": "0001-probe-spz-version-without-inflating.patch",
+          "sha256": "53be444ba4706ed1900e2aa9dcd9d04a2d28bd52d185e3fd020bf86ed6ebc512",
+          "rationale": "Upstream offers no way to read a file's format version without first inflating its gzip payload, which forces decompression of attacker-controlled data before any version policy check can run. Adds a bounded header-only probe.",
+          "upstream_status": "not-submitted"
+        },
+        {
+          "file": "0002-bound-fixed-point-bits-and-finite-logits.patch",
+          "sha256": "5ccd809e2281a77500699b5a342b19d533cd317b1b90f6e6155da805b7d33838",
+          "rationale": "fractionalBits is read from the file and used as a shift exponent with no upper bound (max is 23 for signed 24-bit fixed point). Separately, invSigmoid maps packed alpha bytes 0 and 255 to infinite logits, so even a default opacity of 1.0 round-trips to a non-finite value. Both are clamped.",
+          "upstream_status": "not-submitted"
+        }
+      ],
+      "format_versions": {
+        "read": [
+          1,
+          2,
+          3
+        ],
+        "write": [
+          3
+        ],
+        "_comment": "The vendored v2.1.0 codec hardcodes header version 3. Upstream v3.0.0 sets LATEST_SPZ_HEADER_VERSION = 4, verified in src/cc/load-spz.h at commit 5bf2945de1a003cee07133b1e495fe9c6ffdc7e7. Melkor therefore cannot currently read or write SPZ v4."
+      },
+      "upgrade_target": {
+        "revision": "5bf2945de1a003cee07133b1e495fe9c6ffdc7e7",
+        "release": "v3.0.0",
+        "blocker": "P0-09",
+        "work_package": "WP08",
+        "reason": "Upstream file format advanced to v4 with Zstandard streams, coordinate-system metadata, antialiasing metadata, and SH degree up to 4. Both local patches must be re-evaluated against the restructured upstream rather than forward-ported blindly."
+      },
+      "used_by": [
+        "melkor_core"
+      ],
+      "update_policy": "manual-reviewed",
+      "security_contact": "upstream",
+      "review": {
+        "date": "2026-07-14",
+        "owner": "sepahead",
+        "next_review": "2027-01-14"
+      }
+    },
+    {
+      "id": "tinygltf",
+      "kind": "source",
+      "purpose": "glTF 2.0 / GLB container parsing.",
+      "upstream": "https://github.com/syoyo/tinygltf",
+      "revision": "81bd50c1062fdb956e878efa2a9234b2b9ec91ec",
+      "release": "v2.9.7",
+      "archive": {
+        "url": "https://github.com/syoyo/tinygltf/archive/81bd50c1062fdb956e878efa2a9234b2b9ec91ec.tar.gz",
+        "sha256": null,
+        "note": "Not recorded: GitHub-generated archives are not byte-stable. The revision is authoritative."
+      },
+      "license": "MIT",
+      "license_file": "third_party/tinygltf/LICENSE",
+      "vendored": {
+        "path": "third_party/tinygltf",
+        "content_sha256": "0f7541323b9433f93b925a2410daccbd50e9fc160aece510c889a7d6ec96a42b",
+        "file_count": 3
+      },
+      "embeds": [
+        {
+          "id": "nlohmann-json",
+          "purpose": "JSON parsing, bundled by tinygltf as json.hpp.",
+          "upstream": "https://github.com/nlohmann/json",
+          "version": "3.10.4",
+          "license": "MIT",
+          "license_file": "third_party/licenses/nlohmann-json-MIT.txt",
+          "_comment": "A transitive dependency embedded as a single header. It ships in our artifacts, so it needs its own notice; the parent's licence does not cover it."
+        }
+      ],
+      "used_by": [
+        "melkor_core"
+      ],
+      "update_policy": "manual-reviewed",
+      "security_contact": "upstream",
+      "review": {
+        "date": "2026-07-14",
+        "owner": "sepahead",
+        "next_review": "2027-01-14"
+      }
+    },
+    {
+      "id": "stb",
+      "kind": "source",
+      "purpose": "Image decoding for glTF base-colour textures (stb_image.h only).",
+      "upstream": "https://github.com/nothings/stb",
+      "revision": "31c1ad37456438565541f4919958214b6e762fb4",
+      "release": null,
+      "archive": {
+        "url": "https://github.com/nothings/stb/archive/31c1ad37456438565541f4919958214b6e762fb4.tar.gz",
+        "sha256": null,
+        "note": "Not recorded: GitHub-generated archives are not byte-stable. The revision is authoritative. stb publishes no release tags; the file itself declares stb_image v2.30."
+      },
+      "license": "MIT OR Unlicense",
+      "license_file": "third_party/stb/LICENSE",
+      "vendored": {
+        "path": "third_party/stb",
+        "content_sha256": "10ec99b411febb3b7bb64d6ef898411d09386416eccf351e2f339217c1c88e63",
+        "file_count": 2
+      },
+      "used_by": [
+        "melkor_core"
+      ],
+      "update_policy": "manual-reviewed",
+      "security_contact": "upstream",
+      "review": {
+        "date": "2026-07-14",
+        "owner": "sepahead",
+        "next_review": "2027-01-14"
+      }
+    }
+  ]
+}

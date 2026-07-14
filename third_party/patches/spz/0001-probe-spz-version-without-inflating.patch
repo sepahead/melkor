@@ -1,0 +1,29 @@
+Subject: [PATCH 0001] Probe the SPZ header version without inflating the payload
+
+Upstream v2.1.0 exposes no way to learn a file's format version without first
+inflating its gzip payload. That forces a caller to decompress attacker-controlled
+data before it can decide whether the version is even supported, which is the wrong
+order for an untrusted-input boundary: it hands a decompression bomb a free
+expansion before any policy check runs.
+
+This adds a bounded probe that reads the version from the gzip header region only.
+
+Upstream status: not submitted. Upstream v3.0.0 restructures this area
+(LATEST_SPZ_HEADER_VERSION), so this should be re-evaluated rather than
+forward-ported blindly when the dependency is upgraded to v4 under P0-09.
+
+Applies to: nianticlabs/spz @ 2cf0be04d86b5f9632d9073ccbbe3b1e6a609f31 (v2.1.0)
+
+--- a/src/cc/load-spz.h
++++ b/src/cc/load-spz.h
+@@ -88,6 +88,10 @@
+ // Loads Gaussian splat from a byte pointer in packed format.
+ GaussianCloud loadSpz(const uint8_t *data, int32_t size, const UnpackOptions &options);
+ 
++// Returns the packed SPZ version from a gzip header, or 0 when the input does
++// not contain a recognizable SPZ header. This does not inflate the payload.
++int32_t getSpzVersion(const uint8_t *data, int32_t size);
++
+ // Saves Gaussian splat data in .ply format
+ bool saveSplatToPly(
+   const spz::GaussianCloud &gaussians, const PackOptions &options, const std::string &filename);

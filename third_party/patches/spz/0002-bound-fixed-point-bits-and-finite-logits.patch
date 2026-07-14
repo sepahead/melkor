@@ -1,0 +1,196 @@
+Subject: [PATCH 0002] Bound fixed-point fractional bits and keep decoded logits finite
+
+Two decode hazards in upstream v2.1.0:
+
+1. `fractionalBits` is read from the file and used as a shift exponent with no
+   upper bound. Versions 2 and 3 store each coordinate as a signed 24-bit
+   fixed-point integer, so at most 23 bits can be fractional (one bit is the
+   sign). A crafted header declaring more produces an out-of-range shift and a
+   meaningless scale factor.
+
+2. `invSigmoid` maps the packed alpha byte back to a logit. Packed alpha uses the
+   full uint8 range, so bytes 0 and 255 land exactly on probability 0 and 1, whose
+   logits are -inf and +inf. A decoded cloud then carries non-finite opacity, and
+   a default opacity of 1.0 round-trips to byte 255 and comes back infinite —
+   meaning the *common* case, not just a hostile one, produces invalid data.
+
+Both are clamped with a named epsilon matching Melkor's own logit contract, so the
+two implementations cannot disagree about what a valid opacity is.
+
+Upstream status: not submitted. Both are candidates for upstream; file them when the
+dependency is upgraded to v3.0.0/format v4 under P0-09.
+
+Applies to: nianticlabs/spz @ 2cf0be04d86b5f9632d9073ccbbe3b1e6a609f31 (v2.1.0)
+
+--- a/src/cc/load-spz.cc
++++ b/src/cc/load-spz.cc
+@@ -11,6 +11,7 @@
+ #include <cstdio>
+ #include <fstream>
+ #include <iostream>
++#include <limits>
+ #include <sstream>
+ #include <unordered_map>
+ #include <vector>
+@@ -84,7 +85,16 @@
+ 
+ float sigmoid(float x) { return 1 / (1 + std::exp(-x)); }
+ 
+-float invSigmoid(float x) { return std::log(x / (1.0f - x)); }
++float invSigmoid(float x) {
++  // Packed alpha uses the full uint8 range. Bytes 0 and 255 therefore map to
++  // exact probability endpoints, whose mathematical logits are infinite.
++  // Keep decoded clouds finite using the same epsilon contract as Melkor's
++  // public logit helper; this also makes SPZ round-trips of the default opacity
++  // (1.0 -> byte 255) structurally valid.
++  constexpr float epsilon = 1e-6f;
++  x = std::clamp(x, epsilon, 1.0f - epsilon);
++  return std::log(x / (1.0f - x));
++}
+ 
+ template <typename T>
+ size_t countBytes(std::vector<T> vec) {
+@@ -128,6 +138,27 @@
+ 
+ constexpr uint8_t FlagAntialiased = 0x1;
+ 
++// Versions 2 and 3 store each coordinate as one signed 24-bit fixed-point
++// integer. At most 23 of those bits can be fractional because one bit carries
++// the sign. Version 1 stores float16 positions and does not consume this field.
++constexpr uint8_t MaxFixedPointFractionalBits = 23;
++
++bool validFractionalBits(uint32_t version, uint8_t fractionalBits) {
++  return version == 1 || fractionalBits <= MaxFixedPointFractionalBits;
++}
++
++float fixedPointEncodeScale(int32_t fractionalBits) {
++  if (fractionalBits < 0 || fractionalBits > MaxFixedPointFractionalBits)
++    return std::numeric_limits<float>::quiet_NaN();
++  return std::ldexp(1.0f, fractionalBits);
++}
++
++float fixedPointDecodeScale(int32_t fractionalBits) {
++  if (fractionalBits < 0 || fractionalBits > MaxFixedPointFractionalBits)
++    return std::numeric_limits<float>::quiet_NaN();
++  return std::ldexp(1.0f, -fractionalBits);
++}
++
+ struct PackedGaussiansHeader {
+   uint32_t magic = 0x5053474e;  // NGSP = Niantic gaussian splat
+   uint32_t version = 3;
+@@ -149,6 +180,8 @@
+   }
+   out->clear();
+   bool success = false;
++  bool headerChecked = false;
++  size_t expectedBytes = 0;
+   while (true) {
+     stream.next_out = buffer.data();
+     stream.avail_out = buffer.size();
+@@ -157,8 +190,32 @@
+       break;
+     }
+     out->insert(out->end(), buffer.data(), buffer.data() + buffer.size() - stream.avail_out);
++    if (!headerChecked && out->size() >= sizeof(PackedGaussiansHeader)) {
++      PackedGaussiansHeader header;
++      std::memcpy(&header, out->data(), sizeof(header));
++      constexpr uint32_t maxPointsToRead = 10000000;
++      if (header.magic != PackedGaussiansHeader().magic || header.version < 1 ||
++          header.version > 3 || header.numPoints > maxPointsToRead || header.shDegree > 3 ||
++          !validFractionalBits(header.version, header.fractionalBits)) {
++        break;
++      }
++      const size_t positionBytes = header.version == 1 ? 6 : 9;
++      const size_t rotationBytes = header.version >= 3 ? 4 : 3;
++      const size_t bytesPerPoint = positionBytes + 1 + 3 + 3 + rotationBytes +
++                                   static_cast<size_t>(dimForDegree(header.shDegree)) * 3;
++      expectedBytes = sizeof(PackedGaussiansHeader) +
++                      static_cast<size_t>(header.numPoints) * bytesPerPoint;
++      headerChecked = true;
++    }
++    // Validate the packed header as soon as the first output block arrives,
++    // then cap inflation at the exact format-derived payload size. This stops
++    // malformed gzip bombs before vector growth while still admitting every
++    // legal v1-v3 file up to the format's ten-million-point limit.
++    if (headerChecked && out->size() > expectedBytes) {
++      break;
++    }
+     if (res == Z_STREAM_END) {
+-      success = true;
++      success = headerChecked && out->size() == expectedBytes;
+       break;
+     }
+   }
+@@ -183,6 +240,33 @@
+ 
+ }  // namespace
+ 
++int32_t getSpzVersion(const uint8_t *data, int32_t size) {
++  if (data == nullptr || size <= 0)
++    return 0;
++  uint8_t headerBytes[sizeof(PackedGaussiansHeader)] = {};
++  z_stream stream = {};
++  stream.next_in = const_cast<Bytef *>(data);
++  stream.avail_in = static_cast<uInt>(size);
++  stream.next_out = headerBytes;
++  stream.avail_out = sizeof(headerBytes);
++  if (inflateInit2(&stream, 16 | MAX_WBITS) != Z_OK)
++    return 0;
++  while (stream.avail_out > 0) {
++    const int32_t result = inflate(&stream, Z_NO_FLUSH);
++    if (result == Z_STREAM_END || result != Z_OK)
++      break;
++  }
++  const size_t produced = sizeof(headerBytes) - stream.avail_out;
++  inflateEnd(&stream);
++  if (produced < sizeof(PackedGaussiansHeader))
++    return 0;
++  PackedGaussiansHeader header;
++  std::memcpy(&header, headerBytes, sizeof(header));
++  return header.magic == PackedGaussiansHeader().magic
++             ? static_cast<int32_t>(header.version)
++             : 0;
++}
++
+ bool compressGzipped(const uint8_t *data, size_t size, std::vector<uint8_t> *out) {
+   std::vector<uint8_t> buffer(8192);
+   z_stream stream = {};
+@@ -278,7 +362,7 @@
+   packed.sh.resize(numPoints * shDim * 3);
+ 
+   // Store coordinates as 24-bit fixed point values.
+-  const float scale = (1 << packed.fractionalBits);
++  const float scale = fixedPointEncodeScale(packed.fractionalBits);
+   for (size_t i = 0; i < numPoints * 3; i++) {
+     const int32_t fixed32 =
+       static_cast<int32_t>(std::round(c.flipP[i % 3] * g.positions[i] * scale));
+@@ -391,7 +475,7 @@
+     }
+   } else {
+     // Decode 24-bit fixed point coordinates
+-    float scale = 1.0 / (1 << fractionalBits);
++    const float scale = fixedPointDecodeScale(fractionalBits);
+     for (size_t i = 0; i < 3; i++) {
+       int32_t fixed32 = position[i * 3 + 0];
+       fixed32 |= position[i * 3 + 1] << 8;
+@@ -492,7 +576,7 @@
+     }
+   } else {
+     // Decode 24-bit fixed point coordinates
+-    float scale = 1.0 / (1 << packed.fractionalBits);
++    const float scale = fixedPointDecodeScale(packed.fractionalBits);
+     for (size_t i = 0; i < numPoints * 3; i++) {
+       int32_t fixed32 = packed.positions[i * 3 + 0];
+       fixed32 |= packed.positions[i * 3 + 1] << 8;
+@@ -566,6 +650,11 @@
+     SpzLog("[SPZ ERROR] deserializePackedGaussians: Unsupported SH degree: %d", header.shDegree);
+     return {};
+   }
++  if (!validFractionalBits(header.version, header.fractionalBits)) {
++    SpzLog("[SPZ ERROR] deserializePackedGaussians: Unsupported fractional bit count: %d",
++           header.fractionalBits);
++    return {};
++  }
+   const int32_t numPoints = header.numPoints;
+   const int32_t shDim = dimForDegree(header.shDegree);
+   const bool usesFloat16 = header.version == 1;

@@ -1,20 +1,15 @@
-# Root project metadata for Melkor. The C++/Metal/Swift build is driven by
-# CMakeLists.txt and Package.swift; this file exists primarily to configure
-# ruff for the Python code Melkor authors and maintains (tools/da3), while
-# excluding vendored upstream trees that ship their own lint config.
+# Root tooling configuration for Melkor. The native build is driven by CMakeLists.txt.
+#
+# This file is NOT yet an installable Python package: it declares no [project] and no
+# [build-system] table, so nothing here is pip-installable. That gap is release blocker
+# P0-02 — the GitHub description used to claim "Python/C++" with no distribution behind it.
+# Work package 16 turns this into a real PEP 517 project that builds the melkor3d wheel from
+# the same native core. Until then, no Melkor documentation or metadata may claim Python
+# support.
 
 [tool.ruff]
 line-length = 100
 extend-exclude = [
-    # ByteDance Depth-Anything-3 upstream snapshot. It carries its own
-    # .flake8 / pre-commit config and style conventions (E731 lambdas, etc.);
-    # linting it here would force us to fork upstream. CI lints Melkor's own
-    # Python instead.
-    "DA3coreml/src",
-    "DA3coreml/da3_streaming",
-    "DA3coreml/notebooks",
-    # Apple ml-sharp research snapshot, same rationale.
-    "ml-sharp/src",
     # Vendored third-party code is never Melkor's to lint.
     "third_party",
 ]

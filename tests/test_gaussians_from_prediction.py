@@ -5,7 +5,8 @@ These tests do NOT require DA3 weights, GPU, or torch. They build a synthetic
 Gaussians-shaped object and validate that DA3GaussianGenerator.gaussians_from_prediction()
 correctly maps the model's output to the dict format that save_ply() consumes,
 with field transforms that match ByteDance's export_ply() in
-DA3coreml/src/depth_anything_3/utils/gsply_helpers.py.
+Depth Anything 3's src/depth_anything_3/utils/gsply_helpers.py.
+DA3 is an external adapter and is no longer vendored; see docs/adapters/index.md.
 
 Critical correctness property: after save_ply's rgb->SH-DC conversion, the
 final PLY f_dc must equal the model's original DC band (no double-conversion

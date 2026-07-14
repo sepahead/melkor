@@ -4,8 +4,7 @@
 #   clang-tidy -p build src/*.cpp
 #
 # Checks are chosen for signal on this codebase: correctness and memory
-# safety on, style churn off. Vendored trees (third_party/, tools/OpenSplat/,
-# ml-sharp/, DA3coreml/) are out of scope.
+# safety on, style churn off. The vendored tree (third_party/) is out of scope.
 Checks: >
   bugprone-*,
   clang-analyzer-*,

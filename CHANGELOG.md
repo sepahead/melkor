@@ -17,6 +17,22 @@ register is in `docs/audit/production-blockers.md`.
   (viewer `package.json`, both lockfiles, the Tauri config and Cargo manifest, the Python
   distribution's PEP 440 spelling, `CITATION.cff`, and the changelog) and can rewrite them.
   `--check` never modifies a file and runs in CI as `release_metadata_tests`.
+- `third_party/manifest.lock.json` pins every compiled dependency by upstream commit SHA and by
+  a content digest over the vendored tree, and declares every local patch.
+  `tools/verify_third_party.py --check` enforces it in CI.
+- `third_party/patches/spz/` makes the previously invisible SPZ fork reviewable. The vendored
+  codec was a *modified* copy of upstream v2.1.0 with no record of what had been changed; the
+  two local changes (a header-only version probe, and bounds on `fractionalBits` plus finite
+  logits for packed alpha) are now numbered patch files with rationale that provably reconstruct
+  the vendored tree from pristine upstream.
+- Missing licence texts for `tinygltf` and `stb` are now vendored. Their source was being
+  redistributed with no licence file at all.
+- `tools/generate_notices.py --write|--check` generates `NOTICE` and `THIRD_PARTY_LICENSES.md`
+  from the manifest, separating what Melkor *redistributes* from what it merely *invokes*.
+- `tools/build_source_bundle.py` builds the source release from an explicit allowlist rather
+  than "everything tracked", and produces byte-identical output for a given commit.
+- `docs/adapters/index.md` records the external upstream projects, their licence terms, why the
+  research snapshots were removed, and the separation between code licences and weight licences.
 
 - `docs/audit/v2-review-baseline.md` and `docs/audit/baseline-20260714.md` record the exact
   commit, tags, releases, GitHub metadata, CI state, and local build result that the v2 program
@@ -48,6 +64,13 @@ register is in `docs/audit/production-blockers.md`.
 ### Security
 
 ### Removed
+
+- `tools/OpenSplat/` (AGPL-3.0-only), `DA3coreml/` (research port with separately licensed
+  weights), `ml-sharp/` (Apple sample-code licence, research-only weights), and `.superstack/`
+  (agent artifacts) are removed from the MIT core (P0-16). Attribution and the reasoning are
+  preserved in `docs/adapters/index.md`, and the tree that contained them is preserved at the
+  signed tag `archive/pre-v2-research-bundle-20260714`. The CI job that built the CoreML
+  surface is removed with it.
 
 ## 2.0.0-rc.1 (2026-07-11)
 

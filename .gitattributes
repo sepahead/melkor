@@ -34,9 +34,6 @@ CMakeLists.txt text eol=lf
 
 # Vendored trees: exclude from language stats and review diffs
 third_party/** linguist-vendored
-tools/OpenSplat/** linguist-vendored
-ml-sharp/** linguist-vendored
-DA3coreml/** linguist-vendored
 viewer/vendor/** linguist-vendored
 
 # Lockfiles

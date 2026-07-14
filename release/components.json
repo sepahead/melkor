@@ -2,51 +2,6 @@
   "components": [
     {
       "distribution": "vendored",
-      "download_location": "https://github.com/ByteDance-Seed/Depth-Anything-3",
-      "license_declared": "Apache-2.0",
-      "license_files": [
-        "DA3coreml/LICENSE"
-      ],
-      "name": "depth-anything-3",
-      "paths": [
-        "DA3coreml"
-      ],
-      "spdx_id": "SPDXRef-Package-depth-anything-3",
-      "supplier": "Organization: ByteDance-Seed",
-      "version": "1.0.0"
-    },
-    {
-      "distribution": "vendored",
-      "download_location": "https://github.com/apple/ml-sharp",
-      "license_declared": "LicenseRef-Apple-Sample-Code",
-      "license_files": [
-        "ml-sharp/LICENSE",
-        "ml-sharp/LICENSE_MODEL"
-      ],
-      "name": "ml-sharp",
-      "paths": [
-        "ml-sharp"
-      ],
-      "spdx_id": "SPDXRef-Package-ml-sharp",
-      "supplier": "Organization: Apple Inc.",
-      "version": "0.1"
-    },
-    {
-      "distribution": "vendored",
-      "download_location": "https://github.com/pierotofy/OpenSplat",
-      "license_declared": "AGPL-3.0-only",
-      "license_files": [
-        "tools/OpenSplat/LICENSE.txt"
-      ],
-      "name": "OpenSplat",
-      "paths": [
-        "tools/OpenSplat"
-      ],
-      "spdx_id": "SPDXRef-Package-OpenSplat",
-      "version": "1.1.5"
-    },
-    {
-      "distribution": "vendored",
       "download_location": "https://github.com/nianticlabs/spz",
       "license_declared": "MIT",
       "license_files": [
@@ -187,31 +142,12 @@
     }
   ],
   "dependency_manifests": [
-    "DA3coreml/coreml/Package.resolved",
-    "DA3coreml/da3_streaming/requirements.txt",
-    "DA3coreml/pyproject.toml",
-    "DA3coreml/requirements.txt",
-    "ml-sharp/pyproject.toml",
-    "ml-sharp/requirements.txt",
+    "third_party/manifest.lock.json",
     "third_party/spz/pyproject.toml",
     "viewer/package-lock.json",
     "viewer/src-tauri/Cargo.lock"
   ],
-  "extracted_licenses": [
-    {
-      "license_id": "LicenseRef-Apple-Sample-Code",
-      "name": "Apple Sample Code License",
-      "see_also": [
-        "https://developer.apple.com/support/downloads/terms/apple-sample-code/Apple-Sample-Code-License.pdf"
-      ],
-      "text_file": "ml-sharp/LICENSE"
-    },
-    {
-      "license_id": "LicenseRef-Apple-ML-Research-Model",
-      "name": "Apple Machine Learning Research Model License Agreement",
-      "text_file": "ml-sharp/LICENSE_MODEL"
-    }
-  ],
+  "extracted_licenses": [],
   "generator_path": "scripts/build_release_evidence.py",
   "project": {
     "download_location": "https://github.com/sepahead/melkor",
