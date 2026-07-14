@@ -8,6 +8,7 @@
 // CpuComputeProvider when no GPU is available.
 
 #include "melkor/compute_provider.hpp"
+#include "melkor/spatial_grid.hpp"
 #include "melkor/gaussian_data.hpp"
 
 #include <algorithm>
@@ -37,7 +38,6 @@ public:
         return info;
     }
 
-    void* rawContext() const override { return nullptr; }
 
     bool transformCoordinates(GaussianCloud& cloud,
                               const float m[16]) override {
@@ -192,6 +192,50 @@ public:
 
 private:
     bool initialized_ = false;
+    // The two grid operations. The CPU implementation is the semantic reference: when a GPU
+    // result disagrees with this, the GPU path is wrong. Both simply delegate to the shared
+    // grid kernels, which is exactly what the old code did after casting a raw context.
+    std::vector<float> knnStatsGrid(
+        const std::vector<float>& positions,
+        const std::vector<uint32_t>& cell_entries,
+        const std::vector<uint32_t>& cell_starts,
+        const std::vector<uint32_t>& cell_counts,
+        const float grid_origin[3], float cell_size,
+        const int grid_dims[3], int k_neighbors) override {
+        grid::UniformGrid g;
+        g.valid = true;
+        g.entries = cell_entries;
+        g.cell_starts = cell_starts;
+        g.cell_counts = cell_counts;
+        g.origin = {grid_origin[0], grid_origin[1], grid_origin[2]};
+        g.cell_size = cell_size;
+        g.dims = {grid_dims[0], grid_dims[1], grid_dims[2]};
+        g.num_points = positions.size() / 3;
+        return grid::knnStatsCpu(positions, g, k_neighbors);
+    }
+
+    std::vector<float> filterCandidatesGrid(
+        const std::vector<float>& candidates,
+        const std::vector<float>& directions,
+        const std::vector<float>& positions,
+        const std::vector<uint32_t>& cell_entries,
+        const std::vector<uint32_t>& cell_starts,
+        const std::vector<uint32_t>& cell_counts,
+        const float grid_origin[3], float cell_size,
+        const int grid_dims[3],
+        float min_separation, float support_radius) override {
+        grid::UniformGrid g;
+        g.valid = true;
+        g.entries = cell_entries;
+        g.cell_starts = cell_starts;
+        g.cell_counts = cell_counts;
+        g.origin = {grid_origin[0], grid_origin[1], grid_origin[2]};
+        g.cell_size = cell_size;
+        g.dims = {grid_dims[0], grid_dims[1], grid_dims[2]};
+        g.num_points = positions.size() / 3;
+        return grid::candidateFilterCpu(candidates, directions, positions, g,
+                                        min_separation, support_radius);
+    }
 };
 
 } // namespace melkor

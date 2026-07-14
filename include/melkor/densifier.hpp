@@ -30,7 +30,6 @@
 namespace melkor {
 
 class ComputeProvider;
-namespace metal { class MetalContext; }
 
 struct DensifyConfig {
     int k_neighbors = 8;            // neighborhood size for density stats
@@ -67,8 +66,6 @@ public:
 
     // ctx may be null: all neighbor searches then run on the CPU. On non-Metal
     // platforms the Metal calls are stubs that return empty, which triggers
-    // the same CPU fallback.
-    explicit Densifier(metal::MetalContext* ctx);
 
     // Backend-agnostic constructor: uses the provider's GPU (Metal or CUDA
     // grid kernels) when available, CPU otherwise. Preferred entry point for

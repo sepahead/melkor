@@ -355,12 +355,12 @@ static std::vector<float> cudaGridKnnMeanDists(
 
 class EnhancedConverter::Impl {
 public:
-    metal::MetalContext* metal_ctx_ = nullptr;
+    ComputeProvider* provider_ = nullptr;
     tinygltf::TinyGLTF loader_;
     gltf_fs::Context fs_context_;
     
     Impl() { configureFilesystem(); }
-    explicit Impl(metal::MetalContext* ctx) : metal_ctx_(ctx) { configureFilesystem(); }
+    explicit Impl(ComputeProvider* provider) : provider_(provider) { configureFilesystem(); }
 
     void configureFilesystem() {
         std::string ignored;
@@ -417,35 +417,16 @@ public:
         // ones, CPU spatial hash when no GPU is available.
         std::vector<float> adaptive_scales;
         size_t num_points = positions.size() / 3;
-        if (config.use_gpu && metal_ctx_ && num_points > 0) {
-            metal::GaussianProcessor processor(*metal_ctx_);
-            std::vector<float> knn_dists;
-            if (num_points < 10000) {
-                knn_dists = processor.computeKnnDistancesMetal(
-                    positions, config.knn_neighbors);
-            } else {
-                auto g = grid::buildGrid(positions);
-                if (g.valid) {
-                    auto stats = processor.knnStatsGrid(
-                        positions, g.entries, g.cell_starts, g.cell_counts,
-                        g.origin.data(), g.cell_size, g.dims.data(),
-                        config.knn_neighbors);
-                    if (stats.size() == num_points * 4) {
-                        knn_dists.resize(num_points);
-                        for (size_t i = 0; i < num_points; ++i) {
-                            knn_dists[i] = stats[i * 4];
-                        }
-                    }
-                }
-            }
-            if (knn_dists.size() == num_points) {
-                // Scale: half the average k-NN distance (matching CPU path)
-                adaptive_scales.resize(num_points);
-                for (size_t i = 0; i < num_points; ++i) {
-                    adaptive_scales[i] = knn_dists[i] * 0.5f;
-                }
-            }
-        }
+        // The GPU fast-paths are deliberately gone.
+        //
+        // They accelerated exactly the algorithm that release blocker P0-11 identifies as
+        // misleading: one Gaussian per mesh vertex, with the triangle indices decoded and
+        // then ignored. The whole Enhanced path is replaced by an honest `melkor mesh-init`
+        // in WP10, so keeping a Metal type in a platform-neutral header (P1-02) purely to
+        // speed up something scheduled for deletion is the wrong trade.
+        //
+        // The CPU path below is the semantic reference, produces identical output, and is
+        // the only path any test ever exercised.
 #ifdef MELKOR_HAS_CUDA
         if (config.use_gpu && adaptive_scales.empty() && num_points > 0) {
             auto knn_dists = cudaGridKnnMeanDists(positions, config.knn_neighbors);
@@ -491,54 +472,6 @@ public:
         // Use Metal GPU acceleration when available for the per-point loop.
         result.cloud.reserve(num_points * 2);
 
-        if (config.use_gpu && metal_ctx_ && num_points > 0) {
-            // Metal-accelerated per-point conversion
-            metal::GaussianProcessor processor(*metal_ctx_);
-            metal::GaussianProcessor::EnhancedConvertConfig mtl_cfg;
-            mtl_cfg.scale_factor = config.scale_factor;
-            mtl_cfg.min_scale = config.min_scale;
-            mtl_cfg.max_scale = config.max_scale;
-            mtl_cfg.normal_scale_ratio = config.normal_scale_ratio;
-            mtl_cfg.default_opacity = config.default_opacity;
-            mtl_cfg.position_scale = config.position_scale;
-            mtl_cfg.convert_coordinate_system = config.convert_coordinate_system;
-            mtl_cfg.use_surface_alignment = config.use_surface_alignment;
-            mtl_cfg.default_color[0] = config.default_color[0];
-            mtl_cfg.default_color[1] = config.default_color[1];
-            mtl_cfg.default_color[2] = config.default_color[2];
-
-            auto packed = processor.enhancedConvert(
-                positions, final_normals, final_colors, adaptive_scales, mtl_cfg);
-
-            if (!packed.empty()) {
-                // Convert PackedGaussian back to GaussianSplat
-                float total_scale = 0.0f;
-                for (size_t i = 0; i < num_points; ++i) {
-                    GaussianSplat splat;
-                    splat.x = packed[i].position[0];
-                    splat.y = packed[i].position[1];
-                    splat.z = packed[i].position[2];
-                    splat.opacity = packed[i].position[3];
-                    splat.f_dc_0 = packed[i].color[0];
-                    splat.f_dc_1 = packed[i].color[1];
-                    splat.f_dc_2 = packed[i].color[2];
-                    splat.scale_0 = packed[i].scale[0];
-                    splat.scale_1 = packed[i].scale[1];
-                    splat.scale_2 = packed[i].scale[2];
-                    splat.rot_0 = packed[i].rotation[0];
-                    splat.rot_1 = packed[i].rotation[1];
-                    splat.rot_2 = packed[i].rotation[2];
-                    splat.rot_3 = packed[i].rotation[3];
-                    total_scale += std::exp(packed[i].scale[0]);
-                    result.cloud.addSplat(std::move(splat));
-                }
-                result.output_splats = result.cloud.size();
-                result.avg_scale = total_scale / static_cast<float>(num_points);
-                result.success = true;
-                return result;
-            }
-            // Fall through to CPU path if Metal failed
-        }
 
         // CPU per-point conversion (fallback)
         float total_scale = 0.0f;
@@ -770,8 +703,8 @@ public:
 };
 
 EnhancedConverter::EnhancedConverter() : impl_(std::make_unique<Impl>()) {}
-EnhancedConverter::EnhancedConverter(metal::MetalContext* metal_ctx)
-    : impl_(std::make_unique<Impl>(metal_ctx)) {}
+EnhancedConverter::EnhancedConverter(ComputeProvider* provider)
+    : impl_(std::make_unique<Impl>(provider)) {}
 EnhancedConverter::~EnhancedConverter() = default;
 
 EnhancedConversionResult EnhancedConverter::convertFromFile(
@@ -994,31 +927,22 @@ namespace enhanced {
 std::vector<float> computeKnnDistances(
     const std::vector<float>& positions,
     int k,
-    metal::MetalContext* metal_ctx) {
+    ComputeProvider* provider) {
 
     size_t num_points = positions.size() / 3;
     std::vector<float> distances(num_points, 0.0f);
     if (num_points == 0) return distances;
 
-#ifdef MELKOR_HAS_CUDA
-    // CUDA builds have no Metal context; try the CUDA grid k-NN first.
-    {
-        auto cuda_dists = cudaGridKnnMeanDists(positions, k);
-        if (cuda_dists.size() == num_points) return cuda_dists;
-    }
-#endif
-
-    // Use Metal when a GPU is available: brute force for small clouds,
-    // grid-accelerated for large ones.
-    if (metal_ctx && num_points < 10000) {
-        metal::GaussianProcessor processor(*metal_ctx);
-        auto result = processor.computeKnnDistancesMetal(positions, k);
-        if (result.size() == num_points) return result;
-    } else if (metal_ctx) {
+    // Accelerate through whichever backend the provider happens to be. There is no #ifdef and
+    // no cast to a platform type: knnStatsGrid is part of the abstract ComputeProvider
+    // contract, and each backend -- CPU included -- implements it.
+    //
+    // An empty result means the backend could not do it, so we fall through to the CPU code
+    // below. It never means "there were no neighbours".
+    if (provider) {
         auto g = grid::buildGrid(positions);
         if (g.valid) {
-            metal::GaussianProcessor processor(*metal_ctx);
-            auto stats = processor.knnStatsGrid(
+            auto stats = provider->knnStatsGrid(
                 positions, g.entries, g.cell_starts, g.cell_counts,
                 g.origin.data(), g.cell_size, g.dims.data(), k);
             if (stats.size() == num_points * 4) {

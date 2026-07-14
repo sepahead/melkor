@@ -10,6 +10,8 @@
 //   5. CPU/Metal parity of the grid k-NN and candidate-filter kernels
 //      (only when a Metal device is present).
 
+#include "melkor/backend_registry.hpp"
+#include "melkor/compute_provider.hpp"
 #include "melkor/densifier.hpp"
 #include "melkor/gaussian_data.hpp"
 #include "melkor/spatial_grid.hpp"
@@ -321,13 +323,16 @@ bool test_degenerate_inputs() {
 #ifdef MELKOR_HAS_METAL
 bool test_metal_parity() {
     printf("[test] CPU vs Metal grid-kernel parity\n");
-    if (!melkor::metal::MetalContext::isAvailable()) {
-        printf("  SKIP: no Metal device\n");
-        return true;
-    }
-    melkor::metal::MetalContext ctx;
-    if (!ctx.initialize()) {
-        printf("  SKIP: Metal failed to initialize\n");
+
+    // Through the abstract provider, not a metal::MetalContext. The two grid kernels are part
+    // of the ComputeProvider contract now, so this test exercises the same path production
+    // code takes -- and it no longer has to name a platform type to do it.
+    //
+    // create() returns nullptr when Metal is compiled in but unusable on this machine, which
+    // is the honest answer on a CI runner with no GPU.
+    auto gpu_provider = melkor::ComputeProvider::create(melkor::ComputeBackend::Metal);
+    if (!gpu_provider) {
+        printf("  SKIP: no usable Metal device\n");
         return true;
     }
 
@@ -340,9 +345,8 @@ bool test_metal_parity() {
     auto g = melkor::grid::buildGrid(pos);
     auto cpu = melkor::grid::knnStatsCpu(pos, g, k);
 
-    melkor::metal::GaussianProcessor proc(ctx);
-    auto gpu = proc.knnStatsGrid(pos, g.entries, g.cell_starts, g.cell_counts,
-                                 g.origin.data(), g.cell_size, g.dims.data(), k);
+    auto gpu = gpu_provider->knnStatsGrid(pos, g.entries, g.cell_starts, g.cell_counts,
+                                          g.origin.data(), g.cell_size, g.dims.data(), k);
     check(gpu.size() == cpu.size(), "Metal k-NN stats has the right size");
     if (gpu.size() == cpu.size()) {
         float max_err = 0.0f;
@@ -370,10 +374,10 @@ bool test_metal_parity() {
     }
     const float min_sep = 0.07f, support = 0.8f;
     auto fc = melkor::grid::candidateFilterCpu(cands, dirs, ppos, pg, min_sep, support);
-    auto fg = proc.filterCandidatesGrid(cands, dirs, ppos, pg.entries,
-                                        pg.cell_starts, pg.cell_counts,
-                                        pg.origin.data(), pg.cell_size,
-                                        pg.dims.data(), min_sep, support);
+    auto fg = gpu_provider->filterCandidatesGrid(cands, dirs, ppos, pg.entries,
+                                                 pg.cell_starts, pg.cell_counts,
+                                                 pg.origin.data(), pg.cell_size,
+                                                 pg.dims.data(), min_sep, support);
     check(fg.size() == fc.size(), "Metal candidate filter has the right size");
     if (fg.size() == fc.size()) {
         size_t decision_mismatches = 0;
@@ -388,7 +392,7 @@ bool test_metal_parity() {
     // End-to-end: Metal-backed hole fill also closes the hole.
     auto cloud2 = makePlane(40, 0.1f, 0.35f);
     const size_t before = cloud2.size();
-    melkor::Densifier densifier(&ctx);
+    melkor::Densifier densifier(gpu_provider.get());
     melkor::DensifyConfig cfg;
     auto stats = densifier.fillHoles(cloud2, cfg);
     check(stats.added > 0 && cloud2.size() == before + stats.added,
@@ -400,6 +404,7 @@ bool test_metal_parity() {
 } // namespace
 
 int main() {
+    melkor::register_builtin_backends();
     printf("melkor densifier tests\n");
     test_grid_build();
     test_knn_stats_vs_bruteforce();

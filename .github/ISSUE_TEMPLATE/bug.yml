@@ -1,0 +1,160 @@
+name: Bug report
+description: Report a reproducible defect in the melkor library, CLI, Python package, or viewer
+title: "[bug] "
+# Labels must already exist in the repository, or GitHub will not apply them.
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thank you for taking the time to file a report.
+
+        Two things before you start, because they change where this should go:
+
+        - **Suspected vulnerability?** Do not file it here. Use
+          [private vulnerability reporting](https://github.com/sepahead/melkor/security/advisories/new)
+          instead — see [SECURITY.md](https://github.com/sepahead/melkor/blob/main/SECURITY.md).
+          Unbounded memory, CPU, or disk consumption from a crafted file is a security report, not a
+          bug report.
+        - **Question, or unsure whether it is a bug?**
+          [Discussions](https://github.com/sepahead/melkor/discussions) is the better place, and
+          nothing is lost — a confirmed bug can be moved to an issue afterwards.
+
+        Melkor is maintained by one person. The completeness of this form is what decides whether a
+        report can be acted on or has to be closed for want of information, so please fill it in even
+        where it feels redundant.
+
+  - type: textarea
+    id: summary
+    attributes:
+      label: What happened
+      description: One paragraph. What you were doing, and what went wrong.
+    validations:
+      required: true
+
+  - type: input
+    id: version
+    attributes:
+      label: Melkor version
+      description: >-
+        Paste the release tag, or the output of `melkor version --output-mode json`. If your build
+        predates that subcommand, give the exact commit (`git rev-parse HEAD`). "Latest" is not a
+        version — the defect may already be fixed, or may not exist yet, and we cannot tell which.
+      placeholder: "v2.0.0-rc.1  /  git 4f2a91c"
+    validations:
+      required: true
+
+  - type: dropdown
+    id: install-method
+    attributes:
+      label: How did you install it?
+      description: >-
+        Different install paths ship different build flags and different backends, so a defect that
+        reproduces from source may not reproduce from an archive, and vice versa.
+      options:
+        - Built from source (CMake)
+        - Released archive / binary from GitHub Releases
+        - Python package (melkor3d wheel)
+        - Desktop viewer package
+        - Other / not sure (describe below)
+    validations:
+      required: true
+
+  - type: input
+    id: os-arch
+    attributes:
+      label: Operating system and architecture
+      description: Name, version, and CPU architecture.
+      placeholder: "macOS 15.3, arm64 (M2 Pro)  /  Ubuntu 24.04, x86_64"
+    validations:
+      required: true
+
+  - type: textarea
+    id: environment
+    attributes:
+      label: Backend and environment
+      description: >-
+        Output of `melkor doctor --output-mode json` (or `melkor --info` on older builds). Redact
+        anything you consider sensitive, but say that you have — a redaction we know about is fine, a
+        silent one wastes a round trip. This tells us which compute backend was actually selected,
+        which is frequently the whole answer.
+      render: text
+    validations:
+      required: true
+
+  - type: textarea
+    id: reproduction
+    attributes:
+      label: Command and output
+      description: >-
+        The exact command or API call, copy-pasted rather than retyped, and its output. Capture both
+        streams (`2>&1`); Melkor's diagnostics go to stderr. Redact paths, hostnames, and anything
+        else private.
+      render: shell
+      placeholder: |
+        $ melkor inspect --input scene.ply --level structure --output-mode json 2>&1
+        ...
+    validations:
+      required: true
+
+  - type: textarea
+    id: expected-actual
+    attributes:
+      label: Expected versus actual
+      description: >-
+        What you expected to happen, and what happened instead. State the expectation separately even
+        when it seems obvious: a surprising number of reports turn out to be a disagreement about the
+        contract rather than a defect in it.
+      placeholder: |
+        Expected: ...
+        Actual: ...
+    validations:
+      required: true
+
+  - type: textarea
+    id: asset
+    attributes:
+      label: Asset and inspection report
+      description: >-
+        If the defect depends on an input file, run
+        `melkor inspect --input <asset> --level structure --output-mode json` and paste the report.
+        It is designed to be safe to paste: by default it reports a basename rather than a full path
+        and it does not include environment variables, usernames, or home directories.
+
+        A minimal reproducing asset helps most — **but only attach one if you have the right to
+        share it** (see the acknowledgements below). If you cannot share it, say so; an inspection
+        report plus a description of how the file was produced is often enough.
+      render: json
+
+  - type: textarea
+    id: workaround
+    attributes:
+      label: Regression and workaround
+      description: >-
+        Did this work in an earlier version? If so, which one — a `git bisect` range is ideal, but
+        even "worked in 1.9, broke in 2.0.0-rc.1" narrows it enormously. Any workaround you found?
+
+  - type: checkboxes
+    id: acknowledgements
+    attributes:
+      label: Before you submit
+      options:
+        - label: >-
+            This is **not** a security vulnerability. I understand that memory unsafety, path or
+            command injection, and unbounded resource consumption from crafted input must be reported
+            privately through
+            [GitHub private vulnerability reporting](https://github.com/sepahead/melkor/security/advisories/new),
+            not in a public issue.
+          required: true
+        - label: >-
+            I will not attach any asset I do not have the right to redistribute, and nothing I attach
+            contains personal data. Licensed scan data, client scenes, and captures of identifiable
+            people are not to be uploaded here; a public GitHub issue is a public redistribution.
+          required: true
+        - label: >-
+            I have redacted anything sensitive from the output I pasted, and I have said where I
+            redacted it.
+          required: true
+        - label: >-
+            I have searched existing issues, and this is not a duplicate.
+          required: true

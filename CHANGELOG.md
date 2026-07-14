@@ -52,6 +52,20 @@ register is in `docs/audit/production-blockers.md`.
 
 ### Changed
 
+- **The build graph is acyclic (P0-05).** `melkor_core` and each backend linked to one another
+  `PUBLIC`, because `ComputeProvider::create()` was declared in platform-neutral core but
+  *defined* inside each backend. The resulting mutually dependent static archives linked only
+  because the linker rescans them, and on Apple only after `-no_warn_duplicate_libraries`
+  suppressed the diagnostic — a suppressed linker warning was load-bearing. Core now owns a
+  `BackendRegistry` and knows nothing about Metal or CUDA; the new `melkor_runtime` layer is the
+  only place allowed to name a concrete backend. Dependencies point one way, verified against
+  CMake's own dependency graph. The suppression is gone.
+- `ComputeProvider` no longer exposes `rawContext()` (P1-01, P1-02). It returned a raw `void*`
+  that callers cast to `metal::MetalContext*`, which is how platform types reached
+  platform-neutral code. The two operations that needed it — grid k-NN statistics and candidate
+  filtering — are part of the abstract contract now, implemented by every backend, with CPU as
+  the semantic reference.
+
 - The CLI reads its version from the generated `<melkor/version.h>` instead of a
   `MELKOR_VERSION` compile definition, and the release-evidence builder reads the `VERSION`
   file instead of re-parsing `CMakeLists.txt`. Both previously restated the version
@@ -79,6 +93,14 @@ register is in `docs/audit/production-blockers.md`.
 ### Security
 
 ### Removed
+
+- The dead `GaussianFitter`, `DifferentiableRenderer`, `MeshRenderer`, `FeedforwardModel`, and
+  `PythonBridge` facades (P1-03), 2,952 lines. `--fit` and `--feedforward` already failed closed
+  at the CLI; the classes behind them remained in the public surface. Deleting them also removed
+  the last 20 shell-execution sites from the core.
+- `src/gpu_stub.cpp`. It existed only to fake the entire `metal::` namespace so that
+  platform-neutral code — which should never have named a Metal type — would link on non-Apple
+  platforms. Nothing needs stubbing now.
 
 - `tools/OpenSplat/` (AGPL-3.0-only), `DA3coreml/` (research port with separately licensed
   weights), `ml-sharp/` (Apple sample-code licence, research-only weights), and `.superstack/`

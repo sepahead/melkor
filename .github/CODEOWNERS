@@ -1,6 +1,89 @@
-# Security-sensitive automation and release policy require maintainer review.
-/.github/workflows/ @sepahead
-/.github/dependabot.yml @sepahead
-/SECURITY.md @sepahead
-/scripts/ @sepahead
-/viewer/src-tauri/ @sepahead
+# Code owners
+#
+# An owner listed here has review authority over the matching paths; GitHub requests their
+# review automatically on any pull request that touches one.
+#
+# HONEST NOTE ON THIS FILE
+# -----------------------
+# Melkor has one maintainer. Every rule below therefore resolves to the same person, and this
+# file does not describe a division of labour — it describes a bottleneck. That is deliberate.
+# A CODEOWNERS file populated with invented handles or placeholder teams would imply a review
+# capacity the project does not have, and would also fail silently: GitHub ignores an owner it
+# cannot resolve or who lacks write access, so a path "owned" by a fictional reviewer is a path
+# with no owner at all. The bus-factor consequences are stated in GOVERNANCE.md.
+#
+# The path-specific rules exist even though they are currently redundant, because they record
+# *why* each area is sensitive. When reviewers or a second maintainer are added, ownership of
+# these paths must stay narrow rather than widening by default.
+#
+# Ordering: the last matching rule wins, so the catch-all comes first and the sensitive paths
+# come last.
+
+# Default owner. Every change needs maintainer review today.
+*                                   @sepahead
+
+# --- Build and dependency surface ---------------------------------------------------------
+# The build system decides what is compiled into a distributed artifact and with which
+# hardening flags; a change here can quietly disable a sanitizer or a warning gate.
+/CMakeLists.txt                     @sepahead
+/cmake/                             @sepahead
+/pyproject.toml                     @sepahead
+/VERSION                            @sepahead
+
+# --- Vendored third-party code and licence evidence ---------------------------------------
+# Changes here move the redistributable boundary and alter the licence obligations of every
+# downstream consumer. A permissively licensed core must not acquire copyleft or research-only
+# source without an explicit, reviewed decision.
+/third_party/                       @sepahead
+/THIRD_PARTY_LICENSES.md            @sepahead
+/NOTICE                             @sepahead
+/LICENSE                            @sepahead
+/tools/verify_third_party.py        @sepahead
+/tools/generate_notices.py          @sepahead
+
+# --- Untrusted-input parsers and resource limits -------------------------------------------
+# The primary attack surface. Everything reachable from a crafted GLB, PLY, or SPZ file is a
+# security boundary, and a defect there is a vulnerability rather than an ordinary crash.
+/src/io/                            @sepahead
+/include/melkor/io/                 @sepahead
+/src/glb_reader.cpp                 @sepahead
+/src/spz_encoder.cpp                @sepahead
+/src/ply_writer.cpp                 @sepahead
+/include/melkor/limits.hpp          @sepahead
+/include/melkor/budget.hpp          @sepahead
+/include/melkor/checked.hpp         @sepahead
+
+# --- Release tooling and evidence -----------------------------------------------------------
+# Produces the artifacts and the provenance a consumer uses to decide whether to trust a
+# download. A change here can make a release claim more than it can prove.
+/scripts/build_release_evidence.py  @sepahead
+/release/                           @sepahead
+/tools/build_source_bundle.py       @sepahead
+/tools/check_version_sync.py        @sepahead
+/docs/RELEASE.md                    @sepahead
+
+# --- Pipeline and external-adapter scripts --------------------------------------------------
+# These scripts pass user-supplied paths to shells and fetch external tools; command injection
+# and unverified downloads are in scope for the security policy.
+/scripts/                           @sepahead
+/docs/adapters/                     @sepahead
+
+# --- Desktop packaging ----------------------------------------------------------------------
+# The Tauri surface decides what the shipped desktop application is permitted to touch.
+/viewer/src-tauri/                  @sepahead
+
+# --- CI, automation, and supply chain -------------------------------------------------------
+# Workflows execute with repository credentials. A change here can exfiltrate a secret or
+# publish a forged artifact, which makes it the most sensitive path in the repository.
+/.github/workflows/                 @sepahead
+/.github/dependabot.yml             @sepahead
+
+# --- Security and governance ----------------------------------------------------------------
+# Self-amendment must never be silent: the documents that define the threat model, the review
+# rules, and who may approve a release are owned by the maintainer.
+/SECURITY.md                        @sepahead
+/GOVERNANCE.md                      @sepahead
+/MAINTAINERS.md                     @sepahead
+/CODE_OF_CONDUCT.md                 @sepahead
+/SUPPORT.md                         @sepahead
+/.github/CODEOWNERS                 @sepahead

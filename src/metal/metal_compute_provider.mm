@@ -48,9 +48,6 @@ public:
         return info;
     }
 
-    void* rawContext() const override {
-        return ctx_.get();
-    }
 
     bool transformCoordinates(GaussianCloud& cloud,
                               const float m[16]) override {
@@ -93,6 +90,44 @@ public:
         return processor_->processCloud(cloud, mtl_cfg);
     }
 
+    // The grid operations, forwarding to the Metal kernels. Previously a caller reached
+    // these by casting rawContext() to a metal:: context pointer and constructing a
+    // metal::GaussianProcessor itself, which is how platform types leaked into
+    // platform-neutral code and forced melkor_core to link back against this library
+    // (P0-05, P1-02). They are part of the abstract ComputeProvider contract now.
+    //
+    // An empty return means "this backend could not do it", which the caller treats as a
+    // signal to fall back -- never as "there were no neighbours".
+    std::vector<float> knnStatsGrid(
+        const std::vector<float>& positions,
+        const std::vector<uint32_t>& cell_entries,
+        const std::vector<uint32_t>& cell_starts,
+        const std::vector<uint32_t>& cell_counts,
+        const float grid_origin[3], float cell_size,
+        const int grid_dims[3], int k_neighbors) override {
+        if (!ctx_ || !ctx_->isInitialized()) return {};
+        metal::GaussianProcessor processor(*ctx_);
+        return processor.knnStatsGrid(positions, cell_entries, cell_starts, cell_counts,
+                                      grid_origin, cell_size, grid_dims, k_neighbors);
+    }
+
+    std::vector<float> filterCandidatesGrid(
+        const std::vector<float>& candidates,
+        const std::vector<float>& directions,
+        const std::vector<float>& positions,
+        const std::vector<uint32_t>& cell_entries,
+        const std::vector<uint32_t>& cell_starts,
+        const std::vector<uint32_t>& cell_counts,
+        const float grid_origin[3], float cell_size,
+        const int grid_dims[3],
+        float min_separation, float support_radius) override {
+        if (!ctx_ || !ctx_->isInitialized()) return {};
+        metal::GaussianProcessor processor(*ctx_);
+        return processor.filterCandidatesGrid(candidates, directions, positions, cell_entries,
+                                              cell_starts, cell_counts, grid_origin, cell_size,
+                                              grid_dims, min_separation, support_radius);
+    }
+
 private:
     std::unique_ptr<metal::MetalContext> ctx_;
     std::unique_ptr<metal::GaussianProcessor> processor_;
@@ -100,28 +135,24 @@ private:
 
 // --- Factory (Metal build) ---
 
-std::unique_ptr<ComputeProvider> ComputeProvider::create() {
-    if (metal::MetalContext::isAvailable()) {
-        auto p = std::make_unique<MetalComputeProvider>();
-        if (p->initialize()) return p;
-    }
-    // Fall back to CPU
-    return createCpuProvider();
-}
 
-std::unique_ptr<ComputeProvider> ComputeProvider::create(ComputeBackend backend) {
-    switch (backend) {
-        case ComputeBackend::Metal: {
-            auto p = std::make_unique<MetalComputeProvider>();
-            if (p->isAvailable() && p->initialize()) return p;
-            return nullptr;
-        }
-        case ComputeBackend::CPU:
-            return createCpuProvider();
-        case ComputeBackend::CUDA:
-            return nullptr;  // CUDA not available on macOS
+
+// The one entry point this backend exposes to the runtime layer.
+//
+// It deliberately does NOT define ComputeProvider::create(). A factory declared in
+// platform-neutral core but defined inside the backend is precisely what forced core to link
+// back to the backend and produced the circular static archives (P0-05). Core owns the factory
+// now and consults a registry; melkor_runtime calls this function to populate it.
+//
+// Returns nullptr when the backend is compiled in but unusable on this machine -- no device,
+// no driver, an unsupported GPU. That is a different condition from "not built into this
+// binary", and a caller is entitled to tell them apart.
+std::unique_ptr<ComputeProvider> createMetalProvider() {
+    auto provider = std::make_unique<MetalComputeProvider>();
+    if (!provider->isAvailable() || !provider->initialize()) {
+        return nullptr;
     }
-    return nullptr;
+    return provider;
 }
 
 } // namespace melkor

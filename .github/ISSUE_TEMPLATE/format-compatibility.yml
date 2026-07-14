@@ -1,0 +1,137 @@
+name: Format compatibility
+description: An asset another tool produced will not load correctly, or an asset Melkor produced will not load in another tool
+title: "[format] "
+# Labels must already exist in the repository, or GitHub will not apply them. Create a
+# `format-compat` label and add it here if you want these separated from ordinary bugs.
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Use this form when the problem is **interoperability**: a file crosses a tool boundary and
+        loses meaning, is rejected, or is interpreted differently at each end.
+
+        There is no single "Gaussian splat PLY" format. Producers disagree about activation domains,
+        quaternion order, spherical-harmonic layout, colour space, and the units of the scale field.
+        Melkor's position is that these disagreements must be resolved by an **explicit profile**, not
+        by guessing. That is why this form insists on exact tool names, exact versions, and the
+        profile you used: without those three, "the file is wrong" cannot be adjudicated, because
+        there is no shared definition of right.
+
+        A file that both tools agree to read but that renders differently is exactly the kind of
+        report this project wants.
+
+  - type: input
+    id: producer
+    attributes:
+      label: Producer — tool and exact version
+      description: >-
+        What wrote the file. Give the tool's name and its exact version or commit, not its family.
+        "gsplat", "Inria 3DGS", or "some viewer" is not enough: producers change their PLY layout
+        between versions, and the version is frequently the entire bug.
+      placeholder: "OpenSplat 1.1.4 (commit 9c1f2ab)  /  Luma web export, downloaded 2026-06-30  /  melkor 2.0.0-rc.1"
+    validations:
+      required: true
+
+  - type: input
+    id: consumer
+    attributes:
+      label: Consumer — tool and exact version
+      description: >-
+        What read the file (or refused to). Same rule: exact name and version. If both ends are
+        Melkor — a round trip through Melkor loses or changes something — say so here.
+      placeholder: "melkor 2.0.0-rc.1  /  SuperSplat 2.3.0  /  Blender 4.2 + <addon> 0.9"
+    validations:
+      required: true
+
+  - type: dropdown
+    id: direction
+    attributes:
+      label: Direction of the failure
+      options:
+        - Melkor cannot read a file another tool produced
+        - Another tool cannot read a file Melkor produced
+        - Both read it, but the result differs (rendering, orientation, colour, opacity, scale)
+        - Melkor round-trip (read then write) loses or changes information
+    validations:
+      required: true
+
+  - type: input
+    id: format-profile
+    attributes:
+      label: Format and profile
+      description: >-
+        The container (PLY / SPZ / glTF / GLB) **and** the semantic profile ID you passed to Melkor,
+        exactly as you passed it. If you did not pass one, write "none passed" — that itself is often
+        the finding, because Melkor is designed to refuse to guess rather than to infer a profile it
+        cannot justify.
+      placeholder: "PLY, profile: inria-3dgs-v1  /  SPZ v2, profile: none passed"
+    validations:
+      required: true
+
+  - type: textarea
+    id: inspection
+    attributes:
+      label: Inspection report
+      description: >-
+        Run `melkor inspect --input <asset> --level structure --output-mode json` on the file and paste
+        the report. This is the single most useful thing in the report: it names the fields actually
+        present, and it is designed to be safe to paste (basename rather than full path, no environment
+        variables, no usernames, no home directories).
+
+        If both ends are files, paste both reports and label them.
+      render: json
+    validations:
+      required: true
+
+  - type: textarea
+    id: commands
+    attributes:
+      label: Commands and output
+      description: The exact commands on both sides, copy-pasted, with output (`2>&1`).
+      render: shell
+    validations:
+      required: true
+
+  - type: textarea
+    id: expected-actual
+    attributes:
+      label: Expected versus actual
+      description: >-
+        What the file should mean, and what happened instead. Where you believe one tool is wrong, cite
+        the specification, the profile definition, or the producer's documentation. A citation turns a
+        preference into a defect.
+      placeholder: |
+        Expected: rotations round-trip unchanged; the specification says the quaternion is stored (w, x, y, z).
+        Actual: the scene is mirrored about X after conversion, consistent with (x, y, z, w) being assumed.
+    validations:
+      required: true
+
+  - type: textarea
+    id: asset
+    attributes:
+      label: Sample asset
+      description: >-
+        A minimal file that shows the problem is enormously helpful — often a few hundred Gaussians is
+        enough. Attach it **only if you have the right to redistribute it**. If you cannot, say so; the
+        inspection report plus a description of how to produce an equivalent file is usually workable.
+
+  - type: checkboxes
+    id: acknowledgements
+    attributes:
+      label: Before you submit
+      options:
+        - label: >-
+            I have given the exact tool **and version** on both sides of the boundary, and the profile
+            ID I passed (or stated that I passed none).
+          required: true
+        - label: >-
+            I will not attach any asset I do not have the right to redistribute, and nothing I attach
+            contains personal data. A public issue is a public redistribution.
+          required: true
+        - label: >-
+            This is not a suspected vulnerability. Memory unsafety or unbounded resource consumption
+            triggered by a malformed file goes to
+            [private vulnerability reporting](https://github.com/sepahead/melkor/security/advisories/new)
+            instead.
+          required: true

@@ -1,0 +1,148 @@
+name: Performance problem
+description: An operation is slower, or uses more memory, than it should — with a reproducible measurement
+title: "[perf] "
+# Labels must already exist in the repository, or GitHub will not apply them. Create a
+# `performance` label and add it here if you want these separated from ordinary bugs.
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        This form asks for more than a bug report does, and the reason is worth stating: **"it's slow"
+        is not actionable.** Without the hardware, the data, the versions, and a command someone else
+        can run, a performance report cannot be reproduced, cannot be bisected, and cannot be verified
+        as fixed. It becomes an anecdote, and anecdotes accumulate in the tracker without ever being
+        resolved. What is asked for below is the minimum needed to turn a complaint into a measurement.
+
+        **Before you file:** if you can make Melkor consume unbounded memory, CPU, or disk from an
+        input — whether that input is malformed, or merely enormous but well-formed — that is a
+        **security report**, not a performance report. Resource exhaustion is in scope for the security
+        policy. Use
+        [private vulnerability reporting](https://github.com/sepahead/melkor/security/advisories/new)
+        instead.
+
+  - type: textarea
+    id: summary
+    attributes:
+      label: What is slow
+      description: >-
+        Which operation, and how slow compared to what. State the baseline you are measuring against:
+        an earlier Melkor version, another tool, another machine, or a documented expectation. "Slower
+        than I expected" is a valid baseline only if you say what you expected and why.
+    validations:
+      required: true
+
+  - type: input
+    id: measurement
+    attributes:
+      label: Measurement
+      description: >-
+        The numbers. Wall time, peak resident memory, or throughput, with the number of runs and the
+        variance if you have it. A single run of a cold-cache operation is a noisy number, and knowing
+        that it was a single run is part of the measurement.
+      placeholder: "convert PLY→SPZ, 2.1M Gaussians: 94 s wall, 11.2 GB peak RSS; mean of 3 runs, ±4 s"
+    validations:
+      required: true
+
+  - type: textarea
+    id: command
+    attributes:
+      label: Reproducible command
+      description: >-
+        The exact command, copy-pasted, together with how you timed it. If we cannot run this, we cannot
+        confirm a fix. Include the timing harness (`/usr/bin/time -l`, `hyperfine`, `perf stat`, or
+        whatever you used), because how a number was produced determines what it means.
+      render: shell
+      placeholder: |
+        $ /usr/bin/time -l melkor convert --input scene.ply --output scene.spz --profile inria-3dgs-v1
+        ...
+    validations:
+      required: true
+
+  - type: textarea
+    id: data
+    attributes:
+      label: Input data
+      description: >-
+        What was processed. Gaussian or vertex count, file size, format, spherical-harmonic degree, and
+        how the asset was produced. Performance in this codebase is dominated by spatial distribution
+        and SH degree, not by file size alone, so a size on its own does not characterise the workload.
+
+        Paste `melkor inspect --input <asset> --level structure --output-mode json` if you can — it is
+        safe to paste and it answers most of this. If the asset is shareable and small, attach it, but
+        **only if you have the right to redistribute it**.
+      render: json
+    validations:
+      required: true
+
+  - type: textarea
+    id: hardware
+    attributes:
+      label: Hardware
+      description: >-
+        CPU model and core count, total RAM, GPU model and VRAM, and the storage type for the input and
+        output paths (NVMe, SATA SSD, spinning disk, network share). A conversion bound by a network
+        filesystem and one bound by a kernel look identical from the outside and have nothing in common.
+      placeholder: |
+        Apple M2 Pro, 10 cores, 32 GB unified memory, internal NVMe
+        or: AMD 7950X (16c/32t), 64 GB DDR5, NVIDIA RTX 4090 24 GB, NVMe
+    validations:
+      required: true
+
+  - type: textarea
+    id: versions
+    attributes:
+      label: Versions and environment
+      description: >-
+        Melkor version or commit; how you installed it; OS and version; **build type** (Release,
+        RelWithDebInfo, Debug — a Debug build is expected to be slow and is not a defect); compiler and
+        version if built from source; whether a sanitizer build was used (it will be many times slower);
+        and the compute backend actually selected, from `melkor doctor --output-mode json` (or
+        `melkor --info` on older builds). A CPU fallback where you expected the GPU is the single most
+        common cause of a report like this, and this output is what reveals it.
+      render: text
+    validations:
+      required: true
+
+  - type: dropdown
+    id: regression
+    attributes:
+      label: Is this a regression?
+      description: A regression is prioritised differently from a "this was always slow", so please say.
+      options:
+        - "Yes — it was faster in an earlier Melkor version (say which, below)"
+        - "No — it has always been this slow, but I believe it should be faster"
+        - "Unknown / first time using Melkor for this workload"
+    validations:
+      required: true
+
+  - type: textarea
+    id: profile
+    attributes:
+      label: Profile or trace
+      description: >-
+        Optional, and very welcome. A `perf`, Instruments, Xcode GPU capture, or Nsight profile that
+        shows where the time actually goes. If you have one, name the top few symbols or the dominant
+        phase here rather than only attaching a binary trace.
+
+  - type: checkboxes
+    id: acknowledgements
+    attributes:
+      label: Before you submit
+      options:
+        - label: >-
+            I measured a **Release** build (or I have said explicitly that I did not, and why).
+          required: true
+        - label: >-
+            The command above is reproducible by someone else, given the data description or the
+            attached asset.
+          required: true
+        - label: >-
+            This is a performance problem, not unbounded resource consumption. I understand that making
+            Melkor exhaust memory, CPU, or disk from an input file is a **security** report and belongs
+            in [private vulnerability reporting](https://github.com/sepahead/melkor/security/advisories/new).
+          required: true
+        - label: >-
+            I will not attach any asset I do not have the right to redistribute, and nothing I attach
+            contains personal data.
+          required: true

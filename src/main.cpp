@@ -1,5 +1,7 @@
 #include "melkor/version.h"
 
+#include "melkor/backend_registry.hpp"
+
 #include "melkor/compute_provider.hpp"
 #include "melkor/cloud_inspector.hpp"
 #include "melkor/densifier.hpp"
@@ -9,12 +11,6 @@
 #include "melkor/enhanced_converter.hpp"
 #include "inspect_command.hpp"
 #include "safe_text.hpp"
-
-// Metal-specific features (EnhancedConverter GPU path, GaussianFitter,
-// DifferentiableRenderer) still require metal::MetalContext directly.
-#ifdef MELKOR_HAS_METAL
-#include "melkor/metal_compute.hpp"
-#endif
 
 #include <iostream>
 #include <string>
@@ -117,6 +113,16 @@ enum class ConversionMode {
 };
 
 int main(int argc, char* argv[]) try {
+    // Populate the backend registry.
+    //
+    // melkor_core owns the registry but knows nothing about Metal or CUDA; melkor_runtime is
+    // the only layer allowed to name them, and this call is what connects the two. It is an
+    // explicit call rather than a static initializer because a self-registering backend in a
+    // static library is silently stripped by the linker when nothing else in its translation
+    // unit is referenced -- and the symptom would be "my GPU is not detected", reported by a
+    // user months later on a build nobody tested.
+    melkor::register_builtin_backends();
+
     if (argc >= 2 && std::string(argv[1]) == "inspect") {
         return melkor::cli::runInspectCommand(argc - 2, argv + 2, argv[0]);
     }
@@ -366,13 +372,9 @@ int main(int argc, char* argv[]) try {
         provider = melkor::ComputeProvider::create(melkor::ComputeBackend::CPU);
     }
 
-    // Metal-specific features (EnhancedConverter GPU path, GaussianFitter)
-    // need the raw Metal context handle.  Nullptr on non-Metal backends —
-    // EnhancedConverter falls back to CPU when given nullptr.
-    melkor::metal::MetalContext* metal_ctx = nullptr;
-    if (provider && provider->backend() == melkor::ComputeBackend::Metal) {
-        metal_ctx = static_cast<melkor::metal::MetalContext*>(provider->rawContext());
-    }
+    // No raw context handle is extracted here any more. Everything a caller needs is on the
+    // ComputeProvider interface, so the provider is simply passed along; nothing in this file
+    // knows or cares which backend it happens to be.
 
     melkor::GaussianCloud cloud;
 
@@ -386,7 +388,7 @@ int main(int argc, char* argv[]) try {
         if (mode == ConversionMode::Enhanced) {
             std::cout << "Using enhanced conversion mode\n";
 
-            melkor::EnhancedConverter converter(metal_ctx);
+            melkor::EnhancedConverter converter(provider.get());
             melkor::EnhancedConversionConfig config;
             config.use_gpu = use_gpu;
             config.knn_neighbors = knn_neighbors;

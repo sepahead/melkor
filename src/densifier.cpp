@@ -1,11 +1,6 @@
 #include "melkor/densifier.hpp"
 #include "melkor/compute_provider.hpp"
-#include "melkor/metal_compute.hpp"
 #include "melkor/spatial_grid.hpp"
-
-#ifdef MELKOR_HAS_CUDA
-#include "melkor/cuda_compute.hpp"
-#endif
 
 #include <algorithm>
 #include <cmath>
@@ -84,19 +79,14 @@ private:
 
 class Densifier::Impl {
 public:
-    explicit Impl(metal::MetalContext* ctx) : metal_ctx_(ctx) {}
-
-    explicit Impl(ComputeProvider* provider) {
-        if (!provider) return;
-        if (provider->backend() == ComputeBackend::Metal) {
-            metal_ctx_ = static_cast<metal::MetalContext*>(provider->rawContext());
-        }
-#ifdef MELKOR_HAS_CUDA
-        else if (provider->backend() == ComputeBackend::CUDA) {
-            cuda_ctx_ = static_cast<cuda::CudaContext*>(provider->rawContext());
-        }
-#endif
-    }
+    // A null provider means CPU-only, which is a complete configuration rather than a
+    // degraded one: the CPU path is always present and is the semantic reference.
+    //
+    // This used to take a metal::MetalContext*, obtained by casting ComputeProvider's
+    // rawContext(). That is how Metal types ended up inside platform-neutral code (P1-02) and
+    // why melkor_core had to link back against the Metal library (P0-05). It now holds only
+    // the abstract interface, and it neither knows nor needs to know which backend that is.
+    explicit Impl(ComputeProvider* provider) : provider_(provider) {}
 
     DensifyStats fillHoles(GaussianCloud& cloud, const DensifyConfig& cfg) {
         DensifyStats stats;
@@ -105,17 +95,9 @@ public:
 
         const size_t max_added = static_cast<size_t>(
             static_cast<double>(n0) * std::max(0.0f, cfg.max_growth));
-
-        std::unique_ptr<metal::GaussianProcessor> gpu;
-        if (metal_ctx_ && cfg.use_gpu) {
-            gpu = std::make_unique<metal::GaussianProcessor>(*metal_ctx_);
-        }
-#ifdef MELKOR_HAS_CUDA
-        std::unique_ptr<cuda::GaussianProcessor> cuda_gpu;
-        if (cuda_ctx_ && cfg.use_gpu) {
-            cuda_gpu = std::make_unique<cuda::GaussianProcessor>(*cuda_ctx_);
-        }
-#endif
+        // Accelerate through whichever backend the provider is, or not at all. No #ifdef,
+        // and no knowledge of which backend that happens to be.
+        ComputeProvider* gpu = (provider_ && cfg.use_gpu) ? provider_ : nullptr;
 
         for (int pass = 0; pass < cfg.max_iterations; ++pass) {
             if (stats.added >= max_added) break;
@@ -141,13 +123,6 @@ public:
                                         g.cell_counts, g.origin.data(),
                                         g.cell_size, g.dims.data(), k);
             }
-#ifdef MELKOR_HAS_CUDA
-            if (cuda_gpu && knn.size() != n * 4) {
-                knn = cuda_gpu->knnStatsGrid(positions, g.entries, g.cell_starts,
-                                             g.cell_counts, g.origin.data(),
-                                             g.cell_size, g.dims.data(), k);
-            }
-#endif
             if (knn.size() != n * 4) {
                 knn = grid::knnStatsCpu(positions, g, k);
             }
@@ -226,14 +201,6 @@ public:
                     g.cell_counts, g.origin.data(), g.cell_size, g.dims.data(),
                     min_sep, support_radius);
             }
-#ifdef MELKOR_HAS_CUDA
-            if (cuda_gpu && filter.size() != cands.size() * 2) {
-                filter = cuda_gpu->filterCandidatesGrid(
-                    cand_pos, cand_dir, positions, g.entries, g.cell_starts,
-                    g.cell_counts, g.origin.data(), g.cell_size, g.dims.data(),
-                    min_sep, support_radius);
-            }
-#endif
             if (filter.size() != cands.size() * 2) {
                 filter = grid::candidateFilterCpu(cand_pos, cand_dir, positions,
                                                   g, min_sep, support_radius);
@@ -273,17 +240,13 @@ public:
     }
 
 private:
-    metal::MetalContext* metal_ctx_ = nullptr;
-#ifdef MELKOR_HAS_CUDA
-    cuda::CudaContext* cuda_ctx_ = nullptr;
-#endif
+    // The abstract provider. Which backend it is, this class neither knows nor needs to.
+    ComputeProvider* provider_ = nullptr;
 };
 
-Densifier::Densifier()
-    : impl_(std::make_unique<Impl>(static_cast<metal::MetalContext*>(nullptr))) {}
-
-Densifier::Densifier(metal::MetalContext* ctx)
-    : impl_(std::make_unique<Impl>(ctx)) {}
+// A null provider means CPU-only. The CPU path is always present and is the reference
+// implementation, so "no accelerator" is a valid, complete configuration -- not a degraded one.
+Densifier::Densifier() : impl_(std::make_unique<Impl>(nullptr)) {}
 
 Densifier::Densifier(ComputeProvider* provider)
     : impl_(std::make_unique<Impl>(provider)) {}

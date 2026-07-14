@@ -1,7 +1,7 @@
 #pragma once
 
 #include "melkor/gaussian_data.hpp"
-#include "melkor/metal_compute.hpp"
+#include "melkor/compute_provider.hpp"
 #include <memory>
 #include <vector>
 #include <array>
@@ -68,7 +68,7 @@ struct EnhancedConversionResult {
 class EnhancedConverter {
 public:
     EnhancedConverter();
-    explicit EnhancedConverter(metal::MetalContext* metal_ctx);
+    explicit EnhancedConverter(ComputeProvider* provider);
     ~EnhancedConverter();
     
     // Convert GLB file with enhanced processing
@@ -95,7 +95,7 @@ namespace enhanced {
     std::vector<float> computeKnnDistances(
         const std::vector<float>& positions,
         int k,
-        metal::MetalContext* metal_ctx = nullptr);
+        ComputeProvider* provider = nullptr);
     
     // Compute surface frame (tangent, bitangent) from normal
     void computeSurfaceFrame(

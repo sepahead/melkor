@@ -41,10 +41,13 @@ if(APPLE)
     set(CMAKE_OBJCXX_STANDARD 17)
     set(CMAKE_OBJCXX_STANDARD_REQUIRED ON)
     set(CMAKE_OSX_DEPLOYMENT_TARGET "13.0" CACHE STRING "Minimum macOS deployment version")
-    # CMake deliberately repeats mutually dependent static archives so ld64
-    # rescans them. Xcode 15+ diagnoses the required repetition even though it
-    # is correct; suppress only that linker diagnostic, not compiler warnings.
-    add_link_options("LINKER:-no_warn_duplicate_libraries")
+    # No -no_warn_duplicate_libraries here, deliberately.
+    #
+    # That suppression existed only to silence the diagnostic produced by the circular
+    # melkor_core <-> backend static archives (P0-05). The graph is acyclic now, so the
+    # warning has nothing to fire on -- and leaving the suppression in place would hide a real
+    # cycle if one were ever reintroduced. A suppressed linker warning must never be
+    # load-bearing again.
 elseif(UNIX AND NOT APPLE)
     set(MELKOR_PLATFORM "LINUX")
 else()
@@ -133,6 +136,7 @@ add_library(melkor_core STATIC
     src/core/checked.cpp
     src/core/limits.cpp
     src/core/budget.cpp
+    src/core/backend_registry.cpp
 
     # Atomic output. One implementation for every writer -- PLY, SPZ, glTF, JSON reports.
     # Format-specific "open the file and hope" is how P0-08 happened.
@@ -143,7 +147,6 @@ add_library(melkor_core STATIC
     src/gaussian_data.cpp
     src/cloud_inspector.cpp
     src/enhanced_converter.cpp
-    src/feedforward_model.cpp
     src/spz_encoder.cpp
     src/cpu_compute_provider.cpp
     src/spatial_grid.cpp
@@ -182,7 +185,6 @@ if(APPLE AND MELKOR_USE_METAL)
     add_library(melkor_metal STATIC
         src/metal/metal_compute.mm
         src/metal/gaussian_processor.mm
-        src/metal/gaussian_fitter.mm
         src/metal/metal_compute_provider.mm
     )
     
@@ -202,11 +204,10 @@ if(APPLE AND MELKOR_USE_METAL)
     # retain/release); without -fobjc-arc every newBuffer/newFunction object
     # leaks, growing resident memory on each GPU dispatch.
     target_compile_options(melkor_metal PRIVATE -fobjc-arc ${MELKOR_WARNING_FLAGS})
-    # melkor_core calls into melkor_metal for GPU-accelerated enhanced
-    # conversion and k-NN.  The circular static-library dependency is
-    # resolved by the linker re-scanning archives.  Consumers of melkor_core
-    # (tests, CLI) get melkor_metal transitively via this PUBLIC link.
-    target_link_libraries(melkor_core PUBLIC melkor_metal)
+    # melkor_core does NOT link melkor_metal. That edge -- combined with melkor_metal's
+    # link back to melkor_core -- is what made the graph cyclic. Dependencies now point one
+    # way: backends depend on core, the runtime depends on backends, nothing depends
+    # backwards. melkor_runtime is what pulls the backend into the final binary.
     
     # Compile Metal shaders
     set(METAL_SHADER_COMPUTE ${CMAKE_SOURCE_DIR}/src/metal/shaders/gaussian_compute.metal)
@@ -240,16 +241,17 @@ elseif(MELKOR_PLATFORM STREQUAL "LINUX" AND MELKOR_USE_CUDA AND CUDAToolkit_FOUN
     set(CMAKE_CUDA_STANDARD 17)
     set(CMAKE_CUDA_STANDARD_REQUIRED ON)
     
-    # CUDA compute library. gaussian_processor.cu holds the __global__
-    # kernels that cuda_compute.cpp declares extern; gpu_stub.cpp supplies
-    # the Metal-API stubs that melkor_core references on non-Metal platforms
-    # (its ComputeProvider factory is compiled out under MELKOR_HAS_CUDA —
-    # cuda_compute_provider.cpp provides the real one).
+    # CUDA compute library. gaussian_processor.cu holds the __global__ kernels that
+    # cuda_compute.cpp declares extern.
+    #
+    # It no longer compiles src/gpu_stub.cpp. That file existed to supply fake metal:: symbols
+    # that platform-neutral code referenced -- which it should never have done. With
+    # rawContext() removed from ComputeProvider and the dead Metal-typed facades deleted,
+    # nothing outside src/backends names a platform type, so there is nothing left to stub.
     add_library(melkor_cuda STATIC
         src/cuda/cuda_compute.cpp
         src/cuda/gaussian_processor.cu
         src/cuda/cuda_compute_provider.cpp
-        src/gpu_stub.cpp
     )
 
     target_include_directories(melkor_cuda PUBLIC
@@ -265,7 +267,6 @@ elseif(MELKOR_PLATFORM STREQUAL "LINUX" AND MELKOR_USE_CUDA AND CUDAToolkit_FOUN
     # Same circular static-library arrangement as the Metal branch: consumers
     # of melkor_core (tests, CLI) resolve the Metal-stub and provider-factory
     # symbols via this PUBLIC link.
-    target_link_libraries(melkor_core PUBLIC melkor_cuda)
     
     # Architectures were selected before enable_language(CUDA) above and
     # apply globally via CMAKE_CUDA_ARCHITECTURES.
@@ -278,30 +279,47 @@ elseif(MELKOR_PLATFORM STREQUAL "LINUX" AND MELKOR_USE_CUDA AND CUDAToolkit_FOUN
     set(MELKOR_GPU_BACKEND "CUDA")
     
 else()
-    message(STATUS "Building CPU-only version (no GPU acceleration)")
-    
-    # Stub library for non-GPU platforms
-    add_library(melkor_gpu_stub STATIC
-        src/gpu_stub.cpp
-    )
-    
-    target_include_directories(melkor_gpu_stub PUBLIC
-        ${CMAKE_SOURCE_DIR}/include
-    )
-    
-    target_link_libraries(melkor_gpu_stub PUBLIC
-        melkor_core
-    )
+    message(STATUS "Building CPU-only (no GPU acceleration)")
 
-    # Consumers of melkor_core (tests, CLI) resolve the Metal-stub and
-    # provider-factory symbols via this PUBLIC link (same arrangement as the
-    # Metal and CUDA branches).
-    target_link_libraries(melkor_core PUBLIC melkor_gpu_stub)
+    # There is no stub library any more.
+    #
+    # src/gpu_stub.cpp existed to fake the entire metal:: namespace so that platform-neutral
+    # code -- which should never have referenced Metal types at all -- would link on non-Apple
+    # platforms. With rawContext() gone from ComputeProvider and the dead GaussianFitter /
+    # FeedforwardModel facades deleted, nothing outside src/backends names a platform type,
+    # so there is nothing left to stub.
+    #
+    # A CPU-only build is now simply a build with no GPU backend registered. CPU is not a
+    # fallback that fills a hole; it is a complete, always-present backend and the semantic
+    # reference implementation.
 
-    set(MELKOR_GPU_LIBRARY melkor_gpu_stub)
+    set(MELKOR_GPU_LIBRARY "")
     set(MELKOR_HAS_GPU OFF)
     set(MELKOR_GPU_BACKEND "CPU")
 endif()
+
+# ---------------------------------------------------------------------------
+# melkor_runtime — the only layer allowed to name a concrete backend.
+#
+# This target is what makes the graph acyclic. Dependencies point one way:
+#
+#     melkor_core  <--  melkor_backend_{metal,cuda}  <--  melkor_runtime  <--  CLI / tests
+#
+# Previously melkor_core linked each backend PUBLIC *and* each backend linked melkor_core
+# PUBLIC, because ComputeProvider::create() was declared in core but defined in the backend.
+# The resulting mutually dependent static archives only linked because the linker rescans
+# them, and on Apple only after -no_warn_duplicate_libraries suppressed the warning about it
+# (P0-05). Core now owns a registry and knows nothing about Metal; the runtime populates it.
+# ---------------------------------------------------------------------------
+add_library(melkor_runtime STATIC
+    src/runtime/backend_registration.cpp
+)
+target_include_directories(melkor_runtime PUBLIC ${CMAKE_SOURCE_DIR}/include)
+target_link_libraries(melkor_runtime PUBLIC melkor_core)
+if(MELKOR_GPU_LIBRARY)
+    target_link_libraries(melkor_runtime PUBLIC ${MELKOR_GPU_LIBRARY})
+endif()
+target_compile_options(melkor_runtime PRIVATE ${MELKOR_WARNING_FLAGS})
 
 # Main CLI executable
 add_executable(melkor
@@ -309,11 +327,9 @@ add_executable(melkor
     src/inspect_command.cpp
 )
 
-# The platform GPU library (melkor_metal / melkor_cuda / melkor_gpu_stub) is
-# a PUBLIC transitive dependency of melkor_core on every platform — listing
-# it again would trigger Apple ld's duplicate-library deduplication, which
-# skips archive re-scans and drops symbols.
-target_link_libraries(melkor PRIVATE melkor_core)
+# The CLI links the runtime, which brings in core and whichever backend was compiled. It never
+# names a backend itself.
+target_link_libraries(melkor PRIVATE melkor_runtime)
 target_compile_options(melkor PRIVATE ${MELKOR_WARNING_FLAGS})
 # The CLI reads its version from the generated <melkor/version.h>, which derives from
 # the root VERSION file. There is no second version string to keep in step.
@@ -356,7 +372,7 @@ message(STATUS "")
 enable_testing()
 
 add_executable(test_melkor_core tests/test_melkor_core.cpp)
-target_link_libraries(test_melkor_core PRIVATE melkor_core)
+target_link_libraries(test_melkor_core PRIVATE melkor_runtime)
 if(SPZ_AVAILABLE)
     target_compile_definitions(test_melkor_core PRIVATE MELKOR_HAS_SPZ)
 endif()
@@ -368,18 +384,18 @@ add_test(NAME melkor_core_tests COMMAND test_melkor_core)
 # Safety substrate: checked arithmetic, resource budgets, decompression-bomb guards,
 # cancellation, and the diagnostic/exit-code contract.
 add_executable(test_safety_substrate tests/test_safety_substrate.cpp)
-target_link_libraries(test_safety_substrate PRIVATE melkor_core)
+target_link_libraries(test_safety_substrate PRIVATE melkor_runtime)
 target_compile_options(test_safety_substrate PRIVATE ${MELKOR_WARNING_FLAGS})
 add_test(NAME safety_substrate_tests COMMAND test_safety_substrate)
 
 # Atomic output: the existing destination must survive every injected failure.
 add_executable(test_atomic_writer tests/test_atomic_writer.cpp)
-target_link_libraries(test_atomic_writer PRIVATE melkor_core)
+target_link_libraries(test_atomic_writer PRIVATE melkor_runtime)
 target_compile_options(test_atomic_writer PRIVATE ${MELKOR_WARNING_FLAGS})
 add_test(NAME atomic_writer_tests COMMAND test_atomic_writer)
 
 add_executable(test_cloud_inspector tests/test_cloud_inspector.cpp)
-target_link_libraries(test_cloud_inspector PRIVATE melkor_core)
+target_link_libraries(test_cloud_inspector PRIVATE melkor_runtime)
 set_target_properties(test_cloud_inspector PROPERTIES
     RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}
 )
@@ -398,7 +414,7 @@ add_test(NAME spz_stub_api_tests COMMAND test_spz_stub_api)
 # double-bug cannot hide; compares rotation matrices since q/-q are equivalent.
 if(SPZ_AVAILABLE)
     add_executable(test_spz_quaternion_fuzz tests/test_spz_quaternion_fuzz.cpp)
-    target_link_libraries(test_spz_quaternion_fuzz PRIVATE melkor_core)
+    target_link_libraries(test_spz_quaternion_fuzz PRIVATE melkor_runtime)
     target_compile_definitions(test_spz_quaternion_fuzz PRIVATE MELKOR_HAS_SPZ)
     set_target_properties(test_spz_quaternion_fuzz PROPERTIES
         RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}
@@ -410,7 +426,7 @@ endif()
 # Catches stride/ordering/endian regressions in both the writer and the
 # header-driven reader.
 add_executable(test_ply_roundtrip_fuzz tests/test_ply_roundtrip_fuzz.cpp)
-target_link_libraries(test_ply_roundtrip_fuzz PRIVATE melkor_core)
+target_link_libraries(test_ply_roundtrip_fuzz PRIVATE melkor_runtime)
 set_target_properties(test_ply_roundtrip_fuzz PROPERTIES
     RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}
 )
@@ -420,7 +436,7 @@ add_test(NAME ply_roundtrip_fuzz COMMAND test_ply_roundtrip_fuzz)
 # against the utils reference, Y-up->Z-up rotation semantics, and CPU/GPU
 # parity of the shared operations when a GPU backend is present.
 add_executable(test_compute_provider tests/test_compute_provider.cpp)
-target_link_libraries(test_compute_provider PRIVATE melkor_core)
+target_link_libraries(test_compute_provider PRIVATE melkor_runtime)
 set_target_properties(test_compute_provider PROPERTIES
     RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}
 )
@@ -430,7 +446,7 @@ add_test(NAME compute_provider_tests COMMAND test_compute_provider)
 # hole filling on a synthetic plane, outer-boundary containment, and CPU/Metal
 # parity of the grid k-NN kernels when a GPU is present.
 add_executable(test_densifier tests/test_densifier.cpp)
-target_link_libraries(test_densifier PRIVATE melkor_core)
+target_link_libraries(test_densifier PRIVATE melkor_runtime)
 set_target_properties(test_densifier PROPERTIES
     RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}
 )
@@ -442,19 +458,12 @@ add_test(NAME densifier_tests COMMAND test_densifier)
 add_test(NAME cli_validation
          COMMAND bash ${CMAKE_SOURCE_DIR}/tests/test_cli.sh $<TARGET_FILE:melkor>)
 
-# Gradient-check test for the differentiable rasterizer (macOS/Metal only).
-# Compares the analytic backward gradients against central finite differences
-# for color and opacity -- the correctness bar for any backward pass. Gated
-# on MELKOR_HAS_METAL because the DifferentiableRenderer lives in the Metal TU.
-if(APPLE AND MELKOR_USE_METAL)
-    add_executable(test_gradient_check tests/test_gradient_check.mm)
-    target_link_libraries(test_gradient_check PRIVATE melkor_metal)
-    target_compile_options(test_gradient_check PRIVATE -fobjc-arc)
-    set_target_properties(test_gradient_check PROPERTIES
-        RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}
-    )
-    add_test(NAME gradient_check COMMAND test_gradient_check)
-endif()
+# The gradient-check test is gone with the code it tested.
+#
+# It exercised DifferentiableRenderer's analytic backward pass against finite differences --
+# a good test, but of a facade that was already retired at the CLI (--fit failed closed) and
+# that has now been deleted along with GaussianFitter and FeedforwardModel (P1-03). A test for
+# code that no longer ships is not coverage; it is confusion.
 
 # Python test for the DA3 model-direct Gaussians extraction path. It stubs
 # torch so it runs anywhere Python3 + numpy are available (no DA3 weights or

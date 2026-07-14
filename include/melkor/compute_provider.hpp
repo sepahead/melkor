@@ -3,14 +3,21 @@
 // Abstract compute provider — unifies Metal, CUDA, and CPU backends behind a
 // single interface for Gaussian cloud processing operations.
 //
-// Backends are selected at compile time (Metal on macOS, CUDA on Linux/NVIDIA,
-// CPU fallback elsewhere) but the interface is identical, so callers in
-// melkor_core and main.cpp never need #ifdef dispatch.  Metal-specific
-// features (EnhancedConverter, GaussianFitter, DifferentiableRenderer) still
-// take a metal::MetalContext* directly; obtain it from
-// ComputeProvider::rawContext() when the backend is Metal.
+// Backends are compiled in optionally (Metal on Apple, CUDA on Linux/NVIDIA) and CPU is
+// always present as the semantic reference implementation. The interface is identical across
+// all of them, so no caller needs #ifdef dispatch.
+//
+// The concrete backends are constructed through BackendRegistry (backend_registry.hpp), which
+// they register themselves into. melkor_core deliberately does not know that Metal or CUDA
+// exist: it was core's knowledge of them -- through a factory declared here but defined inside
+// each backend -- that created the circular link this design removes (P0-05).
+//
+// There is no raw-pointer escape hatch. An earlier rawContext() returned a void* that callers
+// cast to metal::MetalContext*, which is how platform types ended up inside platform-neutral
+// code (P1-02). Every operation a caller needs is on this interface.
 
 #include "melkor/gaussian_data.hpp"
+#include <cstdint>
 #include <memory>
 #include <string>
 #include <vector>
@@ -72,12 +79,6 @@ public:
     virtual bool isInitialized() const = 0;
     virtual ComputeDeviceInfo deviceInfo() const = 0;
 
-    // Raw handle access for backend-specific components.
-    // Metal: returns metal::MetalContext*.
-    // CUDA:  returns cuda::CudaContext*.
-    // CPU:   returns nullptr.
-    virtual void* rawContext() const = 0;
-
     // --- Gaussian processing operations ---
 
     virtual bool transformCoordinates(GaussianCloud& cloud,
@@ -99,11 +100,59 @@ public:
     // Apply all enabled transformations in one batch.
     virtual bool processCloud(GaussianCloud& cloud,
                               const ProcessConfig& config) = 0;
+
+    // --- Grid-accelerated neighbourhood operations ---
+    //
+    // These were previously reached by casting rawContext() to a metal::MetalContext* and
+    // constructing a metal::GaussianProcessor directly, which dragged platform types into
+    // platform-neutral code and forced melkor_core to link against the backend. They are part
+    // of the abstract contract now, so a caller never names a backend.
+    //
+    // Every backend must implement them. The CPU implementation is the semantic reference: a
+    // GPU result that disagrees with it is a bug in the GPU path, not a new answer.
+
+    // Neighbourhood statistics over a uniform grid. Returns 4 floats per point: the mean
+    // distance to the k nearest neighbours, then the gap vector (point minus neighbour
+    // centroid) as xyz. Returns empty on failure, which the caller must treat as "fall back",
+    // not as "there were no neighbours".
+    virtual std::vector<float> knnStatsGrid(
+        const std::vector<float>& positions,
+        const std::vector<uint32_t>& cell_entries,
+        const std::vector<uint32_t>& cell_starts,
+        const std::vector<uint32_t>& cell_counts,
+        const float grid_origin[3], float cell_size,
+        const int grid_dims[3], int k_neighbors) = 0;
+
+    // Candidate filtering for densification. Returns 2 floats per candidate: the distance to
+    // the nearest existing point, and 1.0 when a point exists within support_radius in the
+    // forward half-space of the paired direction (a zero direction skips that test). Returns
+    // empty on failure.
+    virtual std::vector<float> filterCandidatesGrid(
+        const std::vector<float>& candidates,
+        const std::vector<float>& directions,
+        const std::vector<float>& positions,
+        const std::vector<uint32_t>& cell_entries,
+        const std::vector<uint32_t>& cell_starts,
+        const std::vector<uint32_t>& cell_counts,
+        const float grid_origin[3], float cell_size,
+        const int grid_dims[3],
+        float min_separation, float support_radius) = 0;
 };
 
-// Internal: creates and initializes the CPU provider.  Implemented in
-// cpu_compute_provider.cpp (melkor_core).  Used by the per-platform GPU
-// library factories as a fallback when no GPU is available.
+// Backend construction entry points.
+//
+// Each is defined in its own backend library and is called ONLY by melkor_runtime's
+// register_builtin_backends(). Core never calls them: core must not know that Metal exists.
+//
+// Each returns nullptr when its backend is compiled in but unusable on this machine.
 std::unique_ptr<ComputeProvider> createCpuProvider();
+
+#if defined(MELKOR_HAS_METAL)
+std::unique_ptr<ComputeProvider> createMetalProvider();
+#endif
+
+#if defined(MELKOR_HAS_CUDA)
+std::unique_ptr<ComputeProvider> createCudaProvider();
+#endif
 
 } // namespace melkor

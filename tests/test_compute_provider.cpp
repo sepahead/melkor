@@ -14,6 +14,7 @@
 //   6. CPU vs GPU backend parity on the shared operations when a GPU
 //      backend initializes on this machine.
 
+#include "melkor/backend_registry.hpp"
 #include "melkor/compute_provider.hpp"
 #include "melkor/gaussian_data.hpp"
 
@@ -86,7 +87,6 @@ bool test_factories() {
     check(cpu != nullptr, "CPU backend is always available");
     check(cpu && cpu->backend() == melkor::ComputeBackend::CPU,
           "CPU provider reports CPU backend");
-    check(cpu && cpu->rawContext() == nullptr, "CPU provider has no raw context");
     return true;
 }
 
@@ -318,6 +318,7 @@ bool test_gpu_cpu_parity() {
 } // namespace
 
 int main() {
+    melkor::register_builtin_backends();
     printf("melkor compute-provider tests\n");
     test_factories();
     test_cpu_math();

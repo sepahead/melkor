@@ -1,5 +1,38 @@
+# Blank issues stay enabled deliberately.
+#
+# The forms in this directory cover the reports the project can act on most efficiently, but they
+# cannot anticipate every problem. A reporter who does not fit a form must still have a way to reach
+# the project: forcing a real defect into the wrong template, or turning a reporter away because no
+# form matches, loses the report entirely. A form is a convenience for the reporter and the
+# maintainer, not a gate on who is allowed to speak.
+#
+# Vulnerabilities are the one exception, and they are redirected below rather than blocked — a public
+# issue is the wrong channel for an exploitable defect, and the private channel is one click away.
 blank_issues_enabled: true
+
 contact_links:
-  - name: Security report
+  - name: Report a security vulnerability (private)
     url: https://github.com/sepahead/melkor/security/advisories/new
-    about: Report vulnerabilities privately via GitHub Security Advisories, not a public issue. See SECURITY.md for scope.
+    about: >-
+      Never open a public issue for a suspected vulnerability. Report privately through GitHub Security
+      Advisories. Memory unsafety in the parsers, path or command injection, and unbounded memory, CPU,
+      or disk consumption driven by an input file are all in scope — see SECURITY.md.
+
+  - name: Ask a question or discuss an idea
+    url: https://github.com/sepahead/melkor/discussions
+    about: >-
+      Usage questions, "is this a bug?", design discussion, and anything exploratory belong in
+      Discussions. Nothing is lost by starting there: a confirmed defect can be turned into an issue
+      afterwards, with the diagnosis already done.
+
+  - name: Support policy and what to include in a report
+    url: https://github.com/sepahead/melkor/blob/main/SUPPORT.md
+    about: >-
+      What is supported today (currently: no production release), which versions receive fixes, and
+      exactly what a report needs to be actionable. Worth two minutes before filing.
+
+  - name: Contributing and governance
+    url: https://github.com/sepahead/melkor/blob/main/CONTRIBUTING.md
+    about: >-
+      Development setup, the backend-parity rules, and the correctness conventions a change must follow.
+      See GOVERNANCE.md for how decisions are made and who makes them.
