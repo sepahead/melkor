@@ -220,7 +220,7 @@
     "name": "melkor",
     "spdx_id": "SPDXRef-Package-melkor",
     "supplier": "Person: Sepehr Mahmoudian",
-    "version_source": "CMakeLists.txt"
+    "version_source": "VERSION"
   },
   "schema_version": 1
 }

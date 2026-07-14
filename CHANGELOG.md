@@ -9,6 +9,15 @@ register is in `docs/audit/production-blockers.md`.
 
 ### Added
 
+- Root `VERSION` file as the single authoritative version source. CMake parses it before
+  `project()` via `cmake/MelkorVersion.cmake` and generates `<melkor/version.h>` carrying the
+  semantic version, the C ABI version, the JSON schema versions, and the adapter protocol
+  version. No wall-clock timestamp is embedded; `SOURCE_DATE_EPOCH` is honoured.
+- `tools/check_version_sync.py --check|--write` verifies every derived version surface
+  (viewer `package.json`, both lockfiles, the Tauri config and Cargo manifest, the Python
+  distribution's PEP 440 spelling, `CITATION.cff`, and the changelog) and can rewrite them.
+  `--check` never modifies a file and runs in CI as `release_metadata_tests`.
+
 - `docs/audit/v2-review-baseline.md` and `docs/audit/baseline-20260714.md` record the exact
   commit, tags, releases, GitHub metadata, CI state, and local build result that the v2 program
   starts from.
@@ -20,6 +29,19 @@ register is in `docs/audit/production-blockers.md`.
   support window that takes effect once `v2.0.0` ships.
 
 ### Changed
+
+- The CLI reads its version from the generated `<melkor/version.h>` instead of a
+  `MELKOR_VERSION` compile definition, and the release-evidence builder reads the `VERSION`
+  file instead of re-parsing `CMakeLists.txt`. Both previously restated the version
+  independently, which is the mechanism behind P0-01.
+- CMake minimum raised to 3.24.
+- GitHub About metadata no longer claims Python. The description and topics stated a
+  Python distribution that does not exist (P0-02); `python` and `depth-estimation` are
+  removed from the topic list and will be restored only when the corresponding artifact
+  passes its release gate.
+- README no longer says "cross-platform" (there is no supported Windows build, P0-03),
+  states the development status prominently, and drops the unsourced "around 90% smaller"
+  SPZ compression figure, which had no benchmark behind it.
 
 ### Fixed
 

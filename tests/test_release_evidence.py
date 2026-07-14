@@ -78,7 +78,12 @@ class RepositoryInventoryTests(unittest.TestCase):
             inventory, module.entry_map(entries)
         )
         self.assertIs(validated, inventory)
-        self.assertEqual(version, "2.0.0-rc.1")
+
+        # Compare against the authoritative VERSION file, not a literal. Hard-coding the
+        # version here would make this test one more surface that has to be remembered on
+        # every bump — the exact failure mode the single version source exists to remove.
+        expected = (ROOT / "VERSION").read_text(encoding="utf-8").strip()
+        self.assertEqual(version, expected)
 
 
 class ReleaseEvidenceTests(unittest.TestCase):
@@ -93,7 +98,10 @@ class ReleaseEvidenceTests(unittest.TestCase):
         # Keep fixture commits hermetic when the invoking developer requires
         # signed commits globally; the ephemeral test repository has no key.
         self.git("config", "commit.gpgsign", "false")
-        self.write("CMakeLists.txt", "project(melkor VERSION 1.2.3 LANGUAGES CXX)\n")
+        # The authoritative version is a single SemVer line in a VERSION file, matching
+        # the real project. Evidence reads the same source the build reads.
+        self.write("VERSION", "1.2.3\n")
+        self.write("CMakeLists.txt", "project(melkor VERSION ${MELKOR_VERSION_CORE})\n")
         self.write("LICENSE", "Synthetic project license\n")
         self.write("deps/widget/LICENSE", "Synthetic widget license\n")
         self.write("deps/widget/widget.cpp", "int widget() { return 7; }\n")
@@ -139,7 +147,7 @@ class ReleaseEvidenceTests(unittest.TestCase):
             "project": {
                 "spdx_id": "SPDXRef-Package-melkor",
                 "name": "melkor",
-                "version_source": "CMakeLists.txt",
+                "version_source": "VERSION",
                 "license_declared": "MIT",
                 "download_location": "https://example.invalid/melkor",
                 "supplier": "Organization: Melkor Test",

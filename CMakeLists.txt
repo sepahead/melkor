@@ -1,8 +1,20 @@
-cmake_minimum_required(VERSION 3.20)
-project(melkor VERSION 2.0.0 LANGUAGES CXX)
-set(MELKOR_PRERELEASE "rc.1")
-set(MELKOR_VERSION "${PROJECT_VERSION}-${MELKOR_PRERELEASE}")
+cmake_minimum_required(VERSION 3.24)
+
+# The root VERSION file is the single authoritative version source. It is read before
+# project() because project(VERSION ...) needs the parsed numeric core.
+include(${CMAKE_CURRENT_LIST_DIR}/cmake/MelkorVersion.cmake)
+
+project(melkor VERSION ${MELKOR_VERSION_CORE} LANGUAGES CXX)
+set(MELKOR_VERSION "${MELKOR_VERSION_FULL}")
 include(GNUInstallDirs)
+
+# Generated version header. Consumers include <melkor/version.h>; the generated copy
+# lives in the build tree so the source tree stays free of build products.
+configure_file(
+    "${CMAKE_CURRENT_SOURCE_DIR}/include/melkor/version.h.in"
+    "${CMAKE_CURRENT_BINARY_DIR}/generated/melkor/version.h"
+    @ONLY)
+set(MELKOR_GENERATED_INCLUDE_DIR "${CMAKE_CURRENT_BINARY_DIR}/generated")
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -128,6 +140,7 @@ add_library(melkor_core STATIC
 
 target_include_directories(melkor_core PUBLIC
     ${CMAKE_SOURCE_DIR}/include
+    ${MELKOR_GENERATED_INCLUDE_DIR}
 )
 
 target_link_libraries(melkor_core PUBLIC
@@ -290,8 +303,8 @@ add_executable(melkor
 # skips archive re-scans and drops symbols.
 target_link_libraries(melkor PRIVATE melkor_core)
 target_compile_options(melkor PRIVATE ${MELKOR_WARNING_FLAGS})
-# Single source of truth for the CLI's --version output.
-target_compile_definitions(melkor PRIVATE MELKOR_VERSION="${MELKOR_VERSION}")
+# The CLI reads its version from the generated <melkor/version.h>, which derives from
+# the root VERSION file. There is no second version string to keep in step.
 
 # Copy metallib to executable directory (macOS only)
 if(APPLE AND MELKOR_USE_METAL)

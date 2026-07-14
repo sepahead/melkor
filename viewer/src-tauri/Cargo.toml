@@ -1,6 +1,6 @@
 [package]
 name = "melkor-viewer"
-version = "2.0.0-rc.1"
+version = "2.0.0-dev"
 description = "Desktop Gaussian-splat viewer for Melkor"
 authors = ["Sepehr Mahmoudian"]
 license = "MIT"

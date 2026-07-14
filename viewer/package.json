@@ -1,6 +1,6 @@
 {
   "name": "melkor-spark-viewer",
-  "version": "2.0.0-rc.1",
+  "version": "2.0.0-dev",
   "private": true,
   "type": "module",
   "description": "SparkJS Gaussian-splat viewer for Melkor with generated demos, camera controls, and Playwright render tests.",

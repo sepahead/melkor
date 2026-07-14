@@ -1,53 +1,46 @@
 #!/usr/bin/env python3
-"""Keep user-visible release metadata synchronized across build systems."""
+"""Release metadata must agree with the authoritative VERSION file.
+
+This test used to re-derive the version by regexing ``CMakeLists.txt`` and comparing it
+against ``package.json``, the Tauri config, and ``Cargo.toml``. That made it a *second*
+implementation of version synchronization, which is the same class of bug it was meant to
+catch: two places that must agree, and nothing forcing them to.
+
+It now delegates to ``tools/check_version_sync.py``, which is the single implementation. It
+covers strictly more than the old test did — the lockfiles, the PEP 440 mapping for the
+Python distribution, the changelog, and a structural check that CMake never restates a
+literal version.
+
+Kept as a separate entry point because CTest registers it as ``release_metadata_tests`` and
+the release-candidate workflow invokes it by path.
+"""
 
 from __future__ import annotations
 
-import json
-import re
+import subprocess
 import sys
 from pathlib import Path
-
 
 ROOT = Path(__file__).resolve().parent.parent
 
 
-def require_match(pattern: str, text: str, source: str) -> str:
-    match = re.search(pattern, text, re.MULTILINE)
-    if match is None:
-        raise AssertionError(f"could not read version from {source}")
-    return match.group(1)
-
-
 def main() -> int:
-    cmake_base = require_match(
-        r"^project\(melkor VERSION ([0-9]+\.[0-9]+\.[0-9]+)",
-        (ROOT / "CMakeLists.txt").read_text(encoding="utf-8"),
-        "CMakeLists.txt",
+    result = subprocess.run(
+        [sys.executable, str(ROOT / "tools" / "check_version_sync.py"), "--check"],
+        cwd=ROOT,
+        capture_output=True,
+        text=True,
+        check=False,
     )
-    prerelease = require_match(
-        r'^set\(MELKOR_PRERELEASE "([0-9A-Za-z.-]+)"\)',
-        (ROOT / "CMakeLists.txt").read_text(encoding="utf-8"),
-        "CMakeLists.txt",
-    )
-    cmake = f"{cmake_base}-{prerelease}"
-    package = json.loads((ROOT / "viewer/package.json").read_text(encoding="utf-8"))[
-        "version"
-    ]
-    tauri = json.loads(
-        (ROOT / "viewer/src-tauri/tauri.conf.json").read_text(encoding="utf-8")
-    )["version"]
-    cargo = require_match(
-        r'^version\s*=\s*"([0-9]+\.[0-9]+\.[0-9]+-[0-9A-Za-z.-]+)"',
-        (ROOT / "viewer/src-tauri/Cargo.toml").read_text(encoding="utf-8"),
-        "viewer/src-tauri/Cargo.toml",
-    )
-    versions = {"CMake": cmake, "npm": package, "Tauri": tauri, "Cargo": cargo}
-    assert len(set(versions.values())) == 1, f"release version drift: {versions}"
 
-    changelog = (ROOT / "CHANGELOG.md").read_text(encoding="utf-8")
-    assert f"## {cmake} " in changelog, f"CHANGELOG has no {cmake} release section"
-    print(f"release metadata synchronized at {cmake}")
+    sys.stdout.write(result.stdout)
+    sys.stderr.write(result.stderr)
+
+    if result.returncode != 0:
+        print("\nrelease metadata is not synchronized with VERSION", file=sys.stderr)
+        return 1
+
+    print("release metadata synchronized with VERSION")
     return 0
 
 

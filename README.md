@@ -7,7 +7,7 @@
 
 # Melkor
 
-**A cross-platform 3D Gaussian Splatting toolkit for conversion, inspection, scene completion, reconstruction pipelines, and viewing.**
+**A 3D Gaussian Splatting toolkit for conversion, inspection, scene completion, reconstruction pipelines, and viewing.**
 
 [![CI](https://github.com/sepahead/melkor/actions/workflows/ci.yml/badge.svg)](https://github.com/sepahead/melkor/actions/workflows/ci.yml)
 [![Source RC](https://img.shields.io/github/v/tag/sepahead/melkor?include_prereleases&sort=semver)](https://github.com/sepahead/melkor/tree/v2.0.0-rc.1)
@@ -25,11 +25,18 @@
 
 </div>
 
-> **Release status:** the latest reviewed source candidate is
-> [`v2.0.0-rc.1`](https://github.com/sepahead/melkor/tree/v2.0.0-rc.1). Its
-> signed tag CI and deterministic source-evidence workflow pass. This is a
-> source-only candidate; signed and notarized production binaries have not
-> been published. See [Release and trust](docs/RELEASE.md).
+> **Development status: v2 hardening in progress. No production binary release is
+> currently supported.**
+>
+> `main` is development software and its public contract is still changing. The `1.x`
+> releases remain downloadable but are not the supported production line, and
+> `v2.0.0-rc.1` is a source-only candidate — no signed binaries, SDK packages, Python
+> wheels, or desktop applications have been published for it.
+>
+> The first supported production line will be `v2.0.0`. What it must satisfy before it can
+> be called that is tracked in [production blockers](docs/audit/production-blockers.md),
+> and the product boundary is in [ROADMAP.md](ROADMAP.md). Support status:
+> [SUPPORT.md](SUPPORT.md).
 
 ## Overview
 
@@ -62,9 +69,13 @@ CLI features.
 - **Deterministic inspection.** `melkor inspect` reports metadata, counts,
   bounds, field provenance, and numeric hazards without changing the source or
   initializing a GPU. The JSON schema is versioned as `melkor.inspect.v1`.
-- **Explicit format behavior.** Melkor reads SPZ v1–v3 and writes v3. SPZ is
-  lossy and is typically around 90% smaller than equivalent 3DGS PLY data;
-  the exact ratio depends on the scene.
+- **Explicit format behavior.** Melkor currently reads SPZ v1–v3 and writes v3. Upstream
+  SPZ has since moved to file-format v4; v4 support is a `v2.0.0` release blocker
+  ([P0-09](docs/audit/production-blockers.md)) and is not claimed until it is tested
+  against the pinned upstream implementation. SPZ is a quantized, compressed
+  representation, so a conversion into it is lossy by construction. Melkor does not
+  currently publish a measured compression ratio; any such figure will be stated only
+  with the dataset, version, and configuration that produced it.
 - **Geometry-based completion.** The advancing-front densifier bridges
   interior occlusion holes and sparse regions without a learned prior, while
   preserving the scene's outer boundary.

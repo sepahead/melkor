@@ -1,0 +1,81 @@
+/* Melkor version and compatibility metadata.
+ *
+ * Generated at configure time from the root VERSION file by cmake/MelkorVersion.cmake.
+ * Do not edit the generated melkor/version.h, and do not hand-copy a version string
+ * anywhere else: tools/check_version_sync.py fails the build when a surface drifts.
+ *
+ * This header is part of the stable C ABI surface. It is valid C and C++, contains no
+ * platform types, and has no dependencies.
+ */
+
+#ifndef MELKOR_VERSION_H
+#define MELKOR_VERSION_H
+
+/* ---------------------------------------------------------------------------
+ * Software version (Semantic Versioning 2.0.0).
+ * --------------------------------------------------------------------------- */
+
+/** Full version string, including any prerelease suffix, e.g. "2.0.0-rc.2". */
+#define MELKOR_VERSION_STRING "@MELKOR_VERSION_FULL@"
+
+/** Numeric core without the prerelease suffix, e.g. "2.0.0". */
+#define MELKOR_VERSION_CORE_STRING "@MELKOR_VERSION_CORE@"
+
+#define MELKOR_VERSION_MAJOR @MELKOR_VERSION_MAJOR@
+#define MELKOR_VERSION_MINOR @MELKOR_VERSION_MINOR@
+#define MELKOR_VERSION_PATCH @MELKOR_VERSION_PATCH@
+
+/** Prerelease identifier without the leading '-', e.g. "rc.2". Empty for a stable release. */
+#define MELKOR_VERSION_PRERELEASE "@MELKOR_VERSION_PRERELEASE@"
+
+/** 1 when this build is a development or release-candidate build, 0 for a stable release.
+ *
+ * Release automation gates on this. A build with a prerelease identifier must never be
+ * published as the supported production line.
+ */
+#define MELKOR_VERSION_IS_PRERELEASE @MELKOR_VERSION_IS_PRERELEASE@
+
+/** Monotonic integer for compile-time comparison: MMmmpp, e.g. 2.0.0 -> 20000.
+ *
+ * Compares the numeric core only. It deliberately ignores the prerelease field,
+ * because SemVer prerelease ordering cannot be expressed as a single integer.
+ */
+#define MELKOR_VERSION_NUMBER \
+    ((MELKOR_VERSION_MAJOR * 10000) + (MELKOR_VERSION_MINOR * 100) + MELKOR_VERSION_PATCH)
+
+/* ---------------------------------------------------------------------------
+ * Compatibility versions.
+ *
+ * These are independent of the software version on purpose. A patch release does
+ * not rebreak the C ABI, and a JSON consumer should not have to infer its schema
+ * from the release number.
+ * --------------------------------------------------------------------------- */
+
+/** Stable binary ABI version for the C API. Bumped only by a reviewed breaking change. */
+#define MELKOR_ABI_VERSION @MELKOR_ABI_VERSION@
+
+/** Version of the inspection report JSON document. */
+#define MELKOR_INSPECT_SCHEMA_VERSION @MELKOR_INSPECT_SCHEMA_VERSION@
+
+/** Version of the loss report JSON document. */
+#define MELKOR_LOSS_SCHEMA_VERSION @MELKOR_LOSS_SCHEMA_VERSION@
+
+/** Version of the external adapter protocol spoken by melkor-pipeline. */
+#define MELKOR_ADAPTER_PROTOCOL_VERSION @MELKOR_ADAPTER_PROTOCOL_VERSION@
+
+/* ---------------------------------------------------------------------------
+ * Build identity.
+ *
+ * Empty in an ordinary developer build. Release workflows supply the exact commit so
+ * that an artifact can be traced back to its source tree. No wall-clock timestamp is
+ * embedded by default, because it would make two builds of the same commit differ and
+ * defeat the reproducibility comparison in the release gate.
+ * --------------------------------------------------------------------------- */
+
+/** Exact source commit, or "" when the build environment did not supply one. */
+#define MELKOR_BUILD_COMMIT "@MELKOR_BUILD_COMMIT@"
+
+/** SOURCE_DATE_EPOCH as a decimal string, or "" when not set. */
+#define MELKOR_SOURCE_DATE_EPOCH "@MELKOR_SOURCE_DATE_EPOCH@"
+
+#endif /* MELKOR_VERSION_H */

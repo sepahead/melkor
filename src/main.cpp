@@ -1,3 +1,5 @@
+#include "melkor/version.h"
+
 #include "melkor/compute_provider.hpp"
 #include "melkor/cloud_inspector.hpp"
 #include "melkor/densifier.hpp"
@@ -213,11 +215,7 @@ int main(int argc, char* argv[]) try {
             printUsage(argv[0]);
             return 0;
         } else if (arg == "--version") {
-#ifdef MELKOR_VERSION
-            std::cout << "melkor " << MELKOR_VERSION << "\n";
-#else
-            std::cout << "melkor (unknown version)\n";
-#endif
+            std::cout << "melkor " << MELKOR_VERSION_STRING << "\n";
             return 0;
         } else if (arg == "--info") {
             show_info = true;

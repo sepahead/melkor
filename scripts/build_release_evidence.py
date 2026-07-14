@@ -32,11 +32,11 @@ INVENTORY_PATH = "release/components.json"
 GENERATOR_VERSION = "1"
 LFS_HEADER = b"version https://git-lfs.github.com/spec/v1\n"
 LFS_OID_RE = re.compile(rb"^oid sha256:([0-9a-f]{64})$")
+# The authoritative version is the single line in the root VERSION file. Evidence must
+# read the same source the build reads; deriving it by re-parsing CMakeLists.txt would
+# reintroduce the second version definition this project just removed.
 VERSION_RE = re.compile(
-    rb"^project\(melkor VERSION ([0-9]+\.[0-9]+\.[0-9]+)", re.MULTILINE
-)
-PRERELEASE_RE = re.compile(
-    rb'^set\(MELKOR_PRERELEASE "([0-9A-Za-z.-]+)"\)', re.MULTILINE
+    rb"^\s*([0-9]+\.[0-9]+\.[0-9]+(?:[-+][0-9A-Za-z.-]+)?)\s*$", re.MULTILINE
 )
 SPDX_ID_RE = re.compile(r"^SPDXRef-[A-Za-z0-9.-]+$")
 LICENSE_REF_RE = re.compile(r"LicenseRef-[A-Za-z0-9.-]+")
@@ -241,11 +241,11 @@ def validate_inventory(
     )
     version_match = VERSION_RE.search(version_entry.data)
     if version_match is None:
-        raise EvidenceError("could not derive the Melkor version from CMakeLists.txt")
+        raise EvidenceError(
+            f"could not derive the Melkor version from {project['version_source']}; "
+            f"it must contain exactly one SemVer line"
+        )
     version = version_match.group(1).decode("ascii")
-    prerelease_match = PRERELEASE_RE.search(version_entry.data)
-    if prerelease_match is not None:
-        version += "-" + prerelease_match.group(1).decode("ascii")
 
     dependency_manifests = inventory.get("dependency_manifests")
     if not isinstance(dependency_manifests, list) or not dependency_manifests:
