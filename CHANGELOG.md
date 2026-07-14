@@ -92,6 +92,18 @@ register is in `docs/audit/production-blockers.md`.
 
 ### Security
 
+- **`SECURITY.md` rewritten, and resource exhaustion is now in scope (P0-12).** The old policy
+  explicitly excluded denial of service from large well-formed input, which meant a valid but
+  enormous asset exhausting memory was, by policy, not a security bug. It is now in scope, and
+  the exclusion is called out as having been wrong.
+- Support attaches to the immutable `2.0.x` release line, never to `main` (P1-14). The policy
+  states plainly that no production release is currently supported, rather than implying a
+  release candidate carries a support promise.
+- `docs/security/threat-model.md`: assets, trust boundaries, attackers, entry points, 29 abuse
+  cases each mapped to a mitigation and its **true** state. It records 21 places where a control
+  is planned but not yet implemented — most importantly that the resource-limit substrate is not
+  yet wired into the readers — rather than describing the design as though it were the code.
+
 ### Removed
 
 - The dead `GaussianFitter`, `DifferentiableRenderer`, `MeshRenderer`, `FeedforwardModel`, and
