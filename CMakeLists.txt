@@ -126,6 +126,14 @@ endif()
 
 # Core library (platform-independent)
 add_library(melkor_core STATIC
+    # Safety substrate. Every reader, writer, and algorithm builds on these: results and
+    # stable diagnostics, checked arithmetic for file-provided numbers, and shared resource
+    # budgets with cancellation. Nothing here depends on a file format or a backend.
+    src/core/error.cpp
+    src/core/checked.cpp
+    src/core/limits.cpp
+    src/core/budget.cpp
+
     src/glb_reader.cpp
     src/ply_writer.cpp
     src/gaussian_data.cpp
@@ -352,6 +360,13 @@ set_target_properties(test_melkor_core PROPERTIES
     RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}
 )
 add_test(NAME melkor_core_tests COMMAND test_melkor_core)
+
+# Safety substrate: checked arithmetic, resource budgets, decompression-bomb guards,
+# cancellation, and the diagnostic/exit-code contract.
+add_executable(test_safety_substrate tests/test_safety_substrate.cpp)
+target_link_libraries(test_safety_substrate PRIVATE melkor_core)
+target_compile_options(test_safety_substrate PRIVATE ${MELKOR_WARNING_FLAGS})
+add_test(NAME safety_substrate_tests COMMAND test_safety_substrate)
 
 add_executable(test_cloud_inspector tests/test_cloud_inspector.cpp)
 target_link_libraries(test_cloud_inspector PRIVATE melkor_core)

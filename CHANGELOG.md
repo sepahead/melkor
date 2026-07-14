@@ -33,6 +33,12 @@ register is in `docs/audit/production-blockers.md`.
   than "everything tracked", and produces byte-identical output for a given commit.
 - `docs/adapters/index.md` records the external upstream projects, their licence terms, why the
   research snapshots were removed, and the separation between code licences and weight licences.
+- Safety substrate (`include/melkor/{error,checked,limits,budget}.hpp`): `Result<T>` with stable
+  diagnostic codes and a documented exit-code contract; checked arithmetic for every
+  file-provided count, offset, and stride that reaches an allocation; `web`/`desktop`/`server`
+  resource-limit profiles with hard ceilings; a thread-safe `Budget` with a decompression-ratio
+  guard; cooperative cancellation; and path redaction that defaults to a basename so an
+  inspection report is safe to paste in public. 112 checks in `safety_substrate_tests`.
 
 - `docs/audit/v2-review-baseline.md` and `docs/audit/baseline-20260714.md` record the exact
   commit, tags, releases, GitHub metadata, CI state, and local build result that the v2 program
