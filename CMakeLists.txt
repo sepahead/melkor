@@ -134,6 +134,10 @@ add_library(melkor_core STATIC
     src/core/limits.cpp
     src/core/budget.cpp
 
+    # Atomic output. One implementation for every writer -- PLY, SPZ, glTF, JSON reports.
+    # Format-specific "open the file and hope" is how P0-08 happened.
+    src/io/atomic_writer.cpp
+
     src/glb_reader.cpp
     src/ply_writer.cpp
     src/gaussian_data.cpp
@@ -367,6 +371,12 @@ add_executable(test_safety_substrate tests/test_safety_substrate.cpp)
 target_link_libraries(test_safety_substrate PRIVATE melkor_core)
 target_compile_options(test_safety_substrate PRIVATE ${MELKOR_WARNING_FLAGS})
 add_test(NAME safety_substrate_tests COMMAND test_safety_substrate)
+
+# Atomic output: the existing destination must survive every injected failure.
+add_executable(test_atomic_writer tests/test_atomic_writer.cpp)
+target_link_libraries(test_atomic_writer PRIVATE melkor_core)
+target_compile_options(test_atomic_writer PRIVATE ${MELKOR_WARNING_FLAGS})
+add_test(NAME atomic_writer_tests COMMAND test_atomic_writer)
 
 add_executable(test_cloud_inspector tests/test_cloud_inspector.cpp)
 target_link_libraries(test_cloud_inspector PRIVATE melkor_core)

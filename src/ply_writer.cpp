@@ -1,4 +1,8 @@
 #include "melkor/ply_writer.hpp"
+
+#include "melkor/budget.hpp"
+#include "melkor/io/atomic_writer.hpp"
+#include "melkor/limits.hpp"
 #include <algorithm>
 #include <cerrno>
 #include <charconv>
@@ -38,12 +42,64 @@ PlyWriter::~PlyWriter() = default;
 PlyWriteResult PlyWriter::writeToFile(const std::string& filepath,
                                       const GaussianCloud& cloud,
                                       const PlyWriteConfig& config) {
-    std::ofstream file(filepath, std::ios::binary);
-    if (!file.is_open()) {
-        return {false, "Failed to open file for writing: " + filepath, 0};
+    // Route through the atomic writer. Opening the destination directly with std::ofstream
+    // truncates it on open, so a failure partway through a write left the user with a
+    // half-written file where their good one used to be (P0-08).
+    //
+    // The bytes stream into an exclusively-created temporary in the same directory; the
+    // destination is replaced atomically only after the write fully succeeds. Streaming --
+    // rather than buffering the result and writing it in one go -- matters here: a
+    // 25-million-splat PLY is several gigabytes, and trading a data-loss bug for an
+    // out-of-memory bug would not be a fix.
+    melkor::Budget budget(melkor::Limits::for_profile(melkor::LimitsProfile::desktop));
+    melkor::OperationContext context = melkor::make_default_context(budget);
+
+    melkor::io::WriteOptions options;
+    // The legacy entry point has no --force plumbing yet; CLI v2 (WP15) makes overwrite an
+    // explicit user decision. Preserving the historical replace-the-output behaviour keeps
+    // this a pure data-safety fix rather than a silent contract change.
+    options.overwrite = true;
+
+    auto writer = melkor::io::AtomicWriter::create(filepath, options, context);
+    if (!writer.has_value()) {
+        const std::string message = writer.diagnostics().empty()
+                                        ? "Failed to open file for writing: " + filepath
+                                        : writer.diagnostics()[0].message;
+        return {false, message, 0};
     }
-    
-    return writeToStream(file, cloud, config);
+
+    PlyWriteResult result;
+    {
+        melkor::io::AtomicOutputStream stream(*writer.value());
+        result = writeToStream(stream, cloud, config);
+
+        stream.flush();
+
+        // An ostream swallows write failures by design. Committing after one would install a
+        // silently truncated file, so the stream's own error state is checked explicitly
+        // rather than trusting that writeToStream noticed.
+        if (stream.failed()) {
+            const auto& diagnostics = stream.diagnostics();
+            return {false,
+                    diagnostics.empty() ? "Failed writing PLY data" : diagnostics[0].message, 0};
+        }
+    }
+
+    if (!result.success) {
+        // The destination is untouched; the temporary is removed by the destructor.
+        return result;
+    }
+
+    auto committed = writer.value()->commit();
+    if (!committed.has_value()) {
+        return {false,
+                committed.diagnostics().empty() ? "Failed to commit PLY file"
+                                                : committed.diagnostics()[0].message,
+                0};
+    }
+
+    result.bytes_written = writer.value()->bytes_written();
+    return result;
 }
 
 PlyWriteResult PlyWriter::writeToStream(std::ostream& stream,

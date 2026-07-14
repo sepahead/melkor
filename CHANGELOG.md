@@ -67,6 +67,15 @@ register is in `docs/audit/production-blockers.md`.
 
 ### Fixed
 
+- **Data loss on a failed write (P0-08).** The SPZ writer opened the destination with
+  `std::ios::trunc` — destroying an existing file before writing a single new byte — and then
+  called `std::remove(filepath)` from each of its error handlers. An encode that failed partway
+  through therefore truncated the user's good `scene.spz` and then deleted it, leaving neither
+  the new asset nor the old one. The PLY writer truncated on open for the same reason. Both now
+  route through `melkor::io::AtomicWriter`: bytes go to an exclusively-created, unpredictably
+  named temporary in the same directory, and the destination is replaced atomically only after
+  the write fully succeeds. Any failure leaves the pre-existing file byte-for-byte intact.
+
 ### Security
 
 ### Removed

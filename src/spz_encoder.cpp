@@ -5,7 +5,10 @@
 
 #ifdef MELKOR_HAS_SPZ
 
+#include "melkor/budget.hpp"
 #include "melkor/cloud_inspector.hpp"
+#include "melkor/io/atomic_writer.hpp"
+#include "melkor/limits.hpp"
 #include "load-spz.h"
 #include <algorithm>
 #include <cmath>
@@ -290,38 +293,53 @@ SpzEncodeResult SpzEncoder::encodeToFile(const std::string& filepath,
     if (!encoded.success) return encoded;
 
     SpzEncodeResult result;
-    bool output_opened = false;
-    try {
-        // Encode fully before opening the destination. Validation/allocation
-        // failures therefore preserve an existing file; an I/O failure after
-        // truncation removes the partial replacement below.
-        std::ofstream file(filepath, std::ios::binary | std::ios::trunc);
-        if (!file.is_open()) {
-            result.error_message = "Failed to open SPZ file for writing";
-            return result;
-        }
-        output_opened = true;
-        file.write(reinterpret_cast<const char*>(buffer.data()),
-                   static_cast<std::streamsize>(buffer.size()));
-        file.close();
-        if (!file.good()) {
-            std::remove(filepath.c_str());
-            result.error_message = "Failed to write complete SPZ file";
-            return result;
-        }
-        result.success = true;
-        result.bytes_written = buffer.size();
-    } catch (const std::bad_alloc&) {
-        if (output_opened) std::remove(filepath.c_str());
-        result.error_message = "SPZ file output exceeded available memory";
-    } catch (const std::length_error&) {
-        if (output_opened) std::remove(filepath.c_str());
-        result.error_message = "SPZ file output exceeded a container size limit";
-    } catch (const std::exception& error) {
-        if (output_opened) std::remove(filepath.c_str());
-        result.error_message = std::string("Failed to write SPZ: ") + error.what();
+
+    // Route through the atomic writer. The previous implementation opened the destination
+    // with std::ios::trunc -- destroying the user's existing file before a single byte of the
+    // new one was written -- and then called std::remove(filepath) from each error handler.
+    // An encode that failed partway through therefore truncated the good file and then
+    // deleted it, leaving the user with neither the new asset nor the old one. That is
+    // release blocker P0-08, and it is the reason AtomicWriter exists.
+    //
+    // Now: the bytes go to an exclusively-created temporary in the same directory, and the
+    // destination is replaced atomically only after the write has fully succeeded. Any
+    // failure leaves the pre-existing file byte-for-byte intact.
+    melkor::Budget budget(melkor::Limits::for_profile(melkor::LimitsProfile::desktop));
+    melkor::OperationContext context = melkor::make_default_context(budget);
+
+    melkor::io::WriteOptions options;
+    // The legacy entry point has no --force plumbing yet; CLI v2 (WP15) makes overwrite an
+    // explicit user decision. Preserving the historical "replace the output" behaviour here
+    // keeps this a pure data-safety fix rather than a silent contract change.
+    options.overwrite = true;
+
+    auto writer = melkor::io::AtomicWriter::create(filepath, options, context);
+    if (!writer.has_value()) {
+        result.error_message = writer.diagnostics().empty()
+                                   ? "Failed to open SPZ file for writing"
+                                   : writer.diagnostics()[0].message;
+        return result;
     }
 
+    auto written = writer.value()->write(buffer.data(), buffer.size());
+    if (!written.has_value()) {
+        // The destination is untouched. The temporary is removed by the destructor.
+        result.error_message = written.diagnostics().empty()
+                                   ? "Failed to write complete SPZ file"
+                                   : written.diagnostics()[0].message;
+        return result;
+    }
+
+    auto committed = writer.value()->commit();
+    if (!committed.has_value()) {
+        result.error_message = committed.diagnostics().empty()
+                                   ? "Failed to commit SPZ file"
+                                   : committed.diagnostics()[0].message;
+        return result;
+    }
+
+    result.success = true;
+    result.bytes_written = buffer.size();
     return result;
 }
 
