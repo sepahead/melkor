@@ -1,5 +1,32 @@
 # Changelog
 
+## Unreleased
+
+Work toward `v2.0.0`, the first release that can honestly be called production-grade. The blocker
+register is in `docs/audit/production-blockers.md`.
+
+### Breaking
+
+### Added
+
+- `docs/audit/v2-review-baseline.md` and `docs/audit/baseline-20260714.md` record the exact
+  commit, tags, releases, GitHub metadata, CI state, and local build result that the v2 program
+  starts from.
+- `docs/audit/production-blockers.md` records the P0, P1, and P2 release blockers and the work
+  package that closes each one.
+- `ROADMAP.md` states the v2 product boundary, the deliberate non-goals, and what "supported"
+  means.
+- `SUPPORT.md` states plainly that no production release is currently supported, and defines the
+  support window that takes effect once `v2.0.0` ships.
+
+### Changed
+
+### Fixed
+
+### Security
+
+### Removed
+
 ## 2.0.0-rc.1 (2026-07-11)
 
 ### Security
