@@ -532,6 +532,12 @@ target_link_libraries(test_ply_color PRIVATE melkor_core)
 target_compile_options(test_ply_color PRIVATE ${MELKOR_WARNING_FLAGS})
 add_test(NAME ply_color_tests COMMAND test_ply_color)
 
+# The PLY reader charges input/splats/memory against a Budget before allocating (P0-12).
+add_executable(test_ply_budget tests/test_ply_budget.cpp)
+target_link_libraries(test_ply_budget PRIVATE melkor_core)
+target_compile_options(test_ply_budget PRIVATE ${MELKOR_WARNING_FLAGS})
+add_test(NAME ply_budget_tests COMMAND test_ply_budget)
+
 # Canonical math oracle: activation domains, quaternion contract, and the covariance affine
 # transform that P0-17 is about.
 add_executable(test_math_oracle tests/test_math_oracle.cpp)

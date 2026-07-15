@@ -9,6 +9,11 @@ register is in `docs/audit/production-blockers.md`.
 
 ### Fixed
 
+- PLY reader resource bounds (P0-12). `PlyReader::readFromFile`/`readFromBuffer` now take a `Limits`
+  (default desktop profile) and charge the input bytes, the declared vertex count, and the
+  reconstructed cloud's memory against a `Budget` before allocating, so a well-formed header
+  declaring an enormous count is refused by policy rather than only when the OS runs out of memory
+  (`test_ply_budget`). Existing callers are unaffected via the default argument.
 - glTF reader resource bounds (P0-12). The scene walk instantiates a mesh once per referencing
   node, so a small file could describe an unbounded splat cloud (nodes x primitives x count) with
   nothing charged against a budget. `read_glb`/`read_gaussian_scene` now take a `Limits` (default:

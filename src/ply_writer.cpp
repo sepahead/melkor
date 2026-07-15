@@ -271,7 +271,7 @@ PlyWriteResult PlyWriter::writeToBuffer(std::vector<uint8_t>& buffer,
 PlyReader::PlyReader() = default;
 PlyReader::~PlyReader() = default;
 
-PlyReader::ReadResult PlyReader::readFromFile(const std::string& filepath) try {
+PlyReader::ReadResult PlyReader::readFromFile(const std::string& filepath, const Limits& limits) try {
     std::ifstream file(filepath, std::ios::binary);
     if (!file.is_open()) {
         return {false, "Failed to open file: " + filepath, {}, {}};
@@ -307,6 +307,16 @@ PlyReader::ReadResult PlyReader::readFromFile(const std::string& filepath) try {
         return {false, "Invalid PLY: header exceeds 1 MiB limit", {}, {}};
     }
 
+    // Charge the whole-file allocation against the budget before making it, so a well-formed but
+    // enormous file is refused by policy rather than only when the OS runs out of memory.
+    Budget budget(limits);
+    if (auto charged = budget.consume(BudgetKind::input_bytes, size, "ply.file");
+        !charged.has_value()) {
+        return {false, charged.diagnostics().empty() ? "PLY file exceeds the input-size limit"
+                                                      : charged.diagnostics()[0].message,
+                {}, {}};
+    }
+
     std::vector<uint8_t> buffer;
     try {
         buffer.resize(size);
@@ -318,17 +328,25 @@ PlyReader::ReadResult PlyReader::readFromFile(const std::string& filepath) try {
     if (!file.read(reinterpret_cast<char*>(buffer.data()), static_cast<std::streamsize>(size))) {
         return {false, "Failed to read complete PLY file", {}, {}};
     }
-    
-    return readFromBuffer(buffer.data(), buffer.size());
+
+    return readFromBuffer(buffer.data(), buffer.size(), limits);
 } catch (const std::bad_alloc&) {
     return {false, "PLY file exceeds available memory", {}, {}};
 } catch (const std::length_error&) {
     return {false, "PLY file exceeds a container size limit", {}, {}};
 }
 
-PlyReader::ReadResult PlyReader::readFromBuffer(const uint8_t* data, size_t size) try {
+PlyReader::ReadResult PlyReader::readFromBuffer(const uint8_t* data, size_t size,
+                                               const Limits& limits) try {
     if (data == nullptr || size == 0) {
         return {false, "Invalid PLY: input buffer is null or empty", {}, {}};
+    }
+    Budget budget(limits);
+    if (auto charged = budget.consume(BudgetKind::input_bytes, size, "ply.input");
+        !charged.has_value()) {
+        return {false, charged.diagnostics().empty() ? "PLY input exceeds the input-size limit"
+                                                      : charged.diagnostics()[0].message,
+                {}, {}};
     }
     ReadResult result;
     result.success = true;
@@ -620,6 +638,27 @@ PlyReader::ReadResult PlyReader::readFromBuffer(const uint8_t* data, size_t size
         if (vertex_count > remaining / min_record + 1) {
             return {false, "Invalid PLY: declared vertex count exceeds data size", {}, {}};
         }
+    }
+
+    // Charge the reconstructed cloud against the budget before reserving it, so a well-formed
+    // header declaring an enormous vertex count is refused by policy. Per-splat memory includes the
+    // fixed GaussianSplat plus any higher-order SH the file carries. The count is already bounded to
+    // the data section above, so this product cannot overflow.
+    if (auto charged = budget.consume(BudgetKind::splats, vertex_count, "ply.vertices");
+        !charged.has_value()) {
+        return {false, charged.diagnostics().empty() ? "PLY vertex count exceeds the splat limit"
+                                                      : charged.diagnostics()[0].message,
+                {}, {}};
+    }
+    const std::uint64_t per_splat_bytes =
+        sizeof(GaussianSplat) + static_cast<std::uint64_t>(sh_rest_idx.size()) * sizeof(float);
+    if (auto charged = budget.consume(BudgetKind::memory_bytes,
+                                      static_cast<std::uint64_t>(vertex_count) * per_splat_bytes,
+                                      "ply.cloud");
+        !charged.has_value()) {
+        return {false, charged.diagnostics().empty() ? "PLY cloud exceeds the memory limit"
+                                                      : charged.diagnostics()[0].message,
+                {}, {}};
     }
 
     result.cloud.reserve(vertex_count);

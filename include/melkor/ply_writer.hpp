@@ -1,6 +1,7 @@
 #pragma once
 
 #include "melkor/gaussian_data.hpp"
+#include "melkor/limits.hpp"
 #include <string>
 #include <ostream>
 
@@ -84,11 +85,15 @@ public:
         Metadata metadata;
     };
     
-    // Read from file
-    ReadResult readFromFile(const std::string& filepath);
-    
-    // Read from memory buffer
-    ReadResult readFromBuffer(const uint8_t* data, size_t size);
+    // Read from file. `limits` bounds resource use: the file bytes, the declared vertex count, and
+    // the reconstructed cloud are charged against a Budget before they are allocated, so a
+    // well-formed header declaring an enormous count is refused by policy, not only by bad_alloc.
+    ReadResult readFromFile(const std::string& filepath,
+                            const Limits& limits = Limits::for_profile(LimitsProfile::desktop));
+
+    // Read from memory buffer (see readFromFile for the meaning of `limits`).
+    ReadResult readFromBuffer(const uint8_t* data, size_t size,
+                              const Limits& limits = Limits::for_profile(LimitsProfile::desktop));
 };
 
 } // namespace melkor
