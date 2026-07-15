@@ -9,6 +9,14 @@ register is in `docs/audit/production-blockers.md`.
 
 ### Added
 
+- glTF accessor resolution (`include/melkor/format/gltf_resolve.hpp`,
+  `src/formats/gltf_resolve.cpp`): composes the bufferView+accessor offset indirection and decodes
+  an accessor into floats, re-validating byte extents with checked arithmetic -- the accessor must
+  lie within its bufferView and the bufferView within its buffer. These are extent checks the
+  index-level document parser does not perform, and an accessor whose count*stride runs off its
+  bufferView is a distinct, attacker-reachable error. Handles interleaved strides and rejects an
+  unavailable (external) buffer cleanly. Tested end-to-end from a parsed document
+  (`test_gltf_resolve`, 14 checks, clean under ASan+UBSan). Advances the glTF reader (P0-10).
 - glTF extension policy (`include/melkor/format/gltf_extensions.hpp`,
   `src/formats/gltf_extensions.cpp`): evaluates a document's extensionsUsed/extensionsRequired
   against what the reader implements, rejecting only the *required* extensions Melkor cannot honour

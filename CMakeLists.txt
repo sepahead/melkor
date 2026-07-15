@@ -153,6 +153,7 @@ add_library(melkor_core STATIC
     src/formats/gltf_document.cpp
     src/formats/gltf_extensions.cpp
     src/formats/gltf_khr.cpp
+    src/formats/gltf_resolve.cpp
     src/formats/gltf_transform.cpp
     src/formats/loss.cpp
     src/formats/probe.cpp
@@ -595,6 +596,13 @@ add_executable(test_gltf_extensions tests/test_gltf_extensions.cpp)
 target_link_libraries(test_gltf_extensions PRIVATE melkor_core)
 target_compile_options(test_gltf_extensions PRIVATE ${MELKOR_WARNING_FLAGS})
 add_test(NAME gltf_extensions_tests COMMAND test_gltf_extensions)
+
+# glTF accessor resolution: composes bufferView+accessor offsets and validates the accessor lies
+# within its bufferView within its buffer, end-to-end from a parsed document (WP09).
+add_executable(test_gltf_resolve tests/test_gltf_resolve.cpp)
+target_link_libraries(test_gltf_resolve PRIVATE melkor_core)
+target_compile_options(test_gltf_resolve PRIVATE ${MELKOR_WARNING_FLAGS})
+add_test(NAME gltf_resolve_tests COMMAND test_gltf_resolve)
 
 # ---------------------------------------------------------------------------
 # Fuzzing.
