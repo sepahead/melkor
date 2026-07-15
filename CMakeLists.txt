@@ -166,6 +166,7 @@ add_library(melkor_core STATIC
     src/math/activation.cpp
     src/math/quaternion.cpp
     src/math/covariance.cpp
+    src/math/sh_rotation.cpp
     src/math/color.cpp
     src/math/coordinate_frame.cpp
 
@@ -565,6 +566,13 @@ add_executable(test_gltf_khr tests/test_gltf_khr.cpp)
 target_link_libraries(test_gltf_khr PRIVATE melkor_core)
 target_compile_options(test_gltf_khr PRIVATE ${MELKOR_WARNING_FLAGS})
 add_test(NAME gltf_khr_tests COMMAND test_gltf_khr)
+
+# Real spherical-harmonic rotation: band matrices verified orthogonal, round-tripping, composing,
+# and matching a direct evaluation of the rotated basis (P0-17).
+add_executable(test_sh_rotation tests/test_sh_rotation.cpp)
+target_link_libraries(test_sh_rotation PRIVATE melkor_core)
+target_compile_options(test_sh_rotation PRIVATE ${MELKOR_WARNING_FLAGS})
+add_test(NAME sh_rotation_tests COMMAND test_sh_rotation)
 
 # GLB container framing: adversarial tests that a lying header/chunk length produces a clean
 # failure with no out-of-bounds read, plus build/parse round-tripping (WP09).
