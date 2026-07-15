@@ -148,6 +148,7 @@ add_library(melkor_core STATIC
     # validation errors: a lossy conversion must say what it lost, and a severe loss blocks the
     # commit unless the exact code is approved.
     src/formats/format_id.cpp
+    src/formats/gltf_khr.cpp
     src/formats/loss.cpp
     src/formats/probe.cpp
 
@@ -547,6 +548,13 @@ add_executable(test_probe tests/test_probe.cpp)
 target_link_libraries(test_probe PRIVATE melkor_core)
 target_compile_options(test_probe PRIVATE ${MELKOR_WARNING_FLAGS})
 add_test(NAME probe_tests COMMAND test_probe)
+
+# KHR_gaussian_splatting layout core: SH attribute naming and m-ordering, the spec's C matrix,
+# and the defined colour spaces, pinned against the vendored RC spec text (WP09).
+add_executable(test_gltf_khr tests/test_gltf_khr.cpp)
+target_link_libraries(test_gltf_khr PRIVATE melkor_core)
+target_compile_options(test_gltf_khr PRIVATE ${MELKOR_WARNING_FLAGS})
+add_test(NAME gltf_khr_tests COMMAND test_gltf_khr)
 
 # ---------------------------------------------------------------------------
 # Fuzzing.
