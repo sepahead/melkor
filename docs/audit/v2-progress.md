@@ -11,14 +11,14 @@ Last updated: 2026-07-15. Baseline commit: `21c8fb5`.
 40 findings tracked (18 P0, 15 P1, 7 P2). As of this update:
 
 - **8 closed** with attached evidence: P0-04, P0-05, P0-07, P0-08, P0-16, P1-02, P1-03, P1-14.
-- **10 in progress** with substantial verified work landed: P0-01, P0-06, P0-11, P0-12, P0-14, P0-17, P1-06, P1-12, P1-15, P2-04.
-- **22 open.**
+- **11 in progress** with substantial verified work landed: P0-01, P0-06, P0-10, P0-11, P0-12, P0-14, P0-17, P1-06, P1-12, P1-15, P2-04.
+- **21 open.**
 
 ## What is closed, and how it was verified
 
 Every change below builds with `MELKOR_WERROR=ON` (zero warnings), passes the full test suite,
 and — where it touches untrusted-input or numeric code — is clean under AddressSanitizer and
-UndefinedBehaviorSanitizer. The suite grew from 13 to 20 targets.
+UndefinedBehaviorSanitizer. The suite grew from 13 to 23 targets.
 
 | Blocker | What it was | The fix, and its evidence |
 |---|---|---|
