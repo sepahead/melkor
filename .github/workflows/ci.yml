@@ -316,3 +316,49 @@ jobs:
         run: |
           cargo install tauri-cli --version 2.9.6 --locked
           rustup run 1.88.0 cargo tauri build --no-bundle
+
+  # The single stable status check for branch protection.
+  #
+  # Branch protection requires this ONE job, not the individual matrix jobs. Requiring the matrix
+  # jobs by name is fragile: rename a job, or a path filter skips it, and the protection silently
+  # weakens because a check that never runs cannot fail. This job depends on all the others and
+  # fails unless each finished successfully (or was legitimately skipped), so protection stays
+  # meaningful even as the matrix changes.
+  ci-gate:
+    name: CI Gate
+    if: always()
+    needs:
+      - secrets-scan
+      - dependency-review
+      - build-macos
+      - sanitize-macos
+      - build-linux
+      - build-linux-cuda
+      - lint-python
+      - viewer-tests
+      - tauri-check
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Verify every required job succeeded
+        env:
+          RESULTS: ${{ toJSON(needs) }}
+        run: |
+          echo "Dependency job results:"
+          echo "$RESULTS" | python3 -c '
+          import json, sys
+          results = json.load(sys.stdin)
+          bad = []
+          for job, info in sorted(results.items()):
+              result = info.get("result")
+              print(f"  {job:<24} {result}")
+              # A skipped job is tolerated only when it was skipped by design (e.g.
+              # dependency-review runs on pull_request only). A failure, cancellation, or
+              # timeout is never tolerated.
+              if result not in ("success", "skipped"):
+                  bad.append(f"{job}={result}")
+          if bad:
+              print("\nCI Gate FAILED: " + ", ".join(bad), file=sys.stderr)
+              sys.exit(1)
+          print("\nCI Gate passed: all required jobs succeeded.")
+          '

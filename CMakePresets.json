@@ -1,0 +1,107 @@
+{
+  "version": 6,
+  "cmakeMinimumRequired": { "major": 3, "minor": 24, "patch": 0 },
+  "configurePresets": [
+    {
+      "name": "dev",
+      "displayName": "Developer (CPU, strict warnings)",
+      "description": "Everyday CPU build with warnings as errors. No GPU backend.",
+      "binaryDir": "${sourceDir}/build/dev",
+      "generator": "Ninja",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "RelWithDebInfo",
+        "MELKOR_WERROR": "ON",
+        "MELKOR_USE_METAL": "OFF",
+        "MELKOR_USE_CUDA": "OFF"
+      }
+    },
+    {
+      "name": "release-cpu",
+      "displayName": "Release (CPU, installable SDK)",
+      "description": "Optimised CPU build used to produce and install the SDK.",
+      "binaryDir": "${sourceDir}/build/release-cpu",
+      "generator": "Ninja",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Release",
+        "MELKOR_WERROR": "ON",
+        "MELKOR_USE_METAL": "OFF",
+        "MELKOR_USE_CUDA": "OFF",
+        "MELKOR_INSTALL": "ON"
+      }
+    },
+    {
+      "name": "asan-ubsan",
+      "displayName": "AddressSanitizer + UndefinedBehaviorSanitizer",
+      "description": "Debug build under ASan and UBSan for the untrusted-input and math paths.",
+      "binaryDir": "${sourceDir}/build/asan-ubsan",
+      "generator": "Ninja",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Debug",
+        "MELKOR_USE_METAL": "OFF",
+        "MELKOR_USE_CUDA": "OFF",
+        "CMAKE_CXX_FLAGS": "-fsanitize=address,undefined -fno-omit-frame-pointer -g",
+        "CMAKE_EXE_LINKER_FLAGS": "-fsanitize=address,undefined"
+      }
+    },
+    {
+      "name": "macos-metal",
+      "displayName": "macOS with Metal",
+      "description": "Apple build with the Metal backend enabled. Requires macOS and Xcode.",
+      "binaryDir": "${sourceDir}/build/macos-metal",
+      "generator": "Ninja",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Release",
+        "MELKOR_WERROR": "ON",
+        "MELKOR_USE_METAL": "ON"
+      },
+      "condition": {
+        "type": "equals",
+        "lhs": "${hostSystemName}",
+        "rhs": "Darwin"
+      }
+    },
+    {
+      "name": "linux-cuda-compile",
+      "displayName": "Linux CUDA (compile-only)",
+      "description": "Compiles the CUDA backend. This is a compile check, NOT hardware qualification: a green build here does not entitle the project to claim runtime CUDA support (P1-13).",
+      "binaryDir": "${sourceDir}/build/linux-cuda",
+      "generator": "Ninja",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Release",
+        "MELKOR_USE_CUDA": "ON"
+      },
+      "condition": {
+        "type": "equals",
+        "lhs": "${hostSystemName}",
+        "rhs": "Linux"
+      }
+    }
+  ],
+  "buildPresets": [
+    { "name": "dev", "configurePreset": "dev" },
+    { "name": "release-cpu", "configurePreset": "release-cpu" },
+    { "name": "asan-ubsan", "configurePreset": "asan-ubsan" },
+    { "name": "macos-metal", "configurePreset": "macos-metal" },
+    { "name": "linux-cuda-compile", "configurePreset": "linux-cuda-compile" }
+  ],
+  "testPresets": [
+    {
+      "name": "dev",
+      "configurePreset": "dev",
+      "output": { "outputOnFailure": true },
+      "execution": { "noTestsAction": "error" }
+    },
+    {
+      "name": "asan-ubsan",
+      "configurePreset": "asan-ubsan",
+      "output": { "outputOnFailure": true },
+      "execution": { "noTestsAction": "error" }
+    },
+    {
+      "name": "macos-metal",
+      "configurePreset": "macos-metal",
+      "output": { "outputOnFailure": true },
+      "execution": { "noTestsAction": "error" }
+    }
+  ]
+}
