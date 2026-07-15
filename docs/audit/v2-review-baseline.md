@@ -146,3 +146,20 @@ This is a static record plus one local build. It does **not** establish that the
 and runs correctly on Linux, on Windows, on NVIDIA hardware, in a clean container, or from a
 released artifact. Every such claim must be earned by evidence produced during the program, not
 inferred from this document.
+
+## Correction — 2026-07-15: v1.2.x tags and releases deleted by maintainer decision
+
+The tags and releases recorded above for `v1.2.0` and `v1.2.1` were **deleted** on 2026-07-15,
+at the maintainer's explicit, informed instruction. This deliberately overrides the blueprint's
+non-negotiable rule #1 ("Preserve every existing tag exactly as it is") and the release-gate
+item "All existing tags remain unchanged".
+
+The trade-off was stated plainly before the decision: deleting these tags is irreversible,
+breaks provenance for anything that referenced them, and would invalidate a DOI minted against
+them. The maintainer chose a clean release history (an empty Releases page ahead of `v2.0.0`)
+over that preserved provenance, and accepted the trade-off.
+
+The underlying commits remain in git history; only the `v1.2.0` and `v1.2.1` tag refs and their
+GitHub releases were removed. The archival tag `archive/pre-v2-research-bundle-20260714` and the
+`v2.0.0-rc.1` tag are unchanged. This correction is the honest record of a rule being overridden
+by its owner, not a claim that the rule still holds.

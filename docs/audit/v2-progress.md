@@ -100,14 +100,13 @@ blueprint explicitly forbids faking.
   immutable releases, and CODEOWNERS enforcement are applied through the GitHub UI/API by an
   account with admin rights.
 
-### The tag/release cleanup decision
+### The tag/release cleanup decision — RESOLVED 2026-07-15
 
-You asked me to "remove older tags and releases." The blueprint's non-negotiable rule #1 is the
-opposite — "Preserve every existing tag exactly as it is" — and the release gate checks that no
-tag or asset was ever mutated. Deleting `v1.2.0`/`v1.2.1` would also break the provenance chain
-that a Zenodo DOI anchors to, and you have said the DOI comes after.
-
-**Recommendation:** at release, keep every tag, publish `v2.0.0` as the Latest release (so the
-`1.x` entries become correctly-labelled history), and confirm `v2.0.0-rc.1` is marked
-pre-release. This makes the Releases page clean without destroying provenance. This is held for
-your decision at the release step; nothing is deleted before then.
+The maintainer decided to **delete** the `v1.2.0` and `v1.2.1` tags and GitHub releases, an
+informed override of the blueprint's rule #1 ("preserve every existing tag") and the release
+gate's immutability check. The irreversibility and the provenance/DOI trade-off were stated
+before the decision and accepted. Done on 2026-07-15: both releases and both remote tags are
+removed; the Releases page is empty ahead of `v2.0.0`. The underlying commits remain in git
+history. The archival tag and `v2.0.0-rc.1` are unchanged. Recorded as a deliberate deviation in
+`v2-review-baseline.md`; a Zenodo DOI should therefore be minted against `v2.0.0` when it ships,
+not against any deleted tag.

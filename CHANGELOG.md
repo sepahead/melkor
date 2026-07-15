@@ -172,6 +172,11 @@ register is in `docs/audit/production-blockers.md`.
 
 ### Removed
 
+- The `v1.2.0` and `v1.2.1` git tags and GitHub releases, by maintainer decision on 2026-07-15.
+  This deliberately overrides the blueprint's preserve-every-tag rule; the irreversibility and
+  loss of provenance were accepted in exchange for a clean release history ahead of `v2.0.0`. The
+  underlying commits remain in git history. Recorded as a deliberate deviation in
+  `docs/audit/v2-review-baseline.md`.
 - The standalone-GLOMAP installer's mutable clone (P0-14, and the mutable-clone half of P0-13).
   `scripts/setup_glomap.sh` cloned `github.com/colmap/glomap` and tracked its `main` branch --
   a non-reproducible install of a now-deprecated tool. It is replaced by a deprecation stub
