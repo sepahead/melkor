@@ -76,7 +76,6 @@ class VersionSync(unittest.TestCase):
         cls.v = load("check_version_sync", "check_version_sync.py")
 
     def test_pep440_mapping(self):
-        Version = self.v.Version
         parse = self.v.parse_version
         self.assertEqual(parse("2.0.0").pep440, "2.0.0")
         self.assertEqual(parse("2.0.0-dev").pep440, "2.0.0.dev0")
