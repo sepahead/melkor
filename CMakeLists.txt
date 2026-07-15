@@ -394,6 +394,12 @@ target_link_libraries(test_atomic_writer PRIVATE melkor_runtime)
 target_compile_options(test_atomic_writer PRIVATE ${MELKOR_WARNING_FLAGS})
 add_test(NAME atomic_writer_tests COMMAND test_atomic_writer)
 
+# PLY colour conversion regression (P0-07): the source property type decides the scaling.
+add_executable(test_ply_color tests/test_ply_color.cpp)
+target_link_libraries(test_ply_color PRIVATE melkor_core)
+target_compile_options(test_ply_color PRIVATE ${MELKOR_WARNING_FLAGS})
+add_test(NAME ply_color_tests COMMAND test_ply_color)
+
 add_executable(test_cloud_inspector tests/test_cloud_inspector.cpp)
 target_link_libraries(test_cloud_inspector PRIVATE melkor_runtime)
 set_target_properties(test_cloud_inspector PROPERTIES

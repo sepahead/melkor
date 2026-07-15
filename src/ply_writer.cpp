@@ -660,9 +660,38 @@ PlyReader::ReadResult PlyReader::readFromBuffer(const uint8_t* data, size_t size
         }
     };
 
-    auto color_byte_to_shdc = [](float c) {
-        // 0..255 uint8 stored as float -> [0,1] -> SH DC.
-        return utils::rgbToShDc(c / 255.0f);
+    // Colour normalisation depends on the DECLARED SOURCE TYPE, never on the property name.
+    //
+    // This is the fix for P0-07. The reader previously divided every red/green/blue value by
+    // 255 unconditionally, as though every PLY stored colour as an 8-bit byte. A point cloud
+    // authored with `property float red` holds a value already in [0,1]; dividing it by 255
+    // turned mid-grey (0.5) into 0.00196 -- essentially black -- and the scene rendered unlit.
+    //
+    // The scaling that actually reconstructs a value in [0,1]:
+    //   - unsigned 8-bit  : divide by 255
+    //   - unsigned 16-bit : divide by 65535
+    //   - unsigned 32-bit : divide by 4294967295
+    //   - float / double  : already normalised; divide by nothing
+    //
+    // Signed integer colour has no single conventional mapping (is -1 the minimum, or an HDR
+    // value?), so we normalise by the type's unsigned-width maximum rather than guess a signed
+    // convention; a profile-aware reader (WP07) will reject it explicitly instead. float/double
+    // pass straight through, which is the whole point of this change.
+    auto color_to_shdc = [](float c, PropKind kind) {
+        float divisor = 1.0f;
+        switch (kind) {
+            case PropKind::U8:
+            case PropKind::I8:  divisor = 255.0f; break;
+            case PropKind::U16:
+            case PropKind::I16: divisor = 65535.0f; break;
+            case PropKind::U32:
+            case PropKind::I32: divisor = 4294967295.0f; break;
+            case PropKind::F32:
+            case PropKind::F64:
+            case PropKind::Unknown:
+            default:            divisor = 1.0f; break;  // already in [0,1]
+        }
+        return utils::rgbToShDc(c / divisor);
     };
 
     auto parse_ascii_value = [](const std::string& token, PropKind kind,
@@ -740,9 +769,12 @@ PlyReader::ReadResult PlyReader::readFromBuffer(const uint8_t* data, size_t size
                 splat.f_dc_1 = read_prop(base, ifdc1);
                 splat.f_dc_2 = read_prop(base, ifdc2);
             } else if (ir >= 0 && ig >= 0 && ib >= 0) {
-                splat.f_dc_0 = color_byte_to_shdc(read_prop(base, ir));
-                splat.f_dc_1 = color_byte_to_shdc(read_prop(base, ig));
-                splat.f_dc_2 = color_byte_to_shdc(read_prop(base, ib));
+                splat.f_dc_0 = color_to_shdc(read_prop(base, ir),
+                                            vertex_props[static_cast<size_t>(ir)].type.kind);
+                splat.f_dc_1 = color_to_shdc(read_prop(base, ig),
+                                            vertex_props[static_cast<size_t>(ig)].type.kind);
+                splat.f_dc_2 = color_to_shdc(read_prop(base, ib),
+                                            vertex_props[static_cast<size_t>(ib)].type.kind);
             } else {
                 splat.f_dc_0 = splat.f_dc_1 = splat.f_dc_2 = utils::rgbToShDc(0.5f);
             }
@@ -799,9 +831,12 @@ PlyReader::ReadResult PlyReader::readFromBuffer(const uint8_t* data, size_t size
                 splat.f_dc_1 = vals[ifdc1];
                 splat.f_dc_2 = vals[ifdc2];
             } else if (ir >= 0 && ig >= 0 && ib >= 0) {
-                splat.f_dc_0 = color_byte_to_shdc(vals[ir]);
-                splat.f_dc_1 = color_byte_to_shdc(vals[ig]);
-                splat.f_dc_2 = color_byte_to_shdc(vals[ib]);
+                splat.f_dc_0 = color_to_shdc(vals[ir],
+                                            vertex_props[static_cast<size_t>(ir)].type.kind);
+                splat.f_dc_1 = color_to_shdc(vals[ig],
+                                            vertex_props[static_cast<size_t>(ig)].type.kind);
+                splat.f_dc_2 = color_to_shdc(vals[ib],
+                                            vertex_props[static_cast<size_t>(ib)].type.kind);
             } else {
                 splat.f_dc_0 = splat.f_dc_1 = splat.f_dc_2 = utils::rgbToShDc(0.5f);
             }

@@ -81,6 +81,12 @@ register is in `docs/audit/production-blockers.md`.
 
 ### Fixed
 
+- **Float RGB rendered nearly black (P0-07).** The PLY reader divided every red/green/blue
+  value by 255 unconditionally, as though every PLY stored colour as an 8-bit byte. A point
+  cloud authored with `property float red` holds a value already in `[0,1]`, so mid-grey (0.5)
+  decoded as `0.5/255 = 0.00196` and the scene rendered essentially unlit. Colour scaling is now
+  driven by the declared source type: `uchar`/255, `ushort`/65535, `float`/`double` unchanged.
+  `f_dc_*` (already an SH coefficient) is never colour-scaled. Regression: `ply_color_tests`.
 - **Data loss on a failed write (P0-08).** The SPZ writer opened the destination with
   `std::ios::trunc` — destroying an existing file before writing a single new byte — and then
   called `std::remove(filepath)` from each of its error handlers. An encode that failed partway
