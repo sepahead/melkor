@@ -9,6 +9,12 @@ register is in `docs/audit/production-blockers.md`.
 
 ### Fixed
 
+- glTF reader resource bounds (P0-12). The scene walk instantiates a mesh once per referencing
+  node, so a small file could describe an unbounded splat cloud (nodes x primitives x count) with
+  nothing charged against a budget. `read_glb`/`read_gaussian_scene` now take a `Limits` (default:
+  desktop profile) and charge each instantiation, each primitive's splat count, and its SH
+  allocation against a `Budget` *before* allocating, failing fast when a limit is exceeded.
+  `test_gltf_scene` proves a memory limit below one splat's SH block refuses the read.
 - glTF reader correctness, from an adversarial multi-lens review of the new codec:
   - A non-contiguous SH pyramid (a coefficient present for a degree above the contiguous prefix,
     e.g. degree 2 present while degree 1 is absent) was silently truncated, dropping the

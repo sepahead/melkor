@@ -309,6 +309,23 @@ void test_no_sh_loss_under_pure_scale() {
     CHECK(!r.losses.has_blocking());
 }
 
+void test_budget_bounds_allocation() {
+    // The resource budget must refuse an allocation before it is made. A memory limit too small for
+    // even one splat's SH block (a degree-0 splat needs 1*3*4 = 12 bytes) fails the read; the
+    // default limits accept the same asset. This is the guard against a small shared-mesh file
+    // describing an unbounded splat cloud.
+    auto bin = pack_one_splat(0.f, 0.f, 0.f).bytes;
+    std::string json = single_splat_json("\"nodes\":[{\"mesh\":0}],",
+                                          "\"scenes\":[{\"nodes\":[0]}],\"scene\":0");
+    auto glb = melkor::format::glb::build_glb(json, bin.data(), bin.size());
+    CHECK(glb.has_value());
+    if (!glb.has_value()) return;
+    melkor::Limits tight = melkor::Limits::for_profile(melkor::LimitsProfile::desktop);
+    tight.max_memory_bytes = 8;  // less than one degree-0 splat's 12-byte SH allocation
+    CHECK(!gltf::read_glb(glb.value().data(), glb.value().size(), tight).has_value());
+    CHECK(gltf::read_glb(glb.value().data(), glb.value().size()).has_value());
+}
+
 void test_read_glb_end_to_end() {
     // Wrap the JSON + BIN in a real GLB container with build_glb, then read it back with read_glb.
     // This exercises the whole path: container framing -> document -> scene -> SplatData.
@@ -347,6 +364,7 @@ int main() {
     test_sh_rotation_applied_under_rotation_and_scale();
     test_sh_loss_under_reflection();
     test_no_sh_loss_under_pure_scale();
+    test_budget_bounds_allocation();
     test_read_glb_end_to_end();
 
     if (g_failures == 0) {

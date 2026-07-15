@@ -17,11 +17,13 @@
 #ifndef MELKOR_FORMAT_GLTF_READER_HPP
 #define MELKOR_FORMAT_GLTF_READER_HPP
 
+#include "melkor/budget.hpp"
 #include "melkor/error.hpp"
 #include "melkor/format/gltf_document.hpp"
 #include "melkor/format/gltf_khr.hpp"
 #include "melkor/format/gltf_resolve.hpp"
 #include "melkor/format/loss.hpp"
+#include "melkor/limits.hpp"
 #include "melkor/scene.hpp"
 
 #include <cstdint>
@@ -52,9 +54,11 @@ struct PrimitiveRead {
 // validated by SplatData::create (finite, positive scale, [0,1] opacity, unit quaternion).
 //
 // `prim` must be a primitive whose `gaussian` extension is set; `buffers` supplies the bytes of each
-// glTF buffer (the GLB BIN chunk for buffer 0).
+// glTF buffer (the GLB BIN chunk for buffer 0). `budget` bounds resource use: the splat count and
+// the spherical-harmonic allocation are charged against it before they are allocated, so a
+// primitive declaring an enormous count fails before it can exhaust memory.
 Result<PrimitiveRead> read_primitive_local(const Document& doc, const PrimitiveDesc& prim,
-                                           const std::vector<BufferSpan>& buffers);
+                                           const std::vector<BufferSpan>& buffers, Budget& budget);
 
 // The result of reading a whole glTF scene into one merged splat cloud: the world-space splats and
 // the loss report describing what the conversion could not fully preserve.
@@ -78,7 +82,13 @@ struct SceneRead {
 // mixed colour space, a flattened hierarchy, and any splat dropped by a singular node transform are
 // each recorded. The caller applies the loss policy (approving codes) before treating the result as
 // a clean conversion.
-Result<SceneRead> read_gaussian_scene(const Document& doc, const std::vector<BufferSpan>& buffers);
+//
+// `limits` bounds resource use. Because a mesh shared by many nodes is instantiated once per node,
+// a small file can otherwise describe an enormous splat cloud; the walk charges each node and each
+// primitive's splats/memory against the limits and fails fast when they are exceeded.
+Result<SceneRead> read_gaussian_scene(
+    const Document& doc, const std::vector<BufferSpan>& buffers,
+    const Limits& limits = Limits::for_profile(LimitsProfile::desktop));
 
 // Reads a complete GLB file: validates the container framing, parses the JSON chunk into a
 // document, feeds the binary chunk to the scene reader as glTF buffer 0, and returns the merged
@@ -86,8 +96,9 @@ Result<SceneRead> read_gaussian_scene(const Document& doc, const std::vector<Buf
 //
 // Only the embedded binary buffer (buffer 0) is available; a bufferView that references any other
 // buffer -- an external or data-URI buffer -- resolves to a clean error, since this reader does not
-// fetch external resources.
-Result<SceneRead> read_glb(const std::uint8_t* data, std::size_t size);
+// fetch external resources. `limits` bounds resource use (see read_gaussian_scene).
+Result<SceneRead> read_glb(const std::uint8_t* data, std::size_t size,
+                           const Limits& limits = Limits::for_profile(LimitsProfile::desktop));
 
 }  // namespace melkor::format::gltf
 

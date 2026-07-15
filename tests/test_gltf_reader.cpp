@@ -118,7 +118,9 @@ gltf::PrimitiveRead read(const Built& b, bool& ok) {
         return gltf::PrimitiveRead{SplatData::create({}).value(), {}, false, "", 0};
     }
     std::vector<gltf::BufferSpan> buffers = {gltf::BufferSpan{b.buffer.data(), b.buffer.size()}};
-    auto r = gltf::read_primitive_local(doc.value(), doc.value().meshes[0].primitives[0], buffers);
+    melkor::Budget budget(melkor::Limits::for_profile(melkor::LimitsProfile::desktop));
+    auto r =
+        gltf::read_primitive_local(doc.value(), doc.value().meshes[0].primitives[0], buffers, budget);
     ok = r.has_value();
     if (!ok) return gltf::PrimitiveRead{SplatData::create({}).value(), {}, false, "", 0};
     return std::move(r.value());

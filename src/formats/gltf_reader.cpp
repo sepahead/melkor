@@ -36,7 +36,7 @@ Result<std::uint64_t> attribute_index(const PrimitiveDesc& prim, const std::stri
 }  // namespace
 
 Result<PrimitiveRead> read_primitive_local(const Document& doc, const PrimitiveDesc& prim,
-                                           const std::vector<BufferSpan>& buffers) {
+                                           const std::vector<BufferSpan>& buffers, Budget& budget) {
     if (!prim.gaussian.has_value()) {
         return fail("MK2151_GLTF_NOT_A_SPLAT",
                     "primitive does not carry the KHR_gaussian_splatting extension");
@@ -89,6 +89,13 @@ Result<PrimitiveRead> read_primitive_local(const Document& doc, const PrimitiveD
     }
 
     const std::size_t n = static_cast<std::size_t>(n64);
+
+    // Charge the splat count before allocating anything sized by it, so a primitive declaring an
+    // enormous count (or a mesh instantiated by many nodes) is refused before exhausting memory.
+    if (auto charged = budget.consume(BudgetKind::splats, n64, "gltf.primitive.splats");
+        !charged.has_value()) {
+        return Result<PrimitiveRead>::failure(charged.error_code(), charged.diagnostics());
+    }
 
     // Decode the geometry attributes. KHR domains are already canonical (linear scale, linear
     // opacity, unit quaternion x,y,z,w), so these map straight into SplatBufferInput.
@@ -144,6 +151,13 @@ Result<PrimitiveRead> read_primitive_local(const Document& doc, const PrimitiveD
     // (which maps to a KHR (degree, coef) address in the same m-order), the accessor holds all
     // splats' RGB for that coefficient; scatter it into each splat's block.
     const std::size_t coeffs = khr::sh_total_coefficients(degree);
+    // Charge the SH allocation before making it. n is already bounded by the splats charge above
+    // (n <= max_splats) and coeffs <= 16, so this product cannot overflow.
+    const std::uint64_t sh_bytes = static_cast<std::uint64_t>(n) * coeffs * 3u * sizeof(float);
+    if (auto charged = budget.consume(BudgetKind::memory_bytes, sh_bytes, "gltf.primitive.sh");
+        !charged.has_value()) {
+        return Result<PrimitiveRead>::failure(charged.error_code(), charged.diagnostics());
+    }
     std::vector<float> sh_data(n * coeffs * 3, 0.0f);
     for (std::size_t k = 0; k < coeffs; ++k) {
         const khr::ShAddress addr = khr::sh_flat_to_address(k);
@@ -320,7 +334,10 @@ Result<SceneRead> scene_fail(ErrorCode code, const char* diag_code, std::string 
 
 }  // namespace
 
-Result<SceneRead> read_gaussian_scene(const Document& doc, const std::vector<BufferSpan>& buffers) {
+Result<SceneRead> read_gaussian_scene(const Document& doc, const std::vector<BufferSpan>& buffers,
+                                      const Limits& limits) {
+    Budget budget(limits);
+
     // 1. Extension gate: an unsupported *required* extension makes the asset unreadable.
     auto ext = evaluate_extensions(doc.extensions_used, doc.extensions_required);
     if (!ext.unsupported_required.empty()) {
@@ -358,7 +375,22 @@ Result<SceneRead> read_gaussian_scene(const Document& doc, const std::vector<Buf
         if (node.mesh.has_value()) {
             const MeshDesc& mesh = doc.meshes[static_cast<std::size_t>(node.mesh.value())];
             for (const auto& prim : mesh.primitives) {
-                if (prim.gaussian.has_value()) instances.push_back(Instance{&prim, global});
+                if (prim.gaussian.has_value()) {
+                    // Charge each instantiation. A mesh shared by many nodes multiplies here, so
+                    // bounding the instance count stops a small file from describing an unbounded
+                    // scene before any splats are even read.
+                    if (auto charged = budget.consume(BudgetKind::gltf_nodes, 1, "gltf.instance");
+                        !charged.has_value()) {
+                        return scene_fail(charged.error_code(),
+                                          charged.diagnostics().empty()
+                                              ? "MK2167_GLTF_BUDGET"
+                                              : charged.diagnostics()[0].code.c_str(),
+                                          charged.diagnostics().empty()
+                                              ? "glTF scene exceeds the node budget"
+                                              : charged.diagnostics()[0].message);
+                    }
+                    instances.push_back(Instance{&prim, global});
+                }
             }
         }
         for (std::uint64_t child : node.children) {
@@ -384,7 +416,7 @@ Result<SceneRead> read_gaussian_scene(const Document& doc, const std::vector<Buf
     std::uint64_t total_dropped = 0;
 
     for (const auto& inst : instances) {
-        auto pr = read_primitive_local(doc, *inst.prim, buffers);
+        auto pr = read_primitive_local(doc, *inst.prim, buffers, budget);
         if (!pr.has_value()) {
             return scene_fail(pr.error_code(),
                               pr.diagnostics().empty() ? "MK2162_GLTF_PRIMITIVE_READ"
@@ -547,7 +579,7 @@ Result<SceneRead> read_gaussian_scene(const Document& doc, const std::vector<Buf
     return Result<SceneRead>::success(std::move(out));
 }
 
-Result<SceneRead> read_glb(const std::uint8_t* data, std::size_t size) {
+Result<SceneRead> read_glb(const std::uint8_t* data, std::size_t size, const Limits& limits) {
     auto framing = glb::parse_glb(data, size);
     if (!framing.has_value()) {
         return scene_fail(framing.error_code(),
@@ -575,7 +607,7 @@ Result<SceneRead> read_glb(const std::uint8_t* data, std::size_t size) {
     } else {
         buffers.push_back(BufferSpan{nullptr, 0});
     }
-    return read_gaussian_scene(doc.value(), buffers);
+    return read_gaussian_scene(doc.value(), buffers, limits);
 }
 
 }  // namespace melkor::format::gltf
