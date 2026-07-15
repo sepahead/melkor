@@ -303,14 +303,16 @@ elseif(MELKOR_PLATFORM STREQUAL "LINUX" AND MELKOR_USE_CUDA AND CUDAToolkit_FOUN
     )
 
     target_compile_definitions(melkor_cuda PUBLIC MELKOR_HAS_CUDA)
-    # Same circular static-library arrangement as the Metal branch: consumers
-    # of melkor_core (tests, CLI) resolve the Metal-stub and provider-factory
-    # symbols via this PUBLIC link.
-    
+
     # Architectures were selected before enable_language(CUDA) above and
-    # apply globally via CMAKE_CUDA_ARCHITECTURES.
+    # apply globally via CMAKE_CUDA_ARCHITECTURES. Resolve relocatable device
+    # code in the backend archive itself: melkor_runtime and all final consumers
+    # are intentionally CXX-only targets, and deferring the device link through
+    # that transitive static-library boundary can leave gaussian_processor.cu's
+    # __cudaRegisterLinkedBinary symbol unresolved at the host link.
     set_target_properties(melkor_cuda PROPERTIES
         CUDA_SEPARABLE_COMPILATION ON
+        CUDA_RESOLVE_DEVICE_SYMBOLS ON
     )
     
     set(MELKOR_GPU_LIBRARY melkor_cuda)
