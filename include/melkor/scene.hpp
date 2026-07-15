@@ -44,11 +44,17 @@ struct Quatf {
 
 // Spherical-harmonic storage.
 //
-// Layout is coefficient-major: for each of the `(degree+1)^2` coefficients, three channels
-// (R, G, B), for each splat. The DC term (coefficient 0) is always present; higher coefficients
-// exist only when degree > 0, and a degree always stores its lower degrees completely. Degree is
-// 0..4 (SPZ v4 needs 4; the glTF RC profile stops at 3, and converting down is a reported loss,
-// never a silent truncation).
+// Layout is splat-major, in contiguous per-splat blocks: each splat owns `(degree+1)^2 * 3`
+// consecutive floats, ordered coefficient then channel, so the value for
+// `(splat s, coefficient k, channel c)` is at `data[s*(coefficients*3) + k*3 + c]` with channel
+// 0/1/2 = R/G/B. The DC term (coefficient 0) is always present, so it is the first three floats of
+// each splat's block; higher coefficients exist only when degree > 0, and a degree always stores
+// its lower degrees completely. Degree is 0..4 (SPZ v4 needs 4; the glTF RC profile stops at 3, and
+// converting down is a reported loss, never a silent truncation).
+//
+// Note this is splat-major, NOT coefficient-major: a format like glTF KHR_gaussian_splatting that
+// stores one accessor per coefficient (all splats' COEF_0, then all splats' COEF_1, ...) must
+// transpose into this block layout, and getting that transpose wrong silently corrupts colour.
 //
 // There is no per-splat heap allocation: everything is one contiguous vector, sized and checked
 // once at construction.
@@ -60,8 +66,9 @@ class ShBuffer {
     ShBuffer() = default;
 
     // Builds an SH buffer from a flat coefficient array. `data` must be exactly
-    // splat_count * (degree+1)^2 * 3 floats, laid out coefficient-major. Any other length, or a
-    // degree above 4, fails with a diagnostic.
+    // splat_count * (degree+1)^2 * 3 floats, laid out splat-major in per-splat blocks (see the
+    // class comment for the exact index). Any other length, or a degree above 4, fails with a
+    // diagnostic.
     static Result<ShBuffer> create(std::uint32_t degree, std::size_t splat_count,
                                    std::vector<float> data);
 
