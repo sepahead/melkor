@@ -149,6 +149,8 @@ add_library(melkor_core STATIC
     src/math/activation.cpp
     src/math/quaternion.cpp
     src/math/covariance.cpp
+    src/math/color.cpp
+    src/math/coordinate_frame.cpp
 
     # Atomic output. One implementation for every writer -- PLY, SPZ, glTF, JSON reports.
     # Format-specific "open the file and hope" is how P0-08 happened.

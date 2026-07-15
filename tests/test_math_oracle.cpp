@@ -13,6 +13,8 @@
 // Self-contained (no external test framework), matching the existing suite's convention.
 
 #include "melkor/math/activation.hpp"
+#include "melkor/math/color.hpp"
+#include "melkor/math/coordinate_frame.hpp"
 #include "melkor/math/covariance.hpp"
 #include "melkor/math/quaternion.hpp"
 
@@ -292,10 +294,78 @@ void test_non_covariance_is_rejected() {
     CHECK(rs.diagnostics()[0].code == "MK1304_NOT_POSITIVE_SEMIDEFINITE");
 }
 
+// ---------------------------------------------------------------------------
+// Colour
+// ---------------------------------------------------------------------------
+
+void test_color_conversions() {
+    // sRGB <-> linear are inverses across the range, including the dark linear segment.
+    for (float srgb : {0.0f, 0.02f, 0.04045f, 0.5f, 1.0f}) {
+        const float linear = srgb_to_linear(srgb);
+        CHECK(approx(linear_to_srgb(linear), srgb, 1e-5));
+    }
+    // Known anchors: 0 -> 0, 1 -> 1, and mid-grey sRGB 0.5 is ~0.214 linear (darker), which is
+    // exactly the perceptual point the sRGB curve exists to encode.
+    CHECK(approx(srgb_to_linear(0.0f), 0.0, 1e-6));
+    CHECK(approx(srgb_to_linear(1.0f), 1.0, 1e-6));
+    CHECK(srgb_to_linear(0.5f) < 0.25f && srgb_to_linear(0.5f) > 0.20f);
+
+    // DC <-> RGB are inverses, and DC is NOT a gamma conversion: mid-grey linear 0.5 maps to DC 0.
+    CHECK(approx(sh_dc_to_rgb(rgb_to_sh_dc(0.7f)), 0.7, 1e-5));
+    CHECK(approx(rgb_to_sh_dc(0.5f), 0.0, 1e-6));  // rgb 0.5 is the DC zero point
+    // A DC term can legitimately be negative or exceed the input range -- it is not clamped.
+    CHECK(rgb_to_sh_dc(0.0f) < 0.0f);
+    CHECK(rgb_to_sh_dc(1.0f) > 1.0f);
+}
+
+// ---------------------------------------------------------------------------
+// Coordinate frames
+// ---------------------------------------------------------------------------
+
+void test_coordinate_frames() {
+    // The canonical frame is identity: a position in it is unchanged.
+    const CoordinateFrame canon = canonical_frame();
+    const Vec3 p{1.0, 2.0, 3.0};
+    const Vec3 out = position_to_canonical(canon, p);
+    CHECK(approx(out[0], 1.0) && approx(out[1], 2.0) && approx(out[2], 3.0));
+
+    // A 90-degree axis swap frame (orthogonal, right-handed) is accepted and applies correctly.
+    const Mat3 swap{0, -1, 0, 1, 0, 0, 0, 0, 1};  // rotate +90 about z
+    auto frame = frame_from_basis("test-swap", swap, 1.0);
+    CHECK(frame.has_value());
+    CHECK(!frame.value().includes_reflection);
+    const Vec3 swapped = position_to_canonical(frame.value(), Vec3{1.0, 0.0, 0.0});
+    CHECK(approx(swapped[0], 0.0) && approx(swapped[1], 1.0));
+
+    // A reflecting frame is accepted but flagged, so it cannot be applied silently.
+    const Mat3 reflect{-1, 0, 0, 0, 1, 0, 0, 0, 1};
+    auto reflected = frame_from_basis("test-reflect", reflect, 1.0);
+    CHECK(reflected.has_value());
+    CHECK(reflected.value().includes_reflection);
+
+    // A non-orthogonal matrix is not a coordinate frame and is rejected.
+    const Mat3 skew{1, 0.5, 0, 0, 1, 0, 0, 0, 1};
+    auto bad = frame_from_basis("test-skew", skew, 1.0);
+    CHECK(!bad.has_value());
+    CHECK(bad.diagnostics()[0].code == "MK1403_NON_ORTHOGONAL_FRAME");
+
+    // Unit scaling: a frame in centimetres converts to metres.
+    auto cm = frame_from_basis("test-cm", Mat3{1, 0, 0, 0, 1, 0, 0, 0, 1}, 0.01);
+    CHECK(cm.has_value());
+    const Vec3 metres = position_to_canonical(cm.value(), Vec3{100.0, 0.0, 0.0});
+    CHECK(approx(metres[0], 1.0));  // 100 cm == 1 m
+
+    // An unknown frame ID is rejected rather than silently defaulted.
+    CHECK(!frame_by_id("opengl").has_value());
+    CHECK(frame_by_id("gltf-luf").has_value());
+}
+
 }  // namespace
 
 int main() {
     test_activation_roundtrips();
+    test_color_conversions();
+    test_coordinate_frames();
 
     test_quaternion_matrix_roundtrip();
     test_quaternion_sign_equivalence();

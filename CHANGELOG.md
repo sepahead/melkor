@@ -19,7 +19,12 @@ register is in `docs/audit/production-blockers.md`.
   applies an affine node transform as `Σ' = A Σ Aᵀ`, decomposing back via a deterministic Jacobi
   eigensolver — correct for rotation, non-uniform scale, shear, and reflection, where moving only
   the mean (the bug) is demonstrably wrong. Reference-tested in `math_oracle_tests` (83 checks),
-  clean under ASan+UBSan.
+  clean under ASan+UBSan. `color` provides the sRGB<->linear transfer function and the pinned
+  degree-0 SH DC<->RGB relation as distinct conversions (applying one for the other, or either
+  twice, is a common way splats go dark). `coordinate_frame` is a registry where each frame
+  carries an exact orthogonal basis-to-canonical matrix, handedness, and unit — so a conversion
+  is a defined operation, not an ambiguous "Y-up" label — and a reflecting or non-orthogonal
+  basis is flagged or rejected rather than silently mirroring a scene. 107 checks total.
 
 - Installable SDK (P0-04). A shared `libmelkor` exposing a stable C ABI
   (`include/melkor/c/melkor.h`), installed with `MelkorConfig.cmake`, an exported target set
