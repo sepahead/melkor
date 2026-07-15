@@ -149,6 +149,7 @@ add_library(melkor_core STATIC
     # commit unless the exact code is approved.
     src/formats/format_id.cpp
     src/formats/glb_container.cpp
+    src/formats/gltf_accessor.cpp
     src/formats/gltf_khr.cpp
     src/formats/loss.cpp
     src/formats/probe.cpp
@@ -563,6 +564,13 @@ add_executable(test_glb_container tests/test_glb_container.cpp)
 target_link_libraries(test_glb_container PRIVATE melkor_core)
 target_compile_options(test_glb_container PRIVATE ${MELKOR_WARNING_FLAGS})
 add_test(NAME glb_container_tests COMMAND test_glb_container)
+
+# glTF accessor decoding: the normalized-integer decode rules and the count/stride/offset bounds
+# arithmetic, tested with hand-built bytes including overflow and out-of-range cases (WP09).
+add_executable(test_gltf_accessor tests/test_gltf_accessor.cpp)
+target_link_libraries(test_gltf_accessor PRIVATE melkor_core)
+target_compile_options(test_gltf_accessor PRIVATE ${MELKOR_WARNING_FLAGS})
+add_test(NAME gltf_accessor_tests COMMAND test_gltf_accessor)
 
 # ---------------------------------------------------------------------------
 # Fuzzing.

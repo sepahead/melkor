@@ -9,6 +9,14 @@ register is in `docs/audit/production-blockers.md`.
 
 ### Added
 
+- glTF accessor decoding (`include/melkor/format/gltf_accessor.hpp`,
+  `src/formats/gltf_accessor.cpp`): decodes a resolved accessor (component type, element type,
+  normalized flag, count, byte offset, byte stride) into bounds-checked floats. It applies the
+  exact glTF normalized-integer rules -- unsigned `c/max`, signed `max(c/max, -1)` -- which are
+  easy to conflate and corrupt colour or rotation, and validates count/stride/offset with checked
+  arithmetic so a malformed accessor fails cleanly rather than over-reading. Independent of JSON
+  parsing (it takes an already-resolved view), so it is unit-tested with hand-built bytes
+  (`test_gltf_accessor`, 40 checks, clean under ASan+UBSan). Foundation for the glTF reader (P0-10).
 - GLB container framing (`include/melkor/format/glb_container.hpp`,
   `src/formats/glb_container.cpp`): a strict, overflow-safe parser for the GLB header and chunk
   framing, with checked arithmetic on every attacker-controlled offset so a lying total length or
