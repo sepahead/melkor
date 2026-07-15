@@ -151,6 +151,7 @@ add_library(melkor_core STATIC
     src/formats/glb_container.cpp
     src/formats/gltf_accessor.cpp
     src/formats/gltf_document.cpp
+    src/formats/gltf_extensions.cpp
     src/formats/gltf_khr.cpp
     src/formats/gltf_transform.cpp
     src/formats/loss.cpp
@@ -587,6 +588,13 @@ add_executable(test_gltf_transform tests/test_gltf_transform.cpp)
 target_link_libraries(test_gltf_transform PRIVATE melkor_core)
 target_compile_options(test_gltf_transform PRIVATE ${MELKOR_WARNING_FLAGS})
 add_test(NAME gltf_transform_tests COMMAND test_gltf_transform)
+
+# glTF extension policy: reject only unsupported *required* extensions (the P0-10 fix), ignore but
+# report used-but-not-required unsupported ones (WP09).
+add_executable(test_gltf_extensions tests/test_gltf_extensions.cpp)
+target_link_libraries(test_gltf_extensions PRIVATE melkor_core)
+target_compile_options(test_gltf_extensions PRIVATE ${MELKOR_WARNING_FLAGS})
+add_test(NAME gltf_extensions_tests COMMAND test_gltf_extensions)
 
 # ---------------------------------------------------------------------------
 # Fuzzing.

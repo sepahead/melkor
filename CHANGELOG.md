@@ -9,6 +9,14 @@ register is in `docs/audit/production-blockers.md`.
 
 ### Added
 
+- glTF extension policy (`include/melkor/format/gltf_extensions.hpp`,
+  `src/formats/gltf_extensions.cpp`): evaluates a document's extensionsUsed/extensionsRequired
+  against what the reader implements, rejecting only the *required* extensions Melkor cannot honour
+  and reporting used-but-not-required unsupported ones as safely ignored. This is the P0-10 fix for
+  glTF extensions being rejected too broadly -- a conforming KHR_gaussian_splatting asset is now
+  accepted, while an asset that genuinely needs an unimplemented extension is refused with a clear
+  reason. Findings are de-duplicated and deterministically ordered (`test_gltf_extensions`, 17
+  checks).
 - glTF node transforms (`include/melkor/format/gltf_transform.hpp`,
   `src/formats/gltf_transform.cpp`): a node's local affine transform from either the column-major
   `matrix` or the translation/rotation/scale triple, and the parent-chain composition, producing
