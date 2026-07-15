@@ -153,6 +153,7 @@ add_library(melkor_core STATIC
     src/formats/gltf_document.cpp
     src/formats/gltf_extensions.cpp
     src/formats/gltf_khr.cpp
+    src/formats/gltf_reader.cpp
     src/formats/gltf_resolve.cpp
     src/formats/gltf_transform.cpp
     src/formats/loss.cpp
@@ -603,6 +604,13 @@ add_executable(test_gltf_resolve tests/test_gltf_resolve.cpp)
 target_link_libraries(test_gltf_resolve PRIVATE melkor_core)
 target_compile_options(test_gltf_resolve PRIVATE ${MELKOR_WARNING_FLAGS})
 add_test(NAME gltf_resolve_tests COMMAND test_gltf_resolve)
+
+# glTF per-primitive reader: reads one KHR_gaussian_splatting primitive into a local-space
+# SplatData, pinning the SH coefficient-major -> splat-major transpose and the structural rejections.
+add_executable(test_gltf_reader tests/test_gltf_reader.cpp)
+target_link_libraries(test_gltf_reader PRIVATE melkor_core)
+target_compile_options(test_gltf_reader PRIVATE ${MELKOR_WARNING_FLAGS})
+add_test(NAME gltf_reader_tests COMMAND test_gltf_reader)
 
 # ---------------------------------------------------------------------------
 # Fuzzing.

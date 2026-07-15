@@ -9,6 +9,17 @@ register is in `docs/audit/production-blockers.md`.
 
 ### Added
 
+- glTF per-primitive reader (`include/melkor/format/gltf_reader.hpp`,
+  `src/formats/gltf_reader.cpp`): reads one KHR_gaussian_splatting primitive into a validated,
+  local-space SplatData, assembling the document model, accessor resolution/decoding, the KHR
+  layout core, and the scene model. It checks POINTS mode and the ellipse kernel, the required
+  attributes with their expected element types and a consistent splat count, and SH degree
+  completeness/contiguity. The load-bearing step is the spherical-harmonic transpose: KHR stores
+  one accessor per coefficient (coefficient-major across splats) and the scene model stores
+  splat-major per-splat blocks, so the reader transposes in one place, pinned by a degree-1 test
+  with distinct per-coefficient values. An unrecognised colour space is reported as assumed rather
+  than silently treated as sRGB (`test_gltf_reader`, 27 checks, clean under ASan+UBSan). Advances
+  P0-10 (WP09).
 - glTF accessor resolution (`include/melkor/format/gltf_resolve.hpp`,
   `src/formats/gltf_resolve.cpp`): composes the bufferView+accessor offset indirection and decodes
   an accessor into floats, re-validating byte extents with checked arithmetic -- the accessor must
