@@ -172,6 +172,51 @@ void test_checked_sh_counts() {
     CHECK(!huge.has_value());
 }
 
+void test_decompression_ratio_boundary_is_exact() {
+    // Integer division truncates, so an earlier version compared declared/compressed and let a
+    // true ratio just under (max+1) slip past. With compressed=1000 and max=100, a declared
+    // size of 100999 is a true ratio of 100.999 and must be REJECTED, not rounded down to 100.
+    Limits limits = Limits::for_profile(LimitsProfile::desktop);
+    limits.max_decompression_ratio = 100;
+    Budget budget(limits);
+
+    // Exactly at the limit: 100 * 1000 = 100000. Allowed.
+    CHECK(budget.check_decompression_ratio(1000, 100000, "test").has_value());
+
+    // One byte over the exact threshold must fail, even though 100001/1000 truncates to 100.
+    auto over = budget.check_decompression_ratio(1000, 100001, "test");
+    CHECK(!over.has_value());
+    CHECK(over.error_code() == ErrorCode::resource_limit);
+
+    // The old truncation bug would have accepted anything up to 100999; prove it does not.
+    CHECK(!budget.check_decompression_ratio(1000, 100999, "test").has_value());
+}
+
+void test_custom_profile_missing_any_budget_limit_fails_validation() {
+    // A limit that is enforced through a BudgetKind but left at 0 is silently unlimited. A
+    // custom profile that populates the common fields but forgets one of the less obvious ones
+    // must not validate -- otherwise the forgotten limit is disabled and the header's promise of
+    // no accidental "unbounded" is broken.
+    Limits limits = Limits::for_profile(LimitsProfile::desktop);
+    limits.max_mesh_triangles = 0;  // the field the original validate() missed
+    auto result = limits.validate();
+    CHECK(!result.has_value());
+
+    limits = Limits::for_profile(LimitsProfile::desktop);
+    limits.max_image_pixels = 0;
+    CHECK(!limits.validate().has_value());
+
+    limits = Limits::for_profile(LimitsProfile::desktop);
+    limits.max_metadata_total_bytes = 0;
+    CHECK(!limits.validate().has_value());
+
+    // But zeroing max_temp_bytes must STILL validate: the web profile legitimately sets it to 0
+    // (a browser has no temp directory), so requiring it positive would reject a real profile.
+    limits = Limits::for_profile(LimitsProfile::desktop);
+    limits.max_temp_bytes = 0;
+    CHECK(limits.validate().has_value());
+}
+
 // ---------------------------------------------------------------------------
 // Budgets
 // ---------------------------------------------------------------------------
@@ -429,6 +474,17 @@ void test_path_redaction() {
     // trying to contain.
     CHECK(redact_path("/etc/passwd", DiagnosticPathPolicy::relative, "/home/alice") ==
           "passwd");
+
+    // The prefix must align on a path-component boundary. A sibling directory whose name merely
+    // *starts with* the root -- "/home/alice/workshop" under root "/home/alice/work" -- is NOT
+    // inside the root, and treating it as a string prefix would both leak "shop/..." and produce
+    // a nonsense relative path. It must fall back to basename.
+    CHECK(redact_path("/home/alice/workshop/secret.ply", DiagnosticPathPolicy::relative,
+                      "/home/alice/work") == "secret.ply");
+
+    // A trailing separator on the root must behave identically to one without.
+    CHECK(redact_path("/home/alice/proj/scene.ply", DiagnosticPathPolicy::relative,
+                      "/home/alice/proj/") == "scene.ply");
 }
 
 }  // namespace
@@ -450,6 +506,9 @@ int main() {
     test_limit_profiles_validate();
     test_limits_reject_absurd_overrides();
     test_limits_profile_parsing();
+    test_custom_profile_missing_any_budget_limit_fails_validation();
+
+    test_decompression_ratio_boundary_is_exact();
 
     test_cancellation();
     test_cancellation_token_shares_state();

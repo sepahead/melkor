@@ -262,11 +262,23 @@ def _npm_lock_surface(expected: str) -> tuple[Finding | None, callable | None]:
 
     def write() -> None:
         text = path.read_text(encoding="utf-8")
-        # Only the project's own self-declarations carry the project version; dependency
-        # entries are nested deeper and are never equal to it by construction.
-        for stale in {v for v in (top, root_pkg) if isinstance(v, str) and v != expected}:
-            text = text.replace(f'"version": "{stale}"', f'"version": "{expected}"')
-        path.write_text(text, encoding="utf-8")
+        # Rewrite ONLY the two self-declarations, which are the first two "version" keys in the
+        # file: the top-level project version, then the packages."" root-package version.
+        # Every dependency version comes after those, under a "node_modules/..." key.
+        #
+        # A blanket str.replace of the stale value was the original bug: a dependency that
+        # happened to share the project's version string would be rewritten too, silently
+        # corrupting the locked dependency graph. count=2 targets exactly the two self-versions
+        # and never reaches a dependency.
+        new_text, n = re.subn(
+            r'("version"\s*:\s*")[^"]*(")', rf"\g<1>{expected}\g<2>", text, count=2
+        )
+        if n < 2:
+            raise VersionError(
+                "viewer/package-lock.json: expected at least two 'version' keys (top-level and "
+                "packages.\"\") to rewrite; the file structure is unexpected."
+            )
+        path.write_text(new_text, encoding="utf-8")
 
     return finding, write
 
@@ -429,12 +441,18 @@ def check_changelog(version: Version) -> list[str]:
         )
 
     if not version.is_prerelease:
-        heading = rf"^##\s+{re.escape(version.core)}\b"
+        # The heading must be the exact stable version, not a prerelease of it. A trailing `\b`
+        # is a word boundary, and there IS one between the "0" of "2.0.0" and the "-" of
+        # "2.0.0-rc.2", so `^##\s+2\.0\.0\b` matched a changelog that only had a "## 2.0.0-rc.2"
+        # section -- letting a stable release ship with no stable changelog entry. The next
+        # character must be whitespace, a paren, or end-of-line, never "-" or ".".
+        heading = rf"^##\s+{re.escape(version.core)}(?:$|[\s(])"
         if not re.search(heading, text, re.MULTILINE):
             errors.append(
                 f"CHANGELOG.md: no '## {version.core}' section, but VERSION is a stable "
                 f"release.\n"
-                f"  A stable release must document what changed before it is tagged."
+                f"  A stable release must document what changed before it is tagged.\n"
+                f"  (A '## {version.core}-rc.N' prerelease section does not satisfy this.)"
             )
 
     return errors

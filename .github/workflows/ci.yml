@@ -153,6 +153,8 @@ jobs:
           ctest --output-on-failure
           ./melkor --info
           ./melkor --version
+      - name: SDK install and consumer test
+        run: bash scripts/test_sdk_install.sh
 
   # Compile-only check for the CUDA backend. Hosted runners have no GPU, but
   # nvcc compilation catches the entire class of CUDA build breakage

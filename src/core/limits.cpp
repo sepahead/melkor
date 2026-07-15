@@ -178,11 +178,29 @@ Result<void> Limits::validate() const {
         }
     };
 
+    // Every limit that is enforced through a BudgetKind must be required positive here.
+    //
+    // Budget::consume treats a limit of 0 as "unlimited", so a limit that is both budget-backed
+    // and left at 0 is silently disabled -- exactly the accidental "unbounded" the header
+    // promises to reject. The original list covered only eight fields and missed the rest, so a
+    // custom profile that populated the obvious ones and forgot, say, max_mesh_triangles passed
+    // validation and then accepted an unbounded triangle count feeding an allocation.
+    //
+    // max_temp_bytes is the one deliberate exception: the web profile sets it to 0 because a
+    // browser has no temp directory, and that profile must validate. It is not required here.
     require_positive(max_input_bytes, "max_input_bytes");
+    require_positive(max_resource_bytes, "max_resource_bytes");
     require_positive(max_decoded_bytes, "max_decoded_bytes");
     require_positive(max_memory_bytes, "max_memory_bytes");
     require_positive(max_splats, "max_splats");
+    require_positive(max_mesh_vertices, "max_mesh_vertices");
+    require_positive(max_mesh_triangles, "max_mesh_triangles");
+    require_positive(max_gltf_nodes, "max_gltf_nodes");
+    require_positive(max_accessors, "max_accessors");
+    require_positive(max_external_resources, "max_external_resources");
     require_positive(max_ply_header_bytes, "max_ply_header_bytes");
+    require_positive(max_metadata_total_bytes, "max_metadata_total_bytes");
+    require_positive(max_image_pixels, "max_image_pixels");
     require_positive(max_scene_depth, "max_scene_depth");
     require_positive(max_threads, "max_threads");
     require_positive(max_decompression_ratio, "max_decompression_ratio");

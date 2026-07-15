@@ -40,6 +40,7 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import subprocess
 import sys
 from pathlib import Path
 
@@ -68,13 +69,43 @@ def content_digest(root: Path, relative_files: list[str]) -> str:
 
 
 def tracked_files(path: Path) -> list[str]:
-    """Every file under ``path``, as paths relative to it."""
+    """The git-tracked files under ``path``, as paths relative to it.
+
+    This deliberately consults git rather than walking the disk. The digest is meant to cover
+    the *vendored source we commit*, not whatever happens to be lying in the directory: a
+    developer who builds a dependency in-tree, or drops a scratch file, would otherwise change
+    the digest and get a spurious verification failure -- or, worse, have an untracked file
+    silently folded into the "vendored source" identity.
+
+    Falls back to a filtered disk walk only when git is unavailable or the path is not in a
+    repository, so the tool still works from an extracted source tarball.
+    """
     if path.is_file():
         return [path.name]
+
+    try:
+        out = subprocess.run(
+            ["git", "-C", str(REPO_ROOT), "ls-files", "--", str(path.relative_to(REPO_ROOT))],
+            capture_output=True,
+            text=True,
+            check=True,
+        )
+        rel_to_repo = [line for line in out.stdout.splitlines() if line.strip()]
+        if rel_to_repo:
+            prefix = path.relative_to(REPO_ROOT).as_posix() + "/"
+            return sorted(
+                p[len(prefix):] for p in rel_to_repo if p.startswith(prefix)
+            )
+    except (subprocess.CalledProcessError, FileNotFoundError, ValueError):
+        pass  # Not a git checkout (e.g. an extracted tarball); fall back to a filtered walk.
+
+    # Fallback: walk the disk, excluding version-control and common build/cache artefacts so an
+    # in-tree build does not corrupt the digest.
+    _skip = {".git", "build", "_build", "__pycache__", ".cache", "node_modules"}
     return sorted(
         str(p.relative_to(path))
         for p in path.rglob("*")
-        if p.is_file() and ".git" not in p.parts
+        if p.is_file() and not (_skip & set(p.relative_to(path).parts))
     )
 
 

@@ -338,6 +338,23 @@ Result<void> AtomicWriter::commit() {
         }
     }
 
+    // Set the final permissions on the open descriptor, before close and before rename.
+    //
+    // The temporary was created 0600 so its contents were never briefly world-readable during
+    // the write. The committed file, however, should have the permissions a normally created
+    // file gets -- which means honouring the process umask, not forcing a fixed mode.
+    //
+    // A previous version called chmod(path, 0644), which is wrong twice over: chmod ignores the
+    // umask entirely (only file-creating syscalls apply it), so a user running umask 0077 -- who
+    // expects their output private -- got a world-readable 0644 file, a local information leak
+    // on a shared host. And chmod-by-path after close is a TOCTOU window. Replicate exactly what
+    // open(path, O_CREAT, 0666) would have produced: 0666 masked by the umask, applied through
+    // the fd we still hold.
+    const mode_t current_umask = ::umask(0);  // read-and-clear
+    ::umask(current_umask);                    // restore immediately
+    const mode_t final_mode = static_cast<mode_t>(0666) & ~current_umask;
+    ::fchmod(fd_, final_mode);
+
     if (::close(fd_) != 0) {
         // close() can report a deferred write error that write() never saw -- notably on NFS
         // and on some filesystems with delayed allocation. Ignoring it would commit a file
@@ -351,11 +368,6 @@ Result<void> AtomicWriter::commit() {
         return Result<void>::failure(ErrorCode::io_error, std::move(diagnostic));
     }
     fd_ = -1;
-
-    // Set the final permissions. The temporary was 0600 so its contents were never briefly
-    // world-readable; the destination gets ordinary 0644, adjusted by the process umask the
-    // way a user expects a newly created file to be.
-    ::chmod(temporary_.c_str(), 0644);
 
     // The atomic step. rename(2) is guaranteed atomic within a filesystem: another process
     // sees either the old file or the new one, never a partial one, and never nothing.

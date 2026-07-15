@@ -9,6 +9,14 @@ register is in `docs/audit/production-blockers.md`.
 
 ### Added
 
+- Installable SDK (P0-04). A shared `libmelkor` exposing a stable C ABI
+  (`include/melkor/c/melkor.h`), installed with `MelkorConfig.cmake`, an exported target set
+  (`Melkor::melkor`), a `SameMajorVersion` version file, the public headers, and the generated
+  `version.h`. `scripts/test_sdk_install.sh` proves the clean-room cycle: build, install to a
+  prefix, `find_package(Melkor 2 CONFIG REQUIRED)` and link from standalone C and C++ consumer
+  projects, run them, then relocate the install and consume again. The vendored SPZ dependency
+  is `EXCLUDE_FROM_ALL` so its CLIs and headers no longer pollute the SDK.
+
 - Root `VERSION` file as the single authoritative version source. CMake parses it before
   `project()` via `cmake/MelkorVersion.cmake` and generates `<melkor/version.h>` carrying the
   semantic version, the C ABI version, the JSON schema versions, and the adapter protocol
@@ -81,6 +89,23 @@ register is in `docs/audit/production-blockers.md`.
 
 ### Fixed
 
+- Adversarial-review fixes across the safety substrate and tooling: `redact_path` required the
+  root to align on a path-component boundary (a sibling directory `/x/workshop` under root
+  `/x/work` was wrongly treated as contained and leaked `shop/...`); the atomic writer set the
+  committed file's mode through `fchmod(0666 & ~umask)` before close instead of `chmod(0644)`
+  by path after close (which ignored the umask and made output world-readable under a
+  restrictive umask); the decompression-ratio guard compares against `max_ratio * compressed`
+  rather than truncating integer division; `Limits::validate()` now requires every
+  budget-backed limit positive (a custom profile that left `max_mesh_triangles` at 0 silently
+  disabled it); `MELKOR_TRY_AS` takes the return type as a variadic tail so a `Result<map<K,V>>`
+  compiles. `tools/build_source_bundle.py` excludes model-weight and key/cert extensions case-
+  insensitively and every `.env*`/credential file, refuses to store symlinks as file content,
+  and compresses to match the output name (it wrote uncompressed data to `.tar.zst` before);
+  `check_version_sync.py` rewrites only the two self-versions in `package-lock.json` (a blanket
+  `str.replace` corrupted dependency versions) and no longer accepts a `-rc` heading for a
+  stable release; `generate_notices.py` degrades gracefully on a patch missing its rationale;
+  `verify_third_party.py` digests git-tracked files, not whatever is on disk. Covered by
+  `tools_tests` and expanded C++ regressions.
 - **Float RGB rendered nearly black (P0-07).** The PLY reader divided every red/green/blue
   value by 255 unconditionally, as though every PLY stored colour as an 8-bit byte. A point
   cloud authored with `property float red` holds a value already in `[0,1]`, so mid-grey (0.5)

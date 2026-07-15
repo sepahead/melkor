@@ -107,9 +107,8 @@ public:
         const std::vector<uint32_t>& cell_counts,
         const float grid_origin[3], float cell_size,
         const int grid_dims[3], int k_neighbors) override {
-        if (!ctx_ || !ctx_->isInitialized()) return {};
-        cuda::GaussianProcessor processor(*ctx_);
-        return processor.knnStatsGrid(positions, cell_entries, cell_starts, cell_counts,
+        if (!processor_) return {};
+        return processor_->knnStatsGrid(positions, cell_entries, cell_starts, cell_counts,
                                       grid_origin, cell_size, grid_dims, k_neighbors);
     }
 
@@ -123,9 +122,8 @@ public:
         const float grid_origin[3], float cell_size,
         const int grid_dims[3],
         float min_separation, float support_radius) override {
-        if (!ctx_ || !ctx_->isInitialized()) return {};
-        cuda::GaussianProcessor processor(*ctx_);
-        return processor.filterCandidatesGrid(candidates, directions, positions, cell_entries,
+        if (!processor_) return {};
+        return processor_->filterCandidatesGrid(candidates, directions, positions, cell_entries,
                                               cell_starts, cell_counts, grid_origin, cell_size,
                                               grid_dims, min_separation, support_radius);
     }

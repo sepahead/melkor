@@ -272,12 +272,18 @@ class Result<void> {
     } while (false)
 
 // As MELKOR_TRY, but for a function whose own return type is `Result<U>`.
-#define MELKOR_TRY_AS(ReturnType, result_expr)                                        \
+//
+// The result expression comes first and the return type is the variadic tail, so that a return
+// type containing commas -- `MELKOR_TRY_AS(load(), std::map<Key, Value>)` -- is passed intact.
+// The preprocessor balances only parentheses, not angle brackets, so with the type as a single
+// fixed parameter the comma in `map<Key, Value>` would be read as an argument separator and the
+// macro would fail to compile.
+#define MELKOR_TRY_AS(result_expr, ...)                                               \
     do {                                                                              \
         auto&& melkor_try_result = (result_expr);                                     \
         if (!melkor_try_result.has_value()) {                                         \
-            return ::melkor::Result<ReturnType>::failure(melkor_try_result.error_code(), \
-                                                         melkor_try_result.diagnostics()); \
+            return ::melkor::Result<__VA_ARGS__>::failure(melkor_try_result.error_code(), \
+                                                          melkor_try_result.diagnostics()); \
         }                                                                             \
     } while (false)
 

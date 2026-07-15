@@ -169,8 +169,21 @@ Result<void> Budget::check_decompression_ratio(std::uint64_t compressed_bytes,
         return Result<void>::success();
     }
 
-    const std::uint64_t ratio = declared_decoded_bytes / compressed_bytes;
-    if (ratio > max_ratio) {
+    // Compare declared_decoded_bytes against max_ratio * compressed_bytes rather than dividing.
+    //
+    // Integer division truncates: declared/compressed for 100999/1000 yields 100, so a strict
+    // `ratio > 100` would let a true ratio of 100.999 through. The multiplication form has no
+    // such slack. It is done with checked_mul so that a hostile compressed_bytes cannot overflow
+    // the threshold into a small number that everything then passes.
+    auto threshold = checked_mul(max_ratio, compressed_bytes, "decompression ratio threshold");
+    if (!threshold.has_value()) {
+        // The threshold overflowed 64 bits, so no plausible declared size can exceed it; the
+        // absolute decoded-byte budget is the effective guard in that regime.
+        return Result<void>::success();
+    }
+
+    if (declared_decoded_bytes > threshold.value()) {
+        const std::uint64_t ratio = declared_decoded_bytes / compressed_bytes;
         Diagnostic diagnostic("MK0302_DECOMPRESSION_RATIO_EXCEEDED", Severity::error,
                               "declared decompression ratio exceeds the configured limit");
         diagnostic.with_context("compressed_bytes", compressed_bytes);

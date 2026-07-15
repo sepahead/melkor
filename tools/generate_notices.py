@@ -201,7 +201,11 @@ def render_third_party(lock: dict) -> str:
         )
         lines.append("")
         for patch in dep["patches"]:
-            lines.append(f"- **`{patch['file']}`** — {patch['rationale']}")
+            # A patch with no rationale is a policy failure (verify_third_party.py rejects it),
+            # but generating notices must not crash with an unhandled KeyError on the way to
+            # reporting that. Degrade to a visible placeholder instead.
+            rationale = patch.get("rationale") or "(no rationale recorded — see the lock)"
+            lines.append(f"- **`{patch['file']}`** — {rationale}")
             lines.append(f"  Upstream status: {patch.get('upstream_status', 'unknown')}.")
         lines.append("")
 

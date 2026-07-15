@@ -120,7 +120,12 @@ target_include_directories(stb_image SYSTEM INTERFACE ${THIRD_PARTY_DIR}/stb)
 
 # SPZ library (if available)
 if(MELKOR_BUILD_SPZ AND EXISTS ${THIRD_PARTY_DIR}/spz/CMakeLists.txt)
-    add_subdirectory(${THIRD_PARTY_DIR}/spz)
+    # EXCLUDE_FROM_ALL: build spz because melkor_core depends on it, but do NOT run its own
+    # install rules. Without this, spz installs its CLI tools (ply_to_spz, spz_info, ...) and
+    # its headers (load-spz.h, splat-types.h) into our SDK prefix, polluting the include root
+    # and the bin directory with a vendored dependency's surface. spz is an implementation
+    # detail of libmelkor, not part of the Melkor SDK.
+    add_subdirectory(${THIRD_PARTY_DIR}/spz EXCLUDE_FROM_ALL)
     set(SPZ_AVAILABLE ON)
 else()
     set(SPZ_AVAILABLE OFF)
@@ -153,10 +158,18 @@ add_library(melkor_core STATIC
     src/densifier.cpp
 )
 
+# Generator-expression include dirs so the installed package relocates. A hard-coded source
+# path in an exported target would point every downstream consumer back at THIS machine's
+# checkout, which is the classic reason a "installed" SDK only works on the box that built it.
 target_include_directories(melkor_core PUBLIC
-    ${CMAKE_SOURCE_DIR}/include
-    ${MELKOR_GENERATED_INCLUDE_DIR}
+    $<BUILD_INTERFACE:${CMAKE_SOURCE_DIR}/include>
+    $<BUILD_INTERFACE:${MELKOR_GENERATED_INCLUDE_DIR}>
+    $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>
 )
+
+# Position-independent code so the static core can be linked into the shared libmelkor. Without
+# this, the shared-library link fails on Linux with a relocation error.
+set_target_properties(melkor_core PROPERTIES POSITION_INDEPENDENT_CODE ON)
 
 target_link_libraries(melkor_core PUBLIC
     tinygltf
@@ -341,17 +354,107 @@ if(APPLE AND MELKOR_USE_METAL)
     )
 endif()
 
+# ---------------------------------------------------------------------------
+# libmelkor — the installable shared library and its stable C ABI.
+#
+# This is what closes P0-04: before this, `cmake --install` shipped the CLI and the licence
+# files but not the library, the headers, or a CMake package config, so no downstream project
+# could consume Melkor as an SDK at all.
+#
+# The stable, supported consumption boundary is the C ABI (include/melkor/c/melkor.h). The
+# shared library links the whole runtime PRIVATELY and exports only the C ABI, so a consumer
+# gets one relocatable libmelkor and a small, versioned surface -- not a web of internal static
+# archives and third-party headers.
+#
+# The C++ headers are installed too, but their compiled symbols are deliberately NOT frozen as
+# an exported ABI yet: the C++ scene/format API is still being reshaped by later work packages,
+# and freezing exported C++ symbols around types that later work proves wrong is exactly the
+# mistake the blueprint warns against. C++ consumers get the header-inline facilities (Result,
+# version macros) now; the richer compiled C++ API is a later, deliberate export.
+# ---------------------------------------------------------------------------
+option(MELKOR_INSTALL "Generate installation and packaging rules for the SDK" ON)
+
+add_library(melkor_lib SHARED src/c_api/melkor_c.cpp)
+set_target_properties(melkor_lib PROPERTIES
+    OUTPUT_NAME melkor           # produces libmelkor.so / libmelkor.dylib / melkor.dll
+    EXPORT_NAME melkor           # exported to consumers as Melkor::melkor, not Melkor::melkor_lib
+    CXX_VISIBILITY_PRESET hidden # export only MELKOR_API symbols; nothing leaks by accident
+    VISIBILITY_INLINES_HIDDEN ON
+    VERSION ${MELKOR_VERSION_CORE}
+    SOVERSION ${MELKOR_ABI_VERSION})
+target_compile_definitions(melkor_lib PRIVATE MELKOR_BUILDING_LIBRARY)
+# PRIVATE: the runtime (core + backend) is an implementation detail of the shared library, not
+# part of its public link surface. A consumer links libmelkor and nothing else.
+target_link_libraries(melkor_lib PRIVATE melkor_runtime)
+target_include_directories(melkor_lib PUBLIC
+    $<BUILD_INTERFACE:${CMAKE_SOURCE_DIR}/include>
+    $<BUILD_INTERFACE:${MELKOR_GENERATED_INCLUDE_DIR}>
+    $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>)
+target_compile_options(melkor_lib PRIVATE ${MELKOR_WARNING_FLAGS})
+add_library(Melkor::melkor ALIAS melkor_lib)
+
 # Installation
-install(TARGETS melkor RUNTIME DESTINATION bin)
+install(TARGETS melkor RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR})
 if(APPLE AND MELKOR_USE_METAL)
-    install(FILES ${METAL_LIBRARY_OUTPUT} DESTINATION bin)
+    install(FILES ${METAL_LIBRARY_OUTPUT} DESTINATION ${CMAKE_INSTALL_BINDIR})
 endif()
-install(FILES
-    ${CMAKE_SOURCE_DIR}/LICENSE
-    ${CMAKE_SOURCE_DIR}/NOTICE
-    ${CMAKE_SOURCE_DIR}/THIRD_PARTY_LICENSES.md
-    DESTINATION ${CMAKE_INSTALL_DATADIR}/melkor
-)
+
+if(MELKOR_INSTALL)
+    include(CMakePackageConfigHelpers)
+
+    # The shared library, exported under the Melkor:: namespace so downstream code links
+    # Melkor::melkor and cannot accidentally pick up a same-named target.
+    install(TARGETS melkor_lib
+        EXPORT MelkorTargets
+        RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR}
+        LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR}
+        ARCHIVE DESTINATION ${CMAKE_INSTALL_LIBDIR}
+        INCLUDES DESTINATION ${CMAKE_INSTALL_INCLUDEDIR})
+
+    # Public headers: the committed tree plus the generated version.h.
+    install(DIRECTORY ${CMAKE_SOURCE_DIR}/include/melkor
+        DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}
+        FILES_MATCHING PATTERN "*.h" PATTERN "*.hpp")
+    install(FILES ${MELKOR_GENERATED_INCLUDE_DIR}/melkor/version.h
+        DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}/melkor)
+
+    # Data the SDK and CLI need at runtime: format profiles and JSON schemas. Installed as
+    # empty-tolerant so the rule holds before those directories are populated by later work.
+    install(DIRECTORY ${CMAKE_SOURCE_DIR}/profiles
+        DESTINATION ${CMAKE_INSTALL_DATADIR}/melkor OPTIONAL)
+    install(DIRECTORY ${CMAKE_SOURCE_DIR}/schemas
+        DESTINATION ${CMAKE_INSTALL_DATADIR}/melkor OPTIONAL)
+
+    install(FILES
+        ${CMAKE_SOURCE_DIR}/LICENSE
+        ${CMAKE_SOURCE_DIR}/NOTICE
+        ${CMAKE_SOURCE_DIR}/THIRD_PARTY_LICENSES.md
+        DESTINATION ${CMAKE_INSTALL_DATADIR}/melkor)
+
+    # The exported target set, the config, and a version file. Together these are what makes
+    # `find_package(Melkor 2 CONFIG REQUIRED)` work from a clean consumer project.
+    install(EXPORT MelkorTargets
+        FILE MelkorTargets.cmake
+        NAMESPACE Melkor::
+        DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/Melkor)
+
+    configure_package_config_file(
+        ${CMAKE_SOURCE_DIR}/cmake/MelkorConfig.cmake.in
+        ${CMAKE_CURRENT_BINARY_DIR}/MelkorConfig.cmake
+        INSTALL_DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/Melkor)
+
+    # SameMajorVersion: a consumer that asks for Melkor 2 accepts any 2.x, matching the ABI
+    # promise, but is refused a 3.x that could have broken the ABI.
+    write_basic_package_version_file(
+        ${CMAKE_CURRENT_BINARY_DIR}/MelkorConfigVersion.cmake
+        VERSION ${MELKOR_VERSION_CORE}
+        COMPATIBILITY SameMajorVersion)
+
+    install(FILES
+        ${CMAKE_CURRENT_BINARY_DIR}/MelkorConfig.cmake
+        ${CMAKE_CURRENT_BINARY_DIR}/MelkorConfigVersion.cmake
+        DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/Melkor)
+endif()
 
 # Print configuration summary
 message(STATUS "")
@@ -490,4 +593,8 @@ if(Python3_Interpreter_FOUND)
              COMMAND ${Python3_EXECUTABLE}
                      ${CMAKE_SOURCE_DIR}/tests/test_inspect_cli.py
                      $<TARGET_FILE:melkor>)
+    # Regression tests for the repository tooling (version sync, source-bundle allowlist,
+    # notice generation) -- locking in adversarial-review fixes.
+    add_test(NAME tools_tests
+             COMMAND ${Python3_EXECUTABLE} ${CMAKE_SOURCE_DIR}/tests/test_tools.py)
 endif()

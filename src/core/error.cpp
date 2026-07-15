@@ -94,13 +94,27 @@ std::string redact_path(const std::string& path, DiagnosticPathPolicy policy,
             return path;
 
         case DiagnosticPathPolicy::relative: {
-            if (!root.empty() && path.size() > root.size() && path.compare(0, root.size(), root) == 0) {
-                std::size_t start = root.size();
-                // Trim exactly one leading separator so the result is "a/b", not "/a/b".
-                if (start < path.size() && (path[start] == '/' || path[start] == '\\')) {
-                    ++start;
-                }
-                return path.substr(start);
+            // The prefix must end on a path-component boundary, not merely be a string prefix.
+            //
+            // A plain `path.compare(0, root.size(), root) == 0` treats "/home/alice/work" as a
+            // prefix of "/home/alice/workshop/secret.ply" -- it is, as a string -- and returns
+            // "shop/secret.ply", which is both a nonsense relative path and a leak of a
+            // directory the caller never authorised. The character immediately after the root
+            // must be a separator for this to be genuine containment.
+            //
+            // A trailing separator on the root is normalised away first, so both
+            // "/home/alice/work" and "/home/alice/work/" behave identically.
+            std::string base = root;
+            while (!base.empty() && (base.back() == '/' || base.back() == '\\')) {
+                base.pop_back();
+            }
+
+            const bool string_prefix = !base.empty() && path.size() > base.size() &&
+                                       path.compare(0, base.size(), base) == 0;
+            if (string_prefix &&
+                (path[base.size()] == '/' || path[base.size()] == '\\')) {
+                // Skip the base and the single boundary separator, so the result is "a/b".
+                return path.substr(base.size() + 1);
             }
             // A path outside the root would leak more than the caller asked for, so it falls
             // back to the stricter policy rather than the looser one.
