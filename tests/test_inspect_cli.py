@@ -163,6 +163,19 @@ def main() -> int:
         assert glb_report["source"]["kind"] == "mesh_vertices"
         assert glb_report["cloud"]["splats"] == 1
 
+        # A GLB carrying KHR_gaussian_splatting is inspected as real Gaussian data (not mesh
+        # vertices), read through the KHR reader. The committed seed corpus provides one.
+        khr_glb = Path(__file__).resolve().parent.parent / "fuzz" / "corpus" / "gltf_khr" / \
+            "minimal_degree1.glb"
+        if khr_glb.is_file():
+            khr_result = run(binary, str(khr_glb), "--json")
+            assert khr_result.returncode == 0, khr_result.stderr
+            khr_report = json.loads(khr_result.stdout)
+            assert khr_report["source"]["kind"] == "gaussian_cloud", khr_report["source"]
+            assert khr_report["cloud"]["splats"] == 3, khr_report["cloud"]
+            assert khr_report["cloud"]["sh_degree"] == 1, khr_report["cloud"]
+            assert khr_report["cloud"]["fields"]["color"] == "explicit_sh_dc"
+
         invalid_color = mesh_gltf()
         invalid_color["meshes"][0]["primitives"][0]["attributes"]["COLOR_0"] = 99
         invalid_normal = mesh_gltf()

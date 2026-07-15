@@ -1,10 +1,14 @@
 #include "inspect_command.hpp"
 
 #include "melkor/cloud_inspector.hpp"
+#include "melkor/format/gltf_reader.hpp"
 #include "melkor/glb_reader.hpp"
 #include "melkor/ply_writer.hpp"
 #include "melkor/spz_encoder.hpp"
 #include "safe_text.hpp"
+
+#include <fstream>
+#include <vector>
 
 #include <algorithm>
 #include <cctype>
@@ -187,23 +191,84 @@ InspectDocument inspectPath(const std::string& path) {
         return document;
 #endif
     } else if (document.format == "glb" || document.format == "gltf") {
-        GlbReader reader;
-        GlbConversionConfig config;
-        config.convert_coordinate_system = false;
-        auto result = reader.loadFromFile(path, config);
-        if (!result.success) {
-            addSourceError(document, "read_error", result.error_message);
+        // Prefer the real KHR_gaussian_splatting reader: a GLB carrying splats is read as actual
+        // Gaussian data, not as mesh vertices. Only when the asset has no splat primitive do we
+        // fall back to the legacy vertices-to-splats path.
+        std::ifstream in(path, std::ios::binary);
+        std::vector<std::uint8_t> bytes((std::istreambuf_iterator<char>(in)),
+                                        std::istreambuf_iterator<char>());
+        auto scene = melkor::format::gltf::read_glb(bytes.data(), bytes.size());
+        const bool no_splat_primitive =
+            !scene.has_value() && !scene.diagnostics().empty() &&
+            scene.diagnostics()[0].code == "MK2161_GLTF_NO_SPLATS";
+
+        if (scene.has_value()) {
+            // Bridge the validated canonical splats into a GaussianCloud for the inspection stats.
+            // SplatData guarantees finite, in-domain values, so the finiteness checks all pass and
+            // the bounds are the true world-space canonical values.
+            const auto& sd = scene.value().data;
+            cloud.splats().reserve(sd.size());
+            for (std::size_t s = 0; s < sd.size(); ++s) {
+                GaussianSplat g{};
+                g.x = sd.positions()[s].x;
+                g.y = sd.positions()[s].y;
+                g.z = sd.positions()[s].z;
+                g.f_dc_0 = sd.sh().dc(s, 0);
+                g.f_dc_1 = sd.sh().dc(s, 1);
+                g.f_dc_2 = sd.sh().dc(s, 2);
+                g.opacity = sd.opacities()[s];
+                g.scale_0 = sd.scales()[s].x;
+                g.scale_1 = sd.scales()[s].y;
+                g.scale_2 = sd.scales()[s].z;
+                const auto& q = sd.rotations()[s];  // canonical x,y,z,w -> GaussianCloud w,x,y,z
+                g.rot_0 = q.w;
+                g.rot_1 = q.x;
+                g.rot_2 = q.y;
+                g.rot_3 = q.z;
+                cloud.addSplat(g);
+            }
+            document.kind = "gaussian_cloud";
+            document.encoding = "khr_gaussian_splatting";
+            document.declared_splats = sd.size();
+            document.has_declared_splats = true;
+            document.fields = {"explicit", "explicit_sh_dc", "explicit", "explicit", "explicit",
+                               scene.value().sh_degree > 0 ? "explicit" : "absent"};
+            document.has_cloud = true;
+            document.inspection = inspectCloud(cloud);
+            // Report the true source SH degree: the bridged GaussianCloud carries only the DC term,
+            // so inspectCloud would otherwise under-report it as 0.
+            document.inspection.sh_degree = static_cast<int>(scene.value().sh_degree);
+            // Surface the conversion loss report so an inspector sees what a conversion would lose.
+            for (const auto& item : scene.value().losses.items()) {
+                addInspectionIssue(document.inspection, InspectionSeverity::Warning, item.code,
+                                   item.source_feature.empty() ? item.target_constraint
+                                                               : item.source_feature);
+            }
+        } else if (no_splat_primitive) {
+            // Not a splat asset: fall back to the legacy vertices-as-splats reading.
+            GlbReader reader;
+            GlbConversionConfig config;
+            config.convert_coordinate_system = false;
+            auto result = reader.loadFromFile(path, config);
+            if (!result.success) {
+                addSourceError(document, "read_error", result.error_message);
+                return document;
+            }
+            cloud = std::move(result.cloud);
+            document.kind = "mesh_vertices";
+            document.encoding = document.format == "glb" ? "binary" : "json";
+            document.declared_splats = result.total_vertices;
+            document.has_declared_splats = true;
+            document.fields = {"explicit", "converted_or_defaulted", "generated", "generated",
+                               "generated", "absent"};
+            document.has_cloud = true;
+            document.inspection = inspectCloud(cloud);
+        } else {
+            addSourceError(document, "read_error",
+                           scene.diagnostics().empty() ? "failed to read GLB"
+                                                       : scene.diagnostics()[0].message);
             return document;
         }
-        cloud = std::move(result.cloud);
-        document.kind = "mesh_vertices";
-        document.encoding = document.format == "glb" ? "binary" : "json";
-        document.declared_splats = result.total_vertices;
-        document.has_declared_splats = true;
-        document.fields = {"explicit", "converted_or_defaulted", "generated", "generated",
-                           "generated", "absent"};
-        document.has_cloud = true;
-        document.inspection = inspectCloud(cloud);
     } else {
         addSourceError(document, "unsupported_format",
                        "Supported inspect inputs are PLY, SPZ, GLB, and glTF.");
