@@ -1,6 +1,7 @@
 #pragma once
 
 #include "melkor/gaussian_data.hpp"
+#include "melkor/limits.hpp"
 #include <string>
 #include <vector>
 
@@ -64,11 +65,15 @@ public:
         Metadata metadata;
     };
     
-    // Decode from file
-    DecodeResult decodeFromFile(const std::string& filepath);
-    
-    // Decode from memory buffer
-    DecodeResult decodeFromBuffer(const uint8_t* data, size_t size);
+    // Decode from file. `limits` bounds the compressed input size charged against a Budget before
+    // the decode. (The decoded allocation happens inside vendored upstream after a whole-stream
+    // inflate; bounding that fully needs a header peek and is tracked with the SPZ v4 upgrade.)
+    DecodeResult decodeFromFile(const std::string& filepath,
+                                const Limits& limits = Limits::for_profile(LimitsProfile::desktop));
+
+    // Decode from memory buffer (see decodeFromFile for `limits`).
+    DecodeResult decodeFromBuffer(const uint8_t* data, size_t size,
+                                  const Limits& limits = Limits::for_profile(LimitsProfile::desktop));
 };
 
 #else

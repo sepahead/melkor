@@ -392,7 +392,8 @@ SpzEncodeResult SpzEncoder::encodeToBuffer(std::vector<uint8_t>& buffer,
 SpzDecoder::SpzDecoder() = default;
 SpzDecoder::~SpzDecoder() = default;
 
-SpzDecoder::DecodeResult SpzDecoder::decodeFromFile(const std::string& filepath) {
+SpzDecoder::DecodeResult SpzDecoder::decodeFromFile(const std::string& filepath,
+                                                    const Limits& limits) {
     DecodeResult result;
     std::ifstream stream(filepath, std::ios::binary | std::ios::ate);
     if (!stream) {
@@ -403,6 +404,15 @@ SpzDecoder::DecodeResult SpzDecoder::decodeFromFile(const std::string& filepath)
     if (end <= 0 || static_cast<uintmax_t>(end) >
                         static_cast<uintmax_t>(std::numeric_limits<int32_t>::max())) {
         result.error_message = "SPZ file is empty or exceeds the 2 GiB decoder limit";
+        return result;
+    }
+    Budget budget(limits);
+    if (auto charged = budget.consume(BudgetKind::input_bytes, static_cast<std::uint64_t>(end),
+                                      "spz.file");
+        !charged.has_value()) {
+        result.error_message = charged.diagnostics().empty()
+                                   ? "SPZ file exceeds the input-size limit"
+                                   : charged.diagnostics()[0].message;
         return result;
     }
     std::vector<uint8_t> data;
@@ -417,14 +427,28 @@ SpzDecoder::DecodeResult SpzDecoder::decodeFromFile(const std::string& filepath)
         result.error_message = "Failed to read complete SPZ file";
         return result;
     }
-    return decodeFromBuffer(data.data(), data.size());
+    return decodeFromBuffer(data.data(), data.size(), limits);
 }
 
-SpzDecoder::DecodeResult SpzDecoder::decodeFromBuffer(const uint8_t* data, size_t size) {
+SpzDecoder::DecodeResult SpzDecoder::decodeFromBuffer(const uint8_t* data, size_t size,
+                                                      const Limits& limits) {
     DecodeResult result;
     if (data == nullptr || size == 0 ||
         size > static_cast<size_t>(std::numeric_limits<int32_t>::max())) {
         result.error_message = "SPZ input buffer is null, empty, or exceeds the 2 GiB decoder limit";
+        return result;
+    }
+    // Charge the compressed input against the budget before the decode. This bounds how large an
+    // SPZ stream will even be attempted; the decoded allocation itself happens inside vendored
+    // upstream (after a whole-stream inflate, capped by upstream at 10M points) and a tighter
+    // per-file bound needs a header peek, tracked with the SPZ v4 upgrade (P0-09).
+    Budget budget(limits);
+    if (auto charged = budget.consume(BudgetKind::input_bytes, static_cast<std::uint64_t>(size),
+                                      "spz.input");
+        !charged.has_value()) {
+        result.error_message = charged.diagnostics().empty()
+                                   ? "SPZ input exceeds the input-size limit"
+                                   : charged.diagnostics()[0].message;
         return result;
     }
     const int32_t version = spz::getSpzVersion(data, static_cast<int32_t>(size));

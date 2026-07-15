@@ -9,6 +9,12 @@ register is in `docs/audit/production-blockers.md`.
 
 ### Fixed
 
+- SPZ decoder input bound (P0-12). `SpzDecoder::decodeFromFile`/`decodeFromBuffer` now take a
+  `Limits` (default desktop profile) and charge the compressed input against a `Budget` before the
+  decode, so an over-large SPZ stream is refused by policy (`test_spz_budget`). The decoded
+  allocation still occurs inside vendored upstream (capped there at 10M points); a tighter
+  per-file bound via a header peek is tracked with the SPZ v4 upgrade. All three readers (glTF,
+  PLY, SPZ) now enforce a resource budget on input.
 - PLY reader resource bounds (P0-12). `PlyReader::readFromFile`/`readFromBuffer` now take a `Limits`
   (default desktop profile) and charge the input bytes, the declared vertex count, and the
   reconstructed cloud's memory against a `Budget` before allocating, so a well-formed header

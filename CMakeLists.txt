@@ -538,6 +538,15 @@ target_link_libraries(test_ply_budget PRIVATE melkor_core)
 target_compile_options(test_ply_budget PRIVATE ${MELKOR_WARNING_FLAGS})
 add_test(NAME ply_budget_tests COMMAND test_ply_budget)
 
+# The SPZ decoder charges the compressed input against a Budget before the decode (P0-12).
+add_executable(test_spz_budget tests/test_spz_budget.cpp)
+target_link_libraries(test_spz_budget PRIVATE melkor_core)
+target_compile_options(test_spz_budget PRIVATE ${MELKOR_WARNING_FLAGS})
+if(SPZ_AVAILABLE)
+    target_compile_definitions(test_spz_budget PRIVATE MELKOR_HAS_SPZ)
+endif()
+add_test(NAME spz_budget_tests COMMAND test_spz_budget)
+
 # Canonical math oracle: activation domains, quaternion contract, and the covariance affine
 # transform that P0-17 is about.
 add_executable(test_math_oracle tests/test_math_oracle.cpp)
