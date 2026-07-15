@@ -150,6 +150,7 @@ add_library(melkor_core STATIC
     src/formats/format_id.cpp
     src/formats/glb_container.cpp
     src/formats/gltf_accessor.cpp
+    src/formats/gltf_document.cpp
     src/formats/gltf_khr.cpp
     src/formats/loss.cpp
     src/formats/probe.cpp
@@ -571,6 +572,13 @@ add_executable(test_gltf_accessor tests/test_gltf_accessor.cpp)
 target_link_libraries(test_gltf_accessor PRIVATE melkor_core)
 target_compile_options(test_gltf_accessor PRIVATE ${MELKOR_WARNING_FLAGS})
 add_test(NAME gltf_accessor_tests COMMAND test_gltf_accessor)
+
+# glTF JSON document parsing: extraction and validation of the reduced document the splat reader
+# needs, with adversarial fixtures for malformed JSON, bad indices, and an incomplete extension.
+add_executable(test_gltf_document tests/test_gltf_document.cpp)
+target_link_libraries(test_gltf_document PRIVATE melkor_core)
+target_compile_options(test_gltf_document PRIVATE ${MELKOR_WARNING_FLAGS})
+add_test(NAME gltf_document_tests COMMAND test_gltf_document)
 
 # ---------------------------------------------------------------------------
 # Fuzzing.

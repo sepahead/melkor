@@ -9,6 +9,15 @@ register is in `docs/audit/production-blockers.md`.
 
 ### Added
 
+- glTF JSON document parsing (`include/melkor/format/gltf_document.hpp`,
+  `src/formats/gltf_document.cpp`): exception-free parsing of the reduced glTF document the splat
+  reader needs -- accessors, bufferViews, buffers, meshes/primitives (with the
+  KHR_gaussian_splatting extension), nodes (matrix or TRS), the default scene, and the
+  extensionsUsed/Required declarations. Every index the reader follows is bounds-checked at parse,
+  so a document that parses has a self-consistent reference graph. Untrusted-input hardened:
+  malformed JSON, wrong-typed fields, negative or out-of-range indices, an unsupported accessor
+  type, and an incomplete extension all fail cleanly (`test_gltf_document`, 46 checks, clean under
+  ASan+UBSan). Advances the glTF reader (P0-10).
 - glTF accessor decoding (`include/melkor/format/gltf_accessor.hpp`,
   `src/formats/gltf_accessor.cpp`): decodes a resolved accessor (component type, element type,
   normalized flag, count, byte offset, byte stride) into bounds-checked floats. It applies the
