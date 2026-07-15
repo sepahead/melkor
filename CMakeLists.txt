@@ -143,6 +143,13 @@ add_library(melkor_core STATIC
     src/core/budget.cpp
     src/core/backend_registry.cpp
 
+    # Canonical math oracle: the single semantic authority for activation domains, quaternion
+    # handling, and covariance transform/decomposition. The place transforms are done correctly
+    # so no format adapter or backend reinvents them wrongly (P0-17).
+    src/math/activation.cpp
+    src/math/quaternion.cpp
+    src/math/covariance.cpp
+
     # Atomic output. One implementation for every writer -- PLY, SPZ, glTF, JSON reports.
     # Format-specific "open the file and hope" is how P0-08 happened.
     src/io/atomic_writer.cpp
@@ -502,6 +509,13 @@ add_executable(test_ply_color tests/test_ply_color.cpp)
 target_link_libraries(test_ply_color PRIVATE melkor_core)
 target_compile_options(test_ply_color PRIVATE ${MELKOR_WARNING_FLAGS})
 add_test(NAME ply_color_tests COMMAND test_ply_color)
+
+# Canonical math oracle: activation domains, quaternion contract, and the covariance affine
+# transform that P0-17 is about.
+add_executable(test_math_oracle tests/test_math_oracle.cpp)
+target_link_libraries(test_math_oracle PRIVATE melkor_core)
+target_compile_options(test_math_oracle PRIVATE ${MELKOR_WARNING_FLAGS})
+add_test(NAME math_oracle_tests COMMAND test_math_oracle)
 
 add_executable(test_cloud_inspector tests/test_cloud_inspector.cpp)
 target_link_libraries(test_cloud_inspector PRIVATE melkor_runtime)

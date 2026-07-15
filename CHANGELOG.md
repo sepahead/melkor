@@ -9,6 +9,18 @@ register is in `docs/audit/production-blockers.md`.
 
 ### Added
 
+- Canonical math oracle (`include/melkor/math/`), the single semantic authority for the
+  transforms P0-17 is about. `activation` converts opacity/scale between training (logit/log)
+  and canonical (linear) domains exactly once, with bounded exp and interval checks that make
+  double activation a diagnostic rather than a plausible-but-wrong value. `quaternion` provides
+  a numerically stable matrix round-trip (correct even at 180°, where the naive formula loses
+  all precision), q/-q sign equivalence via angular distance, and rejection of a zero quaternion
+  rather than silently promoting it to identity. `covariance` builds `Σ = R diag(s²) Rᵀ` and
+  applies an affine node transform as `Σ' = A Σ Aᵀ`, decomposing back via a deterministic Jacobi
+  eigensolver — correct for rotation, non-uniform scale, shear, and reflection, where moving only
+  the mean (the bug) is demonstrably wrong. Reference-tested in `math_oracle_tests` (83 checks),
+  clean under ASan+UBSan.
+
 - Installable SDK (P0-04). A shared `libmelkor` exposing a stable C ABI
   (`include/melkor/c/melkor.h`), installed with `MelkorConfig.cmake`, an exported target set
   (`Melkor::melkor`), a `SameMajorVersion` version file, the public headers, and the generated
