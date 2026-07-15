@@ -392,7 +392,13 @@ int main(int argc, char* argv[]) try {
             melkor::EnhancedConversionConfig config;
             config.use_gpu = use_gpu;
             config.knn_neighbors = knn_neighbors;
-            config.scale_factor = splat_scale * 50.0f;  // Adjust scale factor
+            // The enhanced path multiplies its k-NN-derived local spacing by this factor to
+            // get each splat's base scale. The default splat_scale (0.01) maps to the
+            // converter's default multiplier (0.5); the historical constant that produced that
+            // mapping is named here rather than left as a magic literal (P0-11). The principled
+            // replacement is the mesh-init surface sampler's scale_multiplier * local_spacing.
+            constexpr float kEnhancedScaleMultiplierPerUnit = 50.0f;
+            config.scale_factor = splat_scale * kEnhancedScaleMultiplierPerUnit;
             config.use_surface_alignment = surface_align;
             config.default_opacity = opacity;
             config.position_scale = pos_scale;

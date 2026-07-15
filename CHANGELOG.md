@@ -155,6 +155,12 @@ register is in `docs/audit/production-blockers.md`.
 
 ### Removed
 
+- Three unimplemented fields from `EnhancedConversionConfig` — `adaptive_density`,
+  `target_splats_per_unit`, and `max_subdivision` (P0-11). They exposed density and subdivision
+  controls the converter never implemented. The header now states plainly that the path is a
+  geometric per-vertex initialiser, not trained reconstruction, and the magic `scale_factor * 50`
+  is replaced by a named, explained constant (no behaviour change). The full honest
+  `mesh-init --mode vertices|surface` with a real triangle-area sampler is WP10.
 - The dead `GaussianFitter`, `DifferentiableRenderer`, `MeshRenderer`, `FeedforwardModel`, and
   `PythonBridge` facades (P1-03), 2,952 lines. `--fit` and `--feedforward` already failed closed
   at the CLI; the classes behind them remained in the public surface. Deleting them also removed

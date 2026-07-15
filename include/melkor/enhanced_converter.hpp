@@ -22,11 +22,13 @@ struct EnhancedConversionConfig {
     bool use_surface_alignment = true;  // Align Gaussians to surface normals
     float normal_scale_ratio = 0.3f;    // Scale along normal vs tangent (flatter = smaller)
     
-    // Density handling
-    bool adaptive_density = true;       // Adjust density based on local spacing
-    float target_splats_per_unit = 100; // Target splat density
-    int max_subdivision = 2;            // Maximum subdivision level
-    
+    // NOTE: this converter produces one Gaussian per input vertex with a k-NN-derived
+    // anisotropic scale and PCA surface normal. It is a geometric initialiser, NOT a trained
+    // reconstruction, and it does NOT resample by triangle area. Density and subdivision
+    // controls that were declared here previously were never implemented and have been removed
+    // (P0-11); a real triangle-aware surface sampler arrives as `melkor mesh-init --mode
+    // surface` (WP10).
+
     // Color handling
     bool use_vertex_colors = true;
     float default_color[3] = {0.5f, 0.5f, 0.5f};
