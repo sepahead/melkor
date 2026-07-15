@@ -46,6 +46,13 @@ register is in `docs/audit/production-blockers.md`.
 
 ### Added
 
+- `melkor convert IN.glb OUT.glb` reads a KHR_gaussian_splatting GLB into the canonical scene model
+  and writes it back out, making the glTF writer reachable from the CLI. It enforces the loss policy
+  (a severe loss blocks unless its exact code is approved with `--allow-loss`), the resource limits
+  (`--limits-profile web|desktop|server`), and writes the output atomically (the destination is never
+  truncated on failure). Cross-format conversion (PLY/SPZ, which needs domain conversion) is deferred
+  to WP13; this command handles the canonical GLB path. `test_convert_cli.py` proves a GLB round-trips
+  through the CLI and that cross-format/missing-input/usage errors are clean.
 - `melkor inspect` now reads GLB `KHR_gaussian_splatting` assets as real Gaussian data through the
   new codec (`kind: gaussian_cloud`, `encoding: khr_gaussian_splatting`), reporting the true splat
   count, source SH degree, world-space bounds, and the conversion loss report. A GLB with no splat

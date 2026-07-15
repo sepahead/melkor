@@ -367,6 +367,7 @@ target_compile_options(melkor_runtime PRIVATE ${MELKOR_WARNING_FLAGS})
 add_executable(melkor
     src/main.cpp
     src/inspect_command.cpp
+    src/convert_command.cpp
 )
 
 # The CLI links the runtime, which brings in core and whichever backend was compiled. It never
@@ -808,6 +809,10 @@ if(Python3_Interpreter_FOUND)
     add_test(NAME inspect_cli_tests
              COMMAND ${Python3_EXECUTABLE}
                      ${CMAKE_SOURCE_DIR}/tests/test_inspect_cli.py
+                     $<TARGET_FILE:melkor>)
+    add_test(NAME convert_cli_tests
+             COMMAND ${Python3_EXECUTABLE}
+                     ${CMAKE_SOURCE_DIR}/tests/test_convert_cli.py
                      $<TARGET_FILE:melkor>)
     # Regression tests for the repository tooling (version sync, source-bundle allowlist,
     # notice generation) -- locking in adversarial-review fixes.

@@ -10,6 +10,7 @@
 #include "melkor/spz_encoder.hpp"
 #include "melkor/enhanced_converter.hpp"
 #include "inspect_command.hpp"
+#include "convert_command.hpp"
 #include "safe_text.hpp"
 
 #include <iostream>
@@ -32,7 +33,9 @@ void printUsage(const char* program) {
     melkor::text::writeDisplayString(std::cout, program);
     std::cout << " <input.glb> <output.ply|output.spz> [options]\n       ";
     melkor::text::writeDisplayString(std::cout, program);
-    std::cout << " inspect <input> [--json] [--strict]\n";
+    std::cout << " inspect <input> [--json] [--strict]\n       ";
+    melkor::text::writeDisplayString(std::cout, program);
+    std::cout << " convert <input.glb> <output.glb> [--allow-loss CODE] [--limits-profile P]\n";
     std::cout << "\nSupported conversions:\n";
     std::cout << "  GLB -> PLY    Convert GLB mesh to Gaussian splatting PLY\n";
     std::cout << "  GLB -> SPZ    Convert GLB mesh to compressed SPZ format\n";
@@ -125,6 +128,9 @@ int main(int argc, char* argv[]) try {
 
     if (argc >= 2 && std::string(argv[1]) == "inspect") {
         return melkor::cli::runInspectCommand(argc - 2, argv + 2, argv[0]);
+    }
+    if (argc >= 2 && std::string(argv[1]) == "convert") {
+        return melkor::cli::runConvertCommand(argc - 2, argv + 2, argv[0]);
     }
     if (argc < 2) {
         printUsage(argv[0]);
