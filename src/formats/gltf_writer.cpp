@@ -47,6 +47,13 @@ struct Builder {
 
 Result<GlbWriteResult> write_glb(const SplatData& data, khr::ColorSpace color_space) {
     const std::size_t n = data.size();
+    // The base glTF schema requires accessor.count >= 1, so a zero-splat scene cannot be written as
+    // a valid glTF (it would emit zero-count accessors and a POSITION accessor with no min/max).
+    if (n == 0) {
+        Diagnostic d("MK2167_GLTF_NO_SPLATS", Severity::error,
+                     "cannot write a KHR_gaussian_splatting GLB with zero splats");
+        return Result<GlbWriteResult>::failure(ErrorCode::invalid_data, std::move(d));
+    }
     LossReport losses;
 
     // The KHR RC profile stops at degree 3; a higher-degree source is truncated with a reported

@@ -106,17 +106,12 @@ void test_roundtrip_degree1() {
     }
 }
 
-void test_empty_scene_roundtrips() {
-    // Zero splats is a valid (degenerate) SplatData; writing and reading it back should not crash,
-    // though the reader treats a splat-less scene as an error (nothing to read).
+void test_empty_scene_is_rejected() {
+    // Zero splats cannot be written as valid glTF: the base spec requires accessor.count >= 1, so a
+    // zero-count POSITION accessor (and one with no min/max) would be invalid. write_glb refuses.
     auto original = make_splats(0, 0);
     auto written = gltf::write_glb(original, khr::ColorSpace::srgb_rec709_display);
-    CHECK(written.has_value());
-    if (written.has_value()) {
-        // The GLB is structurally valid, but has no splats, so read_glb reports "no splats".
-        auto read = gltf::read_glb(written.value().bytes.data(), written.value().bytes.size());
-        CHECK(!read.has_value());
-    }
+    CHECK(!written.has_value());
 }
 
 void test_degree4_is_truncated_with_loss() {
@@ -154,7 +149,7 @@ void test_degree4_is_truncated_with_loss() {
 
 int main() {
     test_roundtrip_degree1();
-    test_empty_scene_roundtrips();
+    test_empty_scene_is_rejected();
     test_degree4_is_truncated_with_loss();
 
     if (g_failures == 0) {

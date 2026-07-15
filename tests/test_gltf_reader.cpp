@@ -115,12 +115,12 @@ gltf::PrimitiveRead read(const Built& b, bool& ok) {
     auto doc = gltf::parse_gltf_json(reinterpret_cast<const std::uint8_t*>(b.json.data()), b.json.size());
     if (!doc.has_value()) {
         ok = false;
-        return gltf::PrimitiveRead{SplatData::create({}).value(), {}, false, 0};
+        return gltf::PrimitiveRead{SplatData::create({}).value(), {}, false, "", 0};
     }
     std::vector<gltf::BufferSpan> buffers = {gltf::BufferSpan{b.buffer.data(), b.buffer.size()}};
     auto r = gltf::read_primitive_local(doc.value(), doc.value().meshes[0].primitives[0], buffers);
     ok = r.has_value();
-    if (!ok) return gltf::PrimitiveRead{SplatData::create({}).value(), {}, false, 0};
+    if (!ok) return gltf::PrimitiveRead{SplatData::create({}).value(), {}, false, "", 0};
     return std::move(r.value());
 }
 
@@ -219,6 +219,39 @@ void test_unknown_color_space_is_assumed() {
     }
 }
 
+void test_rejects_sh_degree_gap() {
+    // Degree 0 present plus a stray degree-2 coefficient while degree 1 is absent: a non-contiguous
+    // SH pyramid the KHR spec forbids. It must be rejected, not silently read as degree 0 with the
+    // degree-2 colour dropped.
+    auto attrs = geometry(1, {0.f, 0.f, 0.f});
+    attrs.push_back({"KHR_gaussian_splatting:SH_DEGREE_0_COEF_0", 3, {0.f, 0.f, 0.f}});
+    attrs.push_back({"KHR_gaussian_splatting:SH_DEGREE_2_COEF_0", 3, {0.f, 0.f, 0.f}});
+    bool ok = true;
+    read(build(1, attrs), ok);
+    CHECK(!ok);
+}
+
+void test_non_unit_rotation_is_renormalized() {
+    // A ROTATION that is not exactly unit -- as a spec-permitted normalized-integer encoding
+    // quantizes to -- must be renormalized and accepted, not rejected by the strict unit check.
+    // (0.6,0,0,0.6) has norm 0.849, far outside the 1e-3 tolerance.
+    std::vector<Attr> attrs;
+    attrs.push_back({"POSITION", 3, {0.f, 0.f, 0.f}});
+    attrs.push_back({"KHR_gaussian_splatting:ROTATION", 4, {0.6f, 0.f, 0.f, 0.6f}});
+    attrs.push_back({"KHR_gaussian_splatting:SCALE", 3, {0.1f, 0.1f, 0.1f}});
+    attrs.push_back({"KHR_gaussian_splatting:OPACITY", 1, {0.5f}});
+    attrs.push_back({"KHR_gaussian_splatting:SH_DEGREE_0_COEF_0", 3, {0.f, 0.f, 0.f}});
+    bool ok = false;
+    auto r = read(build(1, attrs), ok);
+    CHECK(ok);
+    if (ok) {
+        const auto& q = r.data.rotations()[0];
+        const float norm = std::sqrt(q.x * q.x + q.y * q.y + q.z * q.z + q.w * q.w);
+        CHECK(approx(norm, 1.0f));
+        CHECK(approx(q.x, 0.70710678f) && approx(q.w, 0.70710678f));
+    }
+}
+
 void test_rejects_invalid_splat_values() {
     // A non-unit rotation must be rejected by SplatData validation flowing through the reader.
     std::vector<Attr> attrs;
@@ -240,6 +273,8 @@ int main() {
     test_rejects_wrong_mode_and_kernel();
     test_rejects_missing_attribute();
     test_rejects_partial_sh_degree();
+    test_rejects_sh_degree_gap();
+    test_non_unit_rotation_is_renormalized();
     test_unknown_color_space_is_assumed();
     test_rejects_invalid_splat_values();
 

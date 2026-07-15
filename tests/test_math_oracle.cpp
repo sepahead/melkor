@@ -402,6 +402,15 @@ void test_rotation_from_linear() {
     // A reflection (negative determinant) and a singular map are rejected, not fudged.
     CHECK(!rotation_from_linear(Mat3{-1, 0, 0, 0, 1, 0, 0, 0, 1}).has_value());  // det -1
     CHECK(!rotation_from_linear(Mat3{1, 0, 0, 0, 1, 0, 0, 0, 0}).has_value());   // singular
+
+    // A rotation combined with a small UNIFORM scale must still be accepted: the determinant scales
+    // as scale^3 (here 1e-3^3 = 1e-9), so an absolute determinant floor would wrongly reject it.
+    Mat3 small{};
+    for (std::size_t i = 0; i < 9; ++i) small[i] = R[i] * 1e-3;
+    auto r_small = rotation_from_linear(small);
+    CHECK(r_small.has_value());
+    if (r_small.has_value())
+        for (std::size_t i = 0; i < 9; ++i) CHECK(approx(r_small.value()[i], R[i], 1e-7));
 }
 
 int main() {

@@ -125,6 +125,20 @@ Result<PrimitiveRead> read_primitive_local(const Document& doc, const PrimitiveD
         }
         degree = l;
     }
+    // The scan stops at the first absent degree. Any SH coefficient present for a *higher* degree is
+    // a gap in the pyramid, which the KHR spec forbids ("either all coefficients for a given degree
+    // and all lower degrees MUST be defined or none"). Reject it rather than silently dropping the
+    // higher-degree colour, which would be a hidden loss.
+    for (std::uint32_t l = degree + 1; l <= khr::kMaxProfileShDegree; ++l) {
+        for (std::uint32_t c = 0; c < khr::sh_coefficients_at_degree(l); ++c) {
+            if (prim.attributes.count(khr::sh_attribute({l, c})) != 0) {
+                return fail("MK2156_GLTF_PARTIAL_SH_DEGREE",
+                            "spherical-harmonic coefficients are present for degree " +
+                                std::to_string(l) +
+                                " but a lower degree is absent; the SH pyramid must be contiguous");
+            }
+        }
+    }
 
     // Assemble the SH buffer in the scene model's splat-major block layout. For flat coefficient k
     // (which maps to a KHR (degree, coef) address in the same m-order), the accessor holds all
@@ -175,8 +189,17 @@ Result<PrimitiveRead> read_primitive_local(const Document& doc, const PrimitiveD
                                         positions.value()[s * 3 + 2]});
         input.scales.push_back(
             Vec3f{scales.value()[s * 3 + 0], scales.value()[s * 3 + 1], scales.value()[s * 3 + 2]});
-        input.rotations.push_back(Quatf{rotations.value()[s * 4 + 0], rotations.value()[s * 4 + 1],
-                                        rotations.value()[s * 4 + 2], rotations.value()[s * 4 + 3]});
+        // Renormalize the decoded quaternion, mirroring the node-quaternion path. KHR permits
+        // ROTATION in normalized signed-byte/short encodings whose quantization error (up to ~1/127)
+        // exceeds SplatData's unit-quaternion tolerance; without this a spec-valid asset would be
+        // rejected. A genuinely degenerate (near-zero) quaternion still fails, reported by
+        // SplatData::create.
+        math::Quat q{rotations.value()[s * 4 + 0], rotations.value()[s * 4 + 1],
+                     rotations.value()[s * 4 + 2], rotations.value()[s * 4 + 3]};
+        auto qn = math::normalize(q);
+        const math::Quat u = qn.has_value() ? qn.value() : q;
+        input.rotations.push_back(Quatf{static_cast<float>(u.x), static_cast<float>(u.y),
+                                        static_cast<float>(u.z), static_cast<float>(u.w)});
         input.opacities.push_back(opacities.value()[s]);
     }
     input.sh = std::move(sh.value());
@@ -189,15 +212,13 @@ Result<PrimitiveRead> read_primitive_local(const Document& doc, const PrimitiveD
                                                  : splats.diagnostics()[0].message);
     }
 
-    PrimitiveRead result{std::move(splats.value()), khr::ColorSpace::srgb_rec709_display, false,
-                         degree};
+    // An unrecognised colorSpace string is assumed sRGB (and reported), but the raw string is kept
+    // so the scene reader can still tell two different unrecognised spaces apart.
     auto cs = khr::color_space_from_string(prim.gaussian->color_space);
-    if (cs.has_value()) {
-        result.color_space = cs.value();
-    } else {
-        result.color_space = khr::ColorSpace::srgb_rec709_display;
-        result.color_space_assumed = true;
-    }
+    const khr::ColorSpace color_space =
+        cs.has_value() ? cs.value() : khr::ColorSpace::srgb_rec709_display;
+    PrimitiveRead result{std::move(splats.value()), color_space, !cs.has_value(),
+                         prim.gaussian->color_space, degree};
     return Result<PrimitiveRead>::success(std::move(result));
 }
 
@@ -356,6 +377,7 @@ Result<SceneRead> read_gaussian_scene(const Document& doc, const std::vector<Buf
     LossReport losses;
     std::vector<TransformedBatch> batches;
     khr::ColorSpace first_cs = khr::ColorSpace::srgb_rec709_display;
+    std::string first_cs_raw;
     bool have_cs = false;
     bool mixed_cs = false;
     bool any_assumed = false;
@@ -372,8 +394,11 @@ Result<SceneRead> read_gaussian_scene(const Document& doc, const std::vector<Buf
         }
         if (!have_cs) {
             first_cs = pr.value().color_space;
+            first_cs_raw = pr.value().color_space_raw;
             have_cs = true;
-        } else if (pr.value().color_space != first_cs) {
+        } else if (pr.value().color_space_raw != first_cs_raw) {
+            // Compare the *declared* strings, so two different unrecognised spaces (both coerced to
+            // the sRGB enum) are still detected as a conflict, not silently merged.
             mixed_cs = true;
         }
         if (pr.value().color_space_assumed) any_assumed = true;

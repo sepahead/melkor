@@ -7,6 +7,26 @@ register is in `docs/audit/production-blockers.md`.
 
 ### Breaking
 
+### Fixed
+
+- glTF reader correctness, from an adversarial multi-lens review of the new codec:
+  - A non-contiguous SH pyramid (a coefficient present for a degree above the contiguous prefix,
+    e.g. degree 2 present while degree 1 is absent) was silently truncated, dropping the
+    higher-degree colour. It is now rejected (MK2156), as the KHR spec requires.
+  - A spec-permitted normalized signed-byte/short ROTATION encoding was rejected, because 8-bit
+    quantization pushes the quaternion norm outside the unit tolerance. The decoded splat
+    quaternion is now renormalized (as the node-quaternion path already was); only a genuinely
+    degenerate quaternion still fails.
+  - Two *different unrecognised* colour-space strings were merged into one sRGB-tagged cloud with
+    only a non-blocking warning, because unknown strings were coerced to the sRGB enum before the
+    mixing check. The raw declared string is now retained and compared, so a genuine colour-space
+    conflict is reported as a severe, blocking loss.
+  - `write_glb` on a zero-splat scene emitted invalid glTF (zero-count accessors, POSITION with no
+    min/max); it now fails cleanly (MK2167).
+- `math::rotation_from_linear` rejected a valid rotation combined with a small uniform scale, because
+  it gated singularity on the absolute determinant (which scales as scale^3). It now rejects
+  reflections by determinant sign and judges singularity by a scale-invariant condition-number test.
+
 ### Added
 
 - Rotation-component extraction for a general linear map via polar decomposition

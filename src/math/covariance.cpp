@@ -219,12 +219,12 @@ Result<RotationScale> affine_transform_gaussian(const Mat3& linear, const Quat& 
 }
 
 Result<Mat3> rotation_from_linear(const Mat3& m) {
-    const double det = determinant(m);
-    // A reflection (negative determinant) has no proper-rotation component; a near-singular map
-    // collapses a dimension so the polar factor is undefined. Both are refused rather than fudged.
-    if (det <= 1e-9) {
+    // A reflection (negative determinant) has no proper-rotation component. This is a sign test,
+    // not a magnitude test: the determinant scales as the cube of the map's overall scale, so an
+    // absolute threshold would wrongly reject a valid rotation combined with a small uniform scale.
+    if (determinant(m) <= 0.0) {
         Diagnostic d("MK1310_NO_ROTATION_COMPONENT", Severity::error,
-                     "linear map is singular or a reflection; it has no proper-rotation component");
+                     "linear map is a reflection or singular; it has no proper-rotation component");
         return Result<Mat3>::failure(ErrorCode::invalid_data, std::move(d));
     }
 
@@ -235,7 +235,9 @@ Result<Mat3> rotation_from_linear(const Mat3& m) {
     if (!eig.has_value()) {
         return Result<Mat3>::failure(eig.error_code(), eig.diagnostics());
     }
-    if (eig.value().values[2] <= 1e-12) {  // smallest eigenvalue (values are descending)
+    // Near-singularity is judged by the condition number, not an absolute floor, so the check is
+    // invariant to the map's overall scale. `values` are the squared singular values, descending.
+    if (eig.value().values[2] <= 1e-24 * eig.value().values[0]) {
         Diagnostic d("MK1310_NO_ROTATION_COMPONENT", Severity::error,
                      "linear map is numerically singular; no stable rotation component");
         return Result<Mat3>::failure(ErrorCode::invalid_data, std::move(d));

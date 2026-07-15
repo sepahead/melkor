@@ -37,6 +37,10 @@ struct PrimitiveRead {
     SplatData data;
     khr::ColorSpace color_space = khr::ColorSpace::srgb_rec709_display;
     bool color_space_assumed = false;
+    // The colorSpace string exactly as declared. Retained so the scene reader can detect a genuine
+    // colour-space conflict between primitives even when one or both strings are unrecognised (and
+    // therefore both coerced to the sRGB enum above).
+    std::string color_space_raw;
     std::uint32_t source_sh_degree = 0;
 };
 
