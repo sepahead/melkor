@@ -73,8 +73,13 @@ documented:
   paths onto the oracle.
 - **P0-09** SPZ v4: pin and wrap upstream v3.0.0 (which sets file-format v4), preserve coordinate
   and antialiasing metadata. Full two-way interop testing needs the official SPZ CLI.
-- **P0-10** glTF `KHR_gaussian_splatting`: implement against the pinned RC spec. Conformance needs
-  the Khronos glTF Validator.
+- **P0-10** glTF `KHR_gaussian_splatting`: the reader is now built bottom-up in eight
+  independently-tested, ASan-clean modules — the KHR layout core, GLB container framing, the
+  accessor decoder, the JSON document parser, node transforms, the extension policy, accessor
+  resolution, and a working per-primitive reader that assembles them into a validated local-space
+  `SplatData` (including the coefficient-major→splat-major SH transpose). Remaining: the scene-graph
+  walk that composes node transforms across primitives and applies `Σ' = MΣMᵀ` and SH rotation, the
+  writer, and conformance against the Khronos glTF Validator.
 - **P0-11 remainder** the honest `mesh-init --mode surface` area-weighted sampler.
 - **P0-15 / P0-13** the typed pipeline stage runner replacing the shell scripts, with pinned
   adapter manifests.
