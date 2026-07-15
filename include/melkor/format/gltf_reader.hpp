@@ -21,6 +21,7 @@
 #include "melkor/format/gltf_document.hpp"
 #include "melkor/format/gltf_khr.hpp"
 #include "melkor/format/gltf_resolve.hpp"
+#include "melkor/format/loss.hpp"
 #include "melkor/scene.hpp"
 
 #include <cstdint>
@@ -50,6 +51,30 @@ struct PrimitiveRead {
 // glTF buffer (the GLB BIN chunk for buffer 0).
 Result<PrimitiveRead> read_primitive_local(const Document& doc, const PrimitiveDesc& prim,
                                            const std::vector<BufferSpan>& buffers);
+
+// The result of reading a whole glTF scene into one merged splat cloud: the world-space splats and
+// the loss report describing what the conversion could not fully preserve.
+struct SceneRead {
+    SplatData data;
+    LossReport losses;
+    khr::ColorSpace color_space = khr::ColorSpace::srgb_rec709_display;
+    std::uint32_t sh_degree = 0;
+};
+
+// Reads every KHR_gaussian_splatting primitive reachable from the default scene, applies each
+// instantiating node's global transform to the geometry (mean via `μ' = Mμ + t`, covariance via
+// `Σ' = M Σ Mᵀ` through the math oracle), and merges the results into one world-space SplatData.
+//
+// The reference graph is walked iteratively with a visited-set so a cyclic or shared-node document
+// cannot loop forever. Primitives of differing SH degree are padded to the maximum with zeros.
+//
+// What the walk cannot fully preserve is reported, not hidden: an unsupported *required* extension
+// is a hard error; a node rotation applied to degree>=1 SH is a severe loss (the Wigner-D rotation
+// is not yet implemented, so the view-dependent colour is left in the source frame); an assumed or
+// mixed colour space, a flattened hierarchy, and any splat dropped by a singular node transform are
+// each recorded. The caller applies the loss policy (approving codes) before treating the result as
+// a clean conversion.
+Result<SceneRead> read_gaussian_scene(const Document& doc, const std::vector<BufferSpan>& buffers);
 
 }  // namespace melkor::format::gltf
 

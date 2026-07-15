@@ -612,6 +612,13 @@ target_link_libraries(test_gltf_reader PRIVATE melkor_core)
 target_compile_options(test_gltf_reader PRIVATE ${MELKOR_WARNING_FLAGS})
 add_test(NAME gltf_reader_tests COMMAND test_gltf_reader)
 
+# glTF scene-graph walk: node transforms composed and applied, cycle-safe traversal, SH-degree
+# merge, and the loss report (WP09).
+add_executable(test_gltf_scene tests/test_gltf_scene.cpp)
+target_link_libraries(test_gltf_scene PRIVATE melkor_core)
+target_compile_options(test_gltf_scene PRIVATE ${MELKOR_WARNING_FLAGS})
+add_test(NAME gltf_scene_tests COMMAND test_gltf_scene)
+
 # ---------------------------------------------------------------------------
 # Fuzzing.
 #

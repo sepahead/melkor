@@ -9,6 +9,17 @@ register is in `docs/audit/production-blockers.md`.
 
 ### Added
 
+- glTF scene-graph walk (`read_gaussian_scene` in `format/gltf_reader.hpp`), completing the read
+  path for GLB KHR_gaussian_splatting assets. It gates unsupported *required* extensions as a hard
+  error, walks the default scene cycle-safely (visited-set, so a cyclic or shared-node graph
+  terminates), composes each node's global transform and applies it to the geometry (mean via
+  mu' = M mu + t, covariance via Sigma' = M Sigma M^T through the math oracle), merges primitives of
+  differing SH degree by zero-padding to the maximum, and produces a loss report. The deferred
+  Wigner-D SH rotation is handled honestly: a rotating node over degree>=1 SH raises a severe,
+  approvable LOSS_SH_ROTATION_NOT_APPLIED (a degree-0 or pure-scale/translation node raises
+  nothing), so view-dependent colour is never silently left in the wrong frame. A singular node
+  transform drops the collapsed splat with a recorded loss (`test_gltf_scene`, 21 checks, clean
+  under ASan+UBSan). New loss code LOSS_SH_ROTATION_NOT_APPLIED; new codes MK2160-MK2164 (P0-10).
 - glTF per-primitive reader (`include/melkor/format/gltf_reader.hpp`,
   `src/formats/gltf_reader.cpp`): reads one KHR_gaussian_splatting primitive into a validated,
   local-space SplatData, assembling the document model, accessor resolution/decoding, the KHR

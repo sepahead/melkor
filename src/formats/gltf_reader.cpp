@@ -1,8 +1,13 @@
 #include "melkor/format/gltf_reader.hpp"
 
 #include "melkor/format/gltf_accessor.hpp"
+#include "melkor/format/gltf_extensions.hpp"
+#include "melkor/format/gltf_transform.hpp"
+#include "melkor/math/covariance.hpp"
 
+#include <cmath>
 #include <string>
+#include <vector>
 
 namespace melkor::format::gltf {
 
@@ -190,6 +195,270 @@ Result<PrimitiveRead> read_primitive_local(const Document& doc, const PrimitiveD
         result.color_space_assumed = true;
     }
     return Result<PrimitiveRead>::success(std::move(result));
+}
+
+namespace {
+
+// Whether a linear map is a pure, axis-aligned positive scale (no rotation or reflection). If so,
+// spherical harmonics need no rotation under this transform; otherwise a rotation is present and
+// degree>=1 SH would need a Wigner-D rotation we do not yet apply. The tolerance is relative to the
+// largest element so it scales with the transform's magnitude.
+bool is_pure_positive_scale(const math::Mat3& l) {
+    double maxabs = 0.0;
+    for (double e : l) maxabs = std::max(maxabs, std::fabs(e));
+    const double eps = 1e-6 * std::max(1.0, maxabs);
+    const bool off_zero = std::fabs(l[1]) < eps && std::fabs(l[2]) < eps && std::fabs(l[3]) < eps &&
+                          std::fabs(l[5]) < eps && std::fabs(l[6]) < eps && std::fabs(l[7]) < eps;
+    const bool diag_pos = l[0] > eps && l[4] > eps && l[8] > eps;
+    return off_zero && diag_pos;
+}
+
+// A primitive's splats after its node transform has been applied: geometry in world space, SH still
+// in the source frame, tagged with the source degree so the merge can pad to a common degree.
+struct TransformedBatch {
+    std::vector<Vec3f> positions;
+    std::vector<Vec3f> scales;
+    std::vector<Quatf> rotations;
+    std::vector<float> opacities;
+    std::vector<float> sh;  // splat-major blocks at `degree`
+    std::uint32_t degree = 0;
+    std::uint64_t dropped = 0;  // splats a singular node transform collapsed
+};
+
+// Applies a node transform to one primitive's local splats.
+TransformedBatch transform_primitive(const PrimitiveRead& pr, const NodeTransform& xform) {
+    TransformedBatch batch;
+    batch.degree = pr.source_sh_degree;
+    const std::size_t coeffs = khr::sh_total_coefficients(pr.source_sh_degree);
+    const std::size_t block = coeffs * 3;
+    const auto& raw = pr.data.sh().raw();
+    for (std::size_t s = 0; s < pr.data.size(); ++s) {
+        const Vec3f& p = pr.data.positions()[s];
+        const Vec3f& sc = pr.data.scales()[s];
+        const Quatf& q = pr.data.rotations()[s];
+        auto rs = math::affine_transform_gaussian(
+            xform.linear, math::Quat{q.x, q.y, q.z, q.w}, math::Vec3{sc.x, sc.y, sc.z});
+        if (!rs.has_value()) {
+            ++batch.dropped;  // a singular transform collapses this Gaussian; drop it honestly
+            continue;
+        }
+        const math::Vec3 mean = apply_point(xform, math::Vec3{p.x, p.y, p.z});
+        batch.positions.push_back(Vec3f{static_cast<float>(mean[0]), static_cast<float>(mean[1]),
+                                        static_cast<float>(mean[2])});
+        batch.scales.push_back(Vec3f{static_cast<float>(rs.value().scale[0]),
+                                     static_cast<float>(rs.value().scale[1]),
+                                     static_cast<float>(rs.value().scale[2])});
+        batch.rotations.push_back(Quatf{static_cast<float>(rs.value().rotation.x),
+                                        static_cast<float>(rs.value().rotation.y),
+                                        static_cast<float>(rs.value().rotation.z),
+                                        static_cast<float>(rs.value().rotation.w)});
+        batch.opacities.push_back(pr.data.opacities()[s]);
+        batch.sh.insert(batch.sh.end(), raw.begin() + static_cast<std::ptrdiff_t>(s * block),
+                        raw.begin() + static_cast<std::ptrdiff_t>((s + 1) * block));
+    }
+    return batch;
+}
+
+Result<SceneRead> scene_fail(ErrorCode code, const char* diag_code, std::string message) {
+    Diagnostic d(diag_code, Severity::error, std::move(message));
+    return Result<SceneRead>::failure(code, std::move(d));
+}
+
+}  // namespace
+
+Result<SceneRead> read_gaussian_scene(const Document& doc, const std::vector<BufferSpan>& buffers) {
+    // 1. Extension gate: an unsupported *required* extension makes the asset unreadable.
+    auto ext = evaluate_extensions(doc.extensions_used, doc.extensions_required);
+    if (!ext.unsupported_required.empty()) {
+        std::string names;
+        for (const auto& n : ext.unsupported_required) {
+            if (!names.empty()) names += ", ";
+            names += n;
+        }
+        return scene_fail(ErrorCode::unsupported_feature, "MK2160_GLTF_UNSUPPORTED_REQUIRED",
+                          "the asset requires glTF extensions Melkor does not implement: " + names);
+    }
+
+    // 2. Walk the default scene, collecting each splat primitive with the global transform of the
+    // node that instantiates it. Iterative with a visited-set: a cyclic or shared-node graph
+    // terminates instead of looping.
+    struct Instance {
+        const PrimitiveDesc* prim;
+        NodeTransform transform;
+    };
+    std::vector<Instance> instances;
+    std::vector<char> visited(doc.nodes.size(), 0);
+    struct Frame {
+        std::uint64_t node;
+        NodeTransform parent;
+    };
+    std::vector<Frame> stack;
+    for (std::uint64_t root : doc.scene_roots) stack.push_back(Frame{root, identity_transform()});
+    while (!stack.empty()) {
+        Frame f = stack.back();
+        stack.pop_back();
+        if (f.node >= doc.nodes.size() || visited[static_cast<std::size_t>(f.node)]) continue;
+        visited[static_cast<std::size_t>(f.node)] = 1;
+        const NodeDesc& node = doc.nodes[static_cast<std::size_t>(f.node)];
+        const NodeTransform global = compose(f.parent, local_node_transform(node));
+        if (node.mesh.has_value()) {
+            const MeshDesc& mesh = doc.meshes[static_cast<std::size_t>(node.mesh.value())];
+            for (const auto& prim : mesh.primitives) {
+                if (prim.gaussian.has_value()) instances.push_back(Instance{&prim, global});
+            }
+        }
+        for (std::uint64_t child : node.children) {
+            if (child < doc.nodes.size() && !visited[static_cast<std::size_t>(child)]) {
+                stack.push_back(Frame{child, global});
+            }
+        }
+    }
+
+    if (instances.empty()) {
+        return scene_fail(ErrorCode::invalid_data, "MK2161_GLTF_NO_SPLATS",
+                          "no KHR_gaussian_splatting primitive is reachable from the default scene");
+    }
+
+    // 3. Read and transform every primitive; accumulate losses.
+    LossReport losses;
+    std::vector<TransformedBatch> batches;
+    khr::ColorSpace first_cs = khr::ColorSpace::srgb_rec709_display;
+    bool have_cs = false;
+    bool mixed_cs = false;
+    bool any_assumed = false;
+    std::uint64_t total_dropped = 0;
+
+    for (const auto& inst : instances) {
+        auto pr = read_primitive_local(doc, *inst.prim, buffers);
+        if (!pr.has_value()) {
+            return scene_fail(pr.error_code(),
+                              pr.diagnostics().empty() ? "MK2162_GLTF_PRIMITIVE_READ"
+                                                       : pr.diagnostics()[0].code.c_str(),
+                              pr.diagnostics().empty() ? "failed to read a splat primitive"
+                                                       : pr.diagnostics()[0].message);
+        }
+        if (!have_cs) {
+            first_cs = pr.value().color_space;
+            have_cs = true;
+        } else if (pr.value().color_space != first_cs) {
+            mixed_cs = true;
+        }
+        if (pr.value().color_space_assumed) any_assumed = true;
+
+        // Report an un-applied SH rotation before moving the batch.
+        if (pr.value().source_sh_degree >= 1 && !is_pure_positive_scale(inst.transform.linear)) {
+            LossItem item;
+            item.code = loss_code::kShRotationNotApplied;
+            item.severity = LossSeverity::severe;
+            item.source_feature = "degree>=1 spherical harmonics under a rotating node transform";
+            item.target_constraint = "Wigner-D SH rotation is not yet implemented";
+            item.affected_splats = pr.value().data.size();
+            item.remediation =
+                "bake the node rotation into the splats before conversion, or approve "
+                "LOSS_SH_ROTATION_NOT_APPLIED to accept colour in the source frame";
+            losses.add(std::move(item));
+        }
+
+        auto batch = transform_primitive(pr.value(), inst.transform);
+        total_dropped += batch.dropped;
+        if (!batch.positions.empty()) batches.push_back(std::move(batch));
+    }
+
+    if (batches.empty()) {
+        return scene_fail(ErrorCode::invalid_data, "MK2161_GLTF_NO_SPLATS",
+                          "every splat was dropped by a singular node transform");
+    }
+
+    // 4. Merge, padding each batch's SH up to the maximum degree present.
+    std::uint32_t max_degree = 0;
+    std::size_t total = 0;
+    for (const auto& b : batches) {
+        max_degree = std::max(max_degree, b.degree);
+        total += b.positions.size();
+    }
+    const std::size_t merged_coeffs = khr::sh_total_coefficients(max_degree);
+    const std::size_t merged_block = merged_coeffs * 3;
+
+    SplatBufferInput input;
+    input.positions.reserve(total);
+    input.scales.reserve(total);
+    input.rotations.reserve(total);
+    input.opacities.reserve(total);
+    std::vector<float> merged_sh(total * merged_block, 0.0f);
+
+    std::size_t write = 0;
+    for (const auto& b : batches) {
+        const std::size_t src_block = khr::sh_total_coefficients(b.degree) * 3;
+        for (std::size_t s = 0; s < b.positions.size(); ++s) {
+            input.positions.push_back(b.positions[s]);
+            input.scales.push_back(b.scales[s]);
+            input.rotations.push_back(b.rotations[s]);
+            input.opacities.push_back(b.opacities[s]);
+            // Copy the splat's coefficients into the front of its max-degree block; the higher
+            // coefficients stay zero-initialised.
+            for (std::size_t i = 0; i < src_block; ++i) {
+                merged_sh[write * merged_block + i] = b.sh[s * src_block + i];
+            }
+            ++write;
+        }
+    }
+
+    auto sh = ShBuffer::create(max_degree, total, std::move(merged_sh));
+    if (!sh.has_value()) {
+        return scene_fail(ErrorCode::invalid_data,
+                          sh.diagnostics().empty() ? "MK2163_GLTF_SH_MERGE"
+                                                   : sh.diagnostics()[0].code.c_str(),
+                          sh.diagnostics().empty() ? "failed to merge spherical harmonics"
+                                                   : sh.diagnostics()[0].message);
+    }
+    input.sh = std::move(sh.value());
+
+    auto merged = SplatData::create(std::move(input));
+    if (!merged.has_value()) {
+        return scene_fail(ErrorCode::invalid_data,
+                          merged.diagnostics().empty() ? "MK2164_GLTF_MERGE"
+                                                       : merged.diagnostics()[0].code.c_str(),
+                          merged.diagnostics().empty() ? "the merged splats failed validation"
+                                                       : merged.diagnostics()[0].message);
+    }
+
+    // 5. Remaining losses.
+    if (batches.size() > 1) {
+        LossItem item;
+        item.code = loss_code::kSceneGraphFlattened;
+        item.severity = LossSeverity::info;
+        item.source_feature = std::to_string(batches.size()) + " splat primitives across the scene graph";
+        item.target_constraint = "the canonical model is a single flat splat cloud";
+        item.affected_splats = total;
+        item.remediation = "none needed; the geometry is preserved, only the node hierarchy is not";
+        losses.add(std::move(item));
+    }
+    if (mixed_cs || any_assumed) {
+        LossItem item;
+        item.code = loss_code::kColorSpaceAssumed;
+        item.severity = mixed_cs ? LossSeverity::severe : LossSeverity::warning;
+        item.source_feature = mixed_cs ? "primitives declaring different colour spaces"
+                                       : "a colorSpace string Melkor does not recognise";
+        item.target_constraint = "the canonical model carries one colour space; sRGB was assumed";
+        item.affected_splats = total;
+        item.remediation = mixed_cs
+                               ? "re-export the asset with a single colour space"
+                               : "approve LOSS_COLOR_SPACE_ASSUMED to accept the sRGB assumption";
+        losses.add(std::move(item));
+    }
+    if (total_dropped > 0) {
+        LossItem item;
+        item.code = loss_code::kInvalidSplatDropped;
+        item.severity = LossSeverity::warning;
+        item.source_feature = "splats under a singular (zero-scale) node transform";
+        item.target_constraint = "a collapsed Gaussian has no valid covariance";
+        item.affected_splats = total_dropped;
+        item.remediation = "remove the degenerate node scale before conversion";
+        losses.add(std::move(item));
+    }
+
+    SceneRead out{std::move(merged.value()), std::move(losses), first_cs, max_degree};
+    return Result<SceneRead>::success(std::move(out));
 }
 
 }  // namespace melkor::format::gltf

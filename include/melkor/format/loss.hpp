@@ -59,6 +59,11 @@ struct LossItem {
 namespace loss_code {
 inline constexpr const char* kShDegreeTruncated = "LOSS_SH_DEGREE_TRUNCATED";
 inline constexpr const char* kShCoefficientsDropped = "LOSS_SH_COEFFICIENTS_DROPPED";
+// A node rotation applies to the geometry, but its rotation of the (degree >= 1) spherical
+// harmonics -- a Wigner-D transform -- is not yet implemented, so the view-dependent colour is left
+// in the source frame. Severe: it changes rendered appearance for a rotated splat, so it must be
+// approved rather than silently accepted.
+inline constexpr const char* kShRotationNotApplied = "LOSS_SH_ROTATION_NOT_APPLIED";
 inline constexpr const char* kSceneGraphFlattened = "LOSS_SCENE_GRAPH_FLATTENED";
 inline constexpr const char* kNodeNameDropped = "LOSS_NODE_NAME_DROPPED";
 inline constexpr const char* kInstanceExpanded = "LOSS_INSTANCE_EXPANDED";
