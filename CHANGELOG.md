@@ -72,6 +72,12 @@ register is in `docs/audit/production-blockers.md`.
 
 ### Changed
 
+- `tools/check_claims.py` lints the production-landing surfaces for unqualified superlative and
+  speed claims ("SOTA", "10-100x", "fastest", "lossless", "production-grade", "universal"),
+  permitting a phrase only when it is attributed to its upstream source on the same line or
+  backed by a benchmark link. Existing violations were removed or attributed (the GLOMAP speed
+  figures are now marked as the authors' reported numbers, not Melkor-reproduced facts). Runs in
+  CI (P2-04).
 - **The build graph is acyclic (P0-05).** `melkor_core` and each backend linked to one another
   `PUBLIC`, because `ComputeProvider::create()` was declared in platform-neutral core but
   *defined* inside each backend. The resulting mutually dependent static archives linked only

@@ -215,6 +215,8 @@ jobs:
           python3 tools/check_version_sync.py --check
       - name: Verify source-bundle allowlist
         run: python3 tools/build_source_bundle.py --check
+      - name: Lint public prose for unqualified claims
+        run: python3 tools/check_claims.py
       - name: Test DA3 synthetic Gaussian conversion
         run: |
           python -c "import numpy; print(f'NumPy {numpy.__version__}')"

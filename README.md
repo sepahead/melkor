@@ -91,7 +91,7 @@ distributed data-parallel training with gsplat CUDA, gsplat-mps on Apple
 Silicon, and LichtFeld-Studio on Linux/CUDA. The feedforward catalog is dated
 and license-aware: some systems are evaluation adapters rather than ordinary
 image-folder reconstruction tools, and some checkpoints have non-commercial
-or unspecified terms. See [Feedforward SOTA](docs/FEEDFORWARD_SOTA.md).
+or unspecified terms. See [the feedforward integration catalog](docs/FEEDFORWARD_SOTA.md).
 
 Spark exposes `.RAD`/LOD primitives that Melkor can build on, but `.RAD` local
 opening and LOD authoring are not current Melkor features. Likewise,
@@ -382,7 +382,7 @@ path; the full fetch is reserved for render-test fixtures.
 | [gsplat CUDA](docs/GSPLAT_CUDA.md) | CUDA and true distributed data-parallel training |
 | [LichtFeld-Studio](docs/LICHTFELD_WRAPPER.md) | Linux/CUDA training integration |
 | [DA3 feedforward](docs/DA3_FEEDFORWARD.md) | Depth Anything 3 reconstruction bridge |
-| [Feedforward SOTA](docs/FEEDFORWARD_SOTA.md) | Dated, license-aware integration catalog |
+| [Feedforward catalog](docs/FEEDFORWARD_SOTA.md) | Dated, license-aware integration catalog |
 | [Streaming and 4D](docs/STREAMING.md) | Current viewer behavior, upstream scaffolding, and roadmap |
 | [Viewer guide](viewer/README.md) | Web viewer, Tauri shell, provenance, and render tests |
 | [Release and trust](docs/RELEASE.md) | Reproducible source checks and production release gates |

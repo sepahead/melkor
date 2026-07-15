@@ -50,7 +50,7 @@ Melkor is a unified toolkit for 3D Gaussian Splatting that provides:
 └─────────────────────────────────────────────────────────────────────────────┘
 ```
 
-#### COLMAP-Free Pipeline (DA3 Feedforward - Fastest)
+#### COLMAP-Free Pipeline (DA3 Feedforward)
 
 ```
 ┌─────────────────────────────────────────────────────────────────────────────┐
@@ -128,18 +128,18 @@ cmake --build build -j
 |------|----------|--------------|-------------|
 | **Melkor CLI** | All | `setup_deps.sh` + CMake build | Format conversion, scene completion |
 | **COLMAP** | All | `setup_all.sh` | Structure-from-motion |
-| **OpenSplat** | All | `setup_all.sh` / `setup_opensplat.sh` | Cross-platform, production-grade |
+| **OpenSplat** | All | `setup_all.sh` / `setup_opensplat.sh` | Cross-platform CPU/CUDA/Metal trainer |
 | **gsplat-mps** | macOS | `setup_all.sh` / `setup_gsplat_mps.sh` | Research, flexible |
-| **LichtFeld-Studio** | Linux CUDA | `setup_all.sh` / `setup_lichtfeld.sh` | Fastest, pose optimization |
+| **LichtFeld-Studio** | Linux CUDA | `setup_all.sh` / `setup_lichtfeld.sh` | Single-GPU trainer with pose optimization |
 | **gsplat-cuda** (optional) | Linux CUDA | `setup_gsplat_cuda.sh` | Multi-GPU DDP training |
-| **GLOMAP** (optional) | All | `setup_glomap.sh` | 10-100× faster SfM mapping |
+| **GLOMAP** (optional) | All | `setup_glomap.sh` | Global SfM mapping; the authors report substantial speedups over incremental SfM |
 | **DA3** (optional) | Linux CUDA | `setup_da3.sh` | COLMAP-free feedforward |
 
 ---
 
 ## Complete Pipeline: Photos → 3D
 
-### Option 1: COLMAP-Free with DA3 (Fastest - Seconds)
+### Option 1: COLMAP-Free with DA3 (feedforward, runs in seconds)
 
 No COLMAP, no camera poses, just images → 3D Gaussians
 (full reference: [DA3_FEEDFORWARD.md](DA3_FEEDFORWARD.md)):
@@ -243,7 +243,7 @@ ls ~/output/my_scene/sparse/0/
 # OpenSplat (cross-platform, recommended)
 ./opensplat ~/output/my_scene -n 30000 -o ~/output/my_scene/splat.ply
 
-# LichtFeld-Studio (Linux CUDA, fastest)
+# LichtFeld-Studio (Linux CUDA)
 ./lichtfeld -d ~/output/my_scene -o ~/output/my_scene/
 
 # gsplat-mps (macOS, research)
@@ -286,7 +286,7 @@ python examples/simple_trainer.py \
 
 | Format | Extension | Size | Direction | Best For |
 |--------|-----------|------|-----------|----------|
-| **PLY** | `.ply` | Large | Input/Output | Editing, archival, universal |
+| **PLY** | `.ply` | Large | Input/Output | Editing, archival, broad tool support |
 | **SPZ** | `.spz` | Small (~10%) | Input/Output | Web, mobile, streaming |
 | **GLB** | `.glb` | Varies | Input only | Converting 3D meshes to splats |
 
@@ -308,7 +308,7 @@ python examples/simple_trainer.py \
 ### Format Details
 
 #### PLY (Polygon File Format)
-- **Pros**: Universal, editable, lossless
+- **Pros**: Broad tool support, editable, uncompressed
 - **Cons**: Large files (100MB - 1GB+)
 - **Use when**: Editing in SuperSplat, archival, further processing
 
@@ -643,7 +643,7 @@ Hole-filling algorithm, parameters, and limits: [SCENE_COMPLETION.md](SCENE_COMP
 # LichtFeld with pose optimization
 ./scripts/lichtfeld_wrapper.sh <project> [options]
 
-# GLOMAP global SfM (10-100× faster mapping)
+# GLOMAP global SfM (the authors report substantial speedups over incremental SfM)
 ./scripts/glomap_wrapper.sh <images> <output_dir> [options]
 ```
 

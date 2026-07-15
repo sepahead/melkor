@@ -9,7 +9,7 @@ development software.
 
 ## v2.0.0
 
-The first release that can honestly be called production-grade. Its full blocker register is
+The first release that meets the production-readiness bar this program defines. Its full blocker register is
 [`docs/audit/production-blockers.md`](docs/audit/production-blockers.md); its release gate is the
 master checklist in the production-hardening blueprint.
 
