@@ -6,7 +6,6 @@
 //
 // Self-contained (no external test framework).
 
-#include "melkor/gaussian_data.hpp"
 #include "melkor/limits.hpp"
 #include "melkor/spz_encoder.hpp"
 
@@ -34,28 +33,26 @@ void check(bool condition, const char* what, int line) {
 
 int main() {
 #ifdef MELKOR_HAS_SPZ
-    // A small valid cloud.
-    GaussianCloud cloud;
+    SplatBufferInput input;
     for (int i = 0; i < 8; ++i) {
-        GaussianSplat s{};
-        s.x = static_cast<float>(i);
-        s.f_dc_0 = s.f_dc_1 = s.f_dc_2 = 0.0f;
-        s.opacity = 0.5f;
-        s.scale_0 = s.scale_1 = s.scale_2 = -3.0f;
-        s.rot_0 = 1.0f;
-        cloud.addSplat(s);
+        input.positions.push_back({static_cast<float>(i), 0.0f, 0.0f});
+        input.scales.push_back({0.05f, 0.05f, 0.05f});
+        input.rotations.push_back({});
+        input.opacities.push_back(0.5f);
     }
+    input.sh = ShBuffer::black(8).value();
+    auto data = SplatData::create(std::move(input)).value();
 
     SpzEncoder encoder;
     std::vector<std::uint8_t> buffer;
-    auto encoded = encoder.encodeToBuffer(buffer, cloud);
+    auto encoded = encoder.encodeToBuffer(buffer, data);
     CHECK(encoded.success);
     CHECK(!buffer.empty());
 
     SpzDecoder decoder;
     // Default limits accept it.
     auto ok = decoder.decodeFromBuffer(buffer.data(), buffer.size());
-    CHECK(ok.success);
+    CHECK(ok.success && ok.data.has_value() && ok.data->size() == 8);
 
     // An input-size limit below the compressed buffer refuses it before the decode.
     Limits tiny = Limits::for_profile(LimitsProfile::desktop);

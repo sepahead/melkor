@@ -21,11 +21,13 @@ void exercise(const uint8_t* data, size_t size) {
     if (!result.success) {
         return;
     }
-    // Touch the produced cloud so a sanitizer build observes any bad memory the reader set up.
-    const auto& splats = result.cloud.splats();
+    if (!result.data.has_value() || !result.data->validate().has_value()) {
+        __builtin_trap();
+    }
+    // Touch canonical positions so a sanitizer build observes any bad memory the reader set up.
     volatile float sink = 0.0f;
-    for (const auto& s : splats) {
-        sink += s.x + s.y + s.z;
+    for (const auto& position : result.data->positions()) {
+        sink += position.x + position.y + position.z;
     }
     (void)sink;
 }
@@ -45,7 +47,8 @@ extern "C" int LLVMFuzzerTestOneInput(const uint8_t* data, size_t size) {
 
 int main(int argc, char** argv) {
     int cases = 0;
-    if (!melkor::fuzzing::replay_requested_inputs(argc, argv, exercise, cases)) return 1;
+    if (!melkor::fuzzing::replay_requested_inputs(argc, argv, exercise, cases))
+        return 1;
 
     // Built-in adversarial GLB shapes: empty, wrong magic, valid magic with a lying chunk length.
     const std::vector<std::vector<uint8_t>> builtins = {

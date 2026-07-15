@@ -31,21 +31,27 @@ void exercise(const uint8_t* data, size_t size) {
     if (!result.success) {
         return;  // A clean rejection is a correct outcome for malformed input.
     }
+    if (!result.data.has_value()) {
+        __builtin_trap();  // Success without a canonical value violates the reader contract.
+    }
 
-    // On success the cloud must be internally consistent. These are cheap checks whose failure
-    // means the parser produced a structurally invalid scene from the input.
-    const auto& cloud = result.cloud;
-    const std::size_t n = cloud.size();
+    // On success the canonical data must be internally consistent. These are cheap checks whose
+    // failure means the parser produced a structurally invalid scene from the input.
+    const auto& data_result = *result.data;
+    const std::size_t n = data_result.size();
+    if (!data_result.validate().has_value()) {
+        __builtin_trap();
+    }
 
-    // Touch every splat so ASan sees any out-of-bounds the parser may have set up, and so a
-    // sanitizer build catches a use of uninitialised or non-finite data downstream.
-    const auto& splats = cloud.splats();
-    if (splats.size() != n) {
-        __builtin_trap();  // size() and splats() disagreeing is a broken invariant.
+    if (data_result.positions().size() != n || data_result.scales().size() != n ||
+        data_result.rotations().size() != n || data_result.opacities().size() != n ||
+        data_result.sh().splat_count() != n) {
+        __builtin_trap();
     }
     volatile float sink = 0.0f;
-    for (const auto& s : splats) {
-        sink += s.x + s.y + s.z + s.opacity;
+    for (std::size_t i = 0; i < n; ++i) {
+        const auto& position = data_result.positions()[i];
+        sink += position.x + position.y + position.z + data_result.opacities()[i];
     }
     (void)sink;
 }
@@ -66,18 +72,23 @@ extern "C" int LLVMFuzzerTestOneInput(const uint8_t* data, size_t size) {
 
 int main(int argc, char** argv) {
     int cases = 0;
-    if (!melkor::fuzzing::replay_requested_inputs(argc, argv, exercise, cases)) return 1;
+    if (!melkor::fuzzing::replay_requested_inputs(argc, argv, exercise, cases))
+        return 1;
 
     // Also run a handful of built-in adversarial inputs, so the replay is meaningful even with an
     // empty corpus directory. These are shapes that have historically broken PLY parsers.
-    const char* builtins[] = {
-        "",                                             // empty
-        "ply\n",                                        // truncated header
-        "ply\nformat binary_little_endian 1.0\n",       // no end_header
-        "ply\nformat ascii 1.0\nelement vertex 999999999999\nproperty float x\nend_header\n",  // huge count
-        "ply\nformat ascii 1.0\nelement vertex 1\nproperty float x\nproperty float y\nproperty float z\nend_header\n1 2\n",  // short record
-        "not a ply at all",                             // wrong magic
-    };
+    const char*
+        builtins[] =
+            {
+                "",                                        // empty
+                "ply\n",                                   // truncated header
+                "ply\nformat binary_little_endian 1.0\n",  // no end_header
+                "ply\nformat ascii 1.0\nelement vertex 999999999999\nproperty float "
+                "x\nend_header\n",  // huge count
+                "ply\nformat ascii 1.0\nelement vertex 1\nproperty float x\nproperty float "
+                "y\nproperty float z\nend_header\n1 2\n",  // short record
+                "not a ply at all",                        // wrong magic
+            };
     for (const char* b : builtins) {
         exercise(reinterpret_cast<const uint8_t*>(b), std::char_traits<char>::length(b));
         ++cases;

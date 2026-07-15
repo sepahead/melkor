@@ -3,6 +3,9 @@
 #include "melkor/budget.hpp"
 #include "melkor/io/atomic_writer.hpp"
 #include "melkor/limits.hpp"
+#include "melkor/math/activation.hpp"
+#include "melkor/math/color.hpp"
+#include "melkor/math/quaternion.hpp"
 #include <algorithm>
 #include <cerrno>
 #include <charconv>
@@ -34,13 +37,45 @@ void writeFloatLittleEndian(std::ostream& stream, float value) {
     stream.write(bytes, sizeof(bytes));
 }
 
-} // namespace
+// The graphdeco PLY profile stores opacity in the unbounded training domain. Canonical endpoint
+// probabilities have infinite logits, so a writer must either reject them or make the adjustment
+// explicit. We preserve the useful 0/1 scene values with the same finite epsilon historically used
+// by the format adapters, while surfacing one structured warning for the write.
+constexpr float kPlyOpacityEpsilon = 1.0e-6f;
+
+Result<float> encodePlyOpacity(float opacity, bool& clamped) {
+    float encodable = opacity;
+    if (encodable <= 0.0f) {
+        encodable = kPlyOpacityEpsilon;
+        clamped = true;
+    } else if (encodable >= 1.0f) {
+        encodable = 1.0f - kPlyOpacityEpsilon;
+        clamped = true;
+    }
+    return math::logit_from_probability(encodable);
+}
+
+float plyRestCoefficient(const SplatData& data, std::size_t splat, int property_index) {
+    const std::size_t coefficients = data.sh().coefficients();
+    const std::size_t higher_per_channel = coefficients - 1;
+    const std::size_t channel = static_cast<std::size_t>(property_index) / higher_per_channel;
+    const std::size_t higher_index = static_cast<std::size_t>(property_index) % higher_per_channel;
+    const std::size_t coefficient = higher_index + 1;
+    return data.sh().raw()[splat * coefficients * 3 + coefficient * 3 + channel];
+}
+
+std::string firstDiagnosticMessage(const std::vector<Diagnostic>& diagnostics,
+                                   const char* fallback) {
+    return diagnostics.empty() ? fallback
+                               : diagnostics.front().code + ": " + diagnostics.front().message;
+}
+
+}  // namespace
 
 PlyWriter::PlyWriter() = default;
 PlyWriter::~PlyWriter() = default;
 
-PlyWriteResult PlyWriter::writeToFile(const std::string& filepath,
-                                      const GaussianCloud& cloud,
+PlyWriteResult PlyWriter::writeToFile(const std::string& filepath, const SplatData& data,
                                       const PlyWriteConfig& config) {
     // Route through the atomic writer. Opening the destination directly with std::ofstream
     // truncates it on open, so a failure partway through a write left the user with a
@@ -65,13 +100,13 @@ PlyWriteResult PlyWriter::writeToFile(const std::string& filepath,
         const std::string message = writer.diagnostics().empty()
                                         ? "Failed to open file for writing: " + filepath
                                         : writer.diagnostics()[0].message;
-        return {false, message, 0};
+        return {false, message, 0, {}};
     }
 
     PlyWriteResult result;
     {
         melkor::io::AtomicOutputStream stream(*writer.value());
-        result = writeToStream(stream, cloud, config);
+        result = writeToStream(stream, data, config);
 
         stream.flush();
 
@@ -81,7 +116,9 @@ PlyWriteResult PlyWriter::writeToFile(const std::string& filepath,
         if (stream.failed()) {
             const auto& diagnostics = stream.diagnostics();
             return {false,
-                    diagnostics.empty() ? "Failed writing PLY data" : diagnostics[0].message, 0};
+                    diagnostics.empty() ? "Failed writing PLY data" : diagnostics[0].message,
+                    0,
+                    {}};
         }
     }
 
@@ -95,32 +132,75 @@ PlyWriteResult PlyWriter::writeToFile(const std::string& filepath,
         return {false,
                 committed.diagnostics().empty() ? "Failed to commit PLY file"
                                                 : committed.diagnostics()[0].message,
-                0};
+                0,
+                {}};
     }
 
     result.bytes_written = writer.value()->bytes_written();
     return result;
 }
 
-PlyWriteResult PlyWriter::writeToStream(std::ostream& stream,
-                                        const GaussianCloud& cloud,
+PlyWriteResult PlyWriter::writeToStream(std::ostream& stream, const SplatData& data,
                                         const PlyWriteConfig& config) {
     PlyWriteResult result;
-    result.success = true;
-    
-    // Calculate SH coefficients count based on degree
+    if (auto valid = data.validate(); !valid.has_value()) {
+        result.error_message =
+            firstDiagnosticMessage(valid.diagnostics(), "Invalid canonical splat data");
+        return result;
+    }
+
+    const std::uint32_t degree = data.sh().degree();
+    if (config.include_sh_rest && degree > 3) {
+        result.error_message = "PLY supports spherical-harmonic degree 0 through 3";
+        return result;
+    }
+
+    // Calculate the graphdeco channel-major higher-SH property count. Canonical SplatData is
+    // coefficient-major within each splat, so every value is transposed explicitly below.
     int sh_rest_count = 0;
-    if (config.include_sh_rest && cloud.shDegree() > 0) {
-        // Degree 1: 9 coefficients (3 per band), Degree 2: 24, Degree 3: 45
-        // Minus 3 for DC which is stored separately
-        switch (cloud.shDegree()) {
-            case 1: sh_rest_count = 9; break;
-            case 2: sh_rest_count = 24; break;
-            case 3: sh_rest_count = 45; break;
-            default: sh_rest_count = 0;
+    if (config.include_sh_rest && degree > 0) {
+        sh_rest_count = static_cast<int>((data.sh().coefficients() - 1) * 3);
+    } else if (!config.include_sh_rest && degree > 0) {
+        Diagnostic diagnostic(
+            "MK1211_PLY_SH_OMITTED", Severity::warning,
+            "Higher spherical-harmonic coefficients were omitted by configuration");
+        diagnostic.with_context("source_degree", static_cast<std::uint64_t>(degree));
+        result.diagnostics.push_back(std::move(diagnostic));
+    }
+
+    // Preflight every domain conversion before emitting the header. This keeps a conversion
+    // failure from leaving a caller-provided stream with a plausible-looking partial PLY.
+    std::size_t endpoint_count = 0;
+    for (std::size_t i = 0; i < data.size(); ++i) {
+        bool clamped = false;
+        auto encoded_opacity = encodePlyOpacity(data.opacities()[i], clamped);
+        if (!encoded_opacity.has_value()) {
+            result.error_message = firstDiagnosticMessage(encoded_opacity.diagnostics(),
+                                                          "Could not encode PLY opacity");
+            return result;
+        }
+        if (clamped)
+            ++endpoint_count;
+        const Vec3f scale = data.scales()[i];
+        for (float component : {scale.x, scale.y, scale.z}) {
+            auto encoded_scale = math::log_scale_from_linear(component);
+            if (!encoded_scale.has_value()) {
+                result.error_message = firstDiagnosticMessage(encoded_scale.diagnostics(),
+                                                              "Could not encode PLY scale");
+                return result;
+            }
         }
     }
-    
+    if (endpoint_count != 0) {
+        Diagnostic diagnostic(
+            "MK1210_PLY_OPACITY_ENDPOINT_CLAMPED", Severity::warning,
+            "Canonical opacity endpoints were clamped to finite values for the PLY logit domain");
+        diagnostic.with_context("splat_count", static_cast<std::uint64_t>(endpoint_count))
+            .with_context("epsilon", static_cast<double>(kPlyOpacityEpsilon));
+        result.diagnostics.push_back(std::move(diagnostic));
+    }
+    result.success = true;
+
     // Write header
     std::ostringstream header;
     header << "ply\n";
@@ -129,141 +209,148 @@ PlyWriteResult PlyWriter::writeToStream(std::ostream& stream,
     } else {
         header << "format ascii 1.0\n";
     }
-    
+
     if (!config.comment.empty()) {
         header << "comment " << config.comment << "\n";
     }
-    
-    header << "element vertex " << cloud.size() << "\n";
-    
+
+    header << "element vertex " << data.size() << "\n";
+
     // Position
     header << "property float x\n";
     header << "property float y\n";
     header << "property float z\n";
-    
+
     // Normals (dummy, required by some viewers)
     header << "property float nx\n";
     header << "property float ny\n";
     header << "property float nz\n";
-    
+
     // DC spherical harmonics (color)
     header << "property float f_dc_0\n";
     header << "property float f_dc_1\n";
     header << "property float f_dc_2\n";
-    
+
     // Rest of spherical harmonics if enabled
     for (int i = 0; i < sh_rest_count; ++i) {
         header << "property float f_rest_" << i << "\n";
     }
-    
+
     // Opacity
     header << "property float opacity\n";
-    
+
     // Scale
     header << "property float scale_0\n";
     header << "property float scale_1\n";
     header << "property float scale_2\n";
-    
+
     // Rotation (quaternion)
     header << "property float rot_0\n";
     header << "property float rot_1\n";
     header << "property float rot_2\n";
     header << "property float rot_3\n";
-    
+
     header << "end_header\n";
-    
+
     std::string header_str = header.str();
     stream.write(header_str.c_str(), header_str.size());
     result.bytes_written = header_str.size();
-    
-    // Write data
-    const auto& splats = cloud.splats();
-    
+
+    // Write data. Domain conversion happens exactly here, at the training-profile boundary.
     if (config.format == PlyFormat::Binary) {
-        // Binary format
-        for (const auto& splat : splats) {
+        for (std::size_t splat = 0; splat < data.size(); ++splat) {
+            const Vec3f position = data.positions()[splat];
+            const Vec3f scale = data.scales()[splat];
+            const Quatf rotation = data.rotations()[splat];
             // Position
-            writeFloatLittleEndian(stream, splat.x);
-            writeFloatLittleEndian(stream, splat.y);
-            writeFloatLittleEndian(stream, splat.z);
-            
+            writeFloatLittleEndian(stream, position.x);
+            writeFloatLittleEndian(stream, position.y);
+            writeFloatLittleEndian(stream, position.z);
+
             // Normals (dummy values)
             float nx = 0.0f, ny = 0.0f, nz = 1.0f;
             writeFloatLittleEndian(stream, nx);
             writeFloatLittleEndian(stream, ny);
             writeFloatLittleEndian(stream, nz);
-            
+
             // DC color
-            writeFloatLittleEndian(stream, splat.f_dc_0);
-            writeFloatLittleEndian(stream, splat.f_dc_1);
-            writeFloatLittleEndian(stream, splat.f_dc_2);
-            
+            writeFloatLittleEndian(stream, data.sh().dc(splat, 0));
+            writeFloatLittleEndian(stream, data.sh().dc(splat, 1));
+            writeFloatLittleEndian(stream, data.sh().dc(splat, 2));
+
             // SH rest coefficients
             for (int i = 0; i < sh_rest_count; ++i) {
-                float val = (i < static_cast<int>(splat.sh_rest.size())) ? splat.sh_rest[i] : 0.0f;
-                writeFloatLittleEndian(stream, val);
+                writeFloatLittleEndian(stream, plyRestCoefficient(data, splat, i));
             }
-            
+
             // Opacity
-            writeFloatLittleEndian(stream, splat.opacity);
-            
+            bool ignored_clamp = false;
+            writeFloatLittleEndian(
+                stream, encodePlyOpacity(data.opacities()[splat], ignored_clamp).value());
+
             // Scale
-            writeFloatLittleEndian(stream, splat.scale_0);
-            writeFloatLittleEndian(stream, splat.scale_1);
-            writeFloatLittleEndian(stream, splat.scale_2);
-            
-            // Rotation
-            writeFloatLittleEndian(stream, splat.rot_0);
-            writeFloatLittleEndian(stream, splat.rot_1);
-            writeFloatLittleEndian(stream, splat.rot_2);
-            writeFloatLittleEndian(stream, splat.rot_3);
-            
+            writeFloatLittleEndian(stream, math::log_scale_from_linear(scale.x).value());
+            writeFloatLittleEndian(stream, math::log_scale_from_linear(scale.y).value());
+            writeFloatLittleEndian(stream, math::log_scale_from_linear(scale.z).value());
+
+            // PLY uses wxyz; canonical SplatData uses xyzw.
+            writeFloatLittleEndian(stream, rotation.w);
+            writeFloatLittleEndian(stream, rotation.x);
+            writeFloatLittleEndian(stream, rotation.y);
+            writeFloatLittleEndian(stream, rotation.z);
+
             result.bytes_written += (6 + 3 + sh_rest_count + 1 + 3 + 4) * sizeof(float);
         }
     } else {
         // ASCII format — track bytes written via stream position
         stream << std::setprecision(8);
         auto pos_before = stream.tellp();
-        for (const auto& splat : splats) {
-            stream << splat.x << " " << splat.y << " " << splat.z << " ";
+        for (std::size_t splat = 0; splat < data.size(); ++splat) {
+            const Vec3f position = data.positions()[splat];
+            const Vec3f scale = data.scales()[splat];
+            const Quatf rotation = data.rotations()[splat];
+            stream << position.x << " " << position.y << " " << position.z << " ";
             stream << "0 0 1 ";  // dummy normals
-            stream << splat.f_dc_0 << " " << splat.f_dc_1 << " " << splat.f_dc_2 << " ";
-            
+            stream << data.sh().dc(splat, 0) << " " << data.sh().dc(splat, 1) << " "
+                   << data.sh().dc(splat, 2) << " ";
+
             for (int i = 0; i < sh_rest_count; ++i) {
-                float val = (i < static_cast<int>(splat.sh_rest.size())) ? splat.sh_rest[i] : 0.0f;
-                stream << val << " ";
+                stream << plyRestCoefficient(data, splat, i) << " ";
             }
-            
-            stream << splat.opacity << " ";
-            stream << splat.scale_0 << " " << splat.scale_1 << " " << splat.scale_2 << " ";
-            stream << splat.rot_0 << " " << splat.rot_1 << " " << splat.rot_2 << " " << splat.rot_3 << "\n";
+
+            bool ignored_clamp = false;
+            stream << encodePlyOpacity(data.opacities()[splat], ignored_clamp).value() << " ";
+            stream << math::log_scale_from_linear(scale.x).value() << " "
+                   << math::log_scale_from_linear(scale.y).value() << " "
+                   << math::log_scale_from_linear(scale.z).value() << " ";
+            stream << rotation.w << " " << rotation.x << " " << rotation.y << " " << rotation.z
+                   << "\n";
         }
         auto pos_after = stream.tellp();
         if (pos_after != decltype(pos_after)(-1) && pos_before != decltype(pos_before)(-1)) {
             result.bytes_written += static_cast<size_t>(pos_after - pos_before);
         }
     }
-    
+
     if (!stream.good()) {
         result.success = false;
         result.error_message = "Stream error during write";
     }
-    
+
     return result;
 }
 
-PlyWriteResult PlyWriter::writeToBuffer(std::vector<uint8_t>& buffer,
-                                        const GaussianCloud& cloud,
+PlyWriteResult PlyWriter::writeToBuffer(std::vector<uint8_t>& buffer, const SplatData& data,
                                         const PlyWriteConfig& config) {
     std::ostringstream stream(std::ios::binary);
-    auto result = writeToStream(stream, cloud, config);
-    
+    auto result = writeToStream(stream, data, config);
+
     if (result.success) {
         std::string str = stream.str();
         buffer.assign(str.begin(), str.end());
         result.bytes_written = buffer.size();
     }
-    
+
     return result;
 }
 
@@ -271,20 +358,22 @@ PlyWriteResult PlyWriter::writeToBuffer(std::vector<uint8_t>& buffer,
 PlyReader::PlyReader() = default;
 PlyReader::~PlyReader() = default;
 
-PlyReader::ReadResult PlyReader::readFromFile(const std::string& filepath, const Limits& limits) try {
+PlyReader::ReadResult PlyReader::readFromFile(const std::string& filepath,
+                                              const Limits& limits) try {
     std::ifstream file(filepath, std::ios::binary);
     if (!file.is_open()) {
         return {false, "Failed to open file: " + filepath, {}, {}};
     }
-    
+
     // Reject malformed/header-bomb inputs before allocating for the entire
     // file. Valid payloads still decode in memory because the public result is
-    // a materialized GaussianCloud, but an unrelated sparse multi-GB file no
+    // materialized canonical SplatData, but an unrelated sparse multi-GB file no
     // longer consumes its full size merely to discover a bad magic line.
     file.seekg(0, std::ios::end);
     const std::streamoff end = file.tellg();
     if (end <= 0 || static_cast<uintmax_t>(end) > std::numeric_limits<size_t>::max() ||
-        static_cast<uintmax_t>(end) > static_cast<uintmax_t>(std::numeric_limits<std::streamsize>::max())) {
+        static_cast<uintmax_t>(end) >
+            static_cast<uintmax_t>(std::numeric_limits<std::streamsize>::max())) {
         return {false, "Invalid or oversized PLY file", {}, {}};
     }
     const size_t size = static_cast<size_t>(end);
@@ -292,26 +381,30 @@ PlyReader::ReadResult PlyReader::readFromFile(const std::string& filepath, const
 
     // Screen the header against the same limit readFromBuffer enforces, not a hardcoded 1 MiB, so
     // a file with a valid within-policy header (e.g. up to the desktop profile's 4 MiB) is not
-    // false-rejected here.
+    // false-rejected here. Zero means unlimited throughout the Budget/Limits contract, so in that
+    // explicit case the whole file is eligible to contain the header.
     const size_t header_cap =
         limits.max_ply_header_bytes != 0
             ? static_cast<size_t>(std::min<std::uint64_t>(limits.max_ply_header_bytes,
                                                           std::numeric_limits<size_t>::max()))
-            : (1024u * 1024u);
-    const size_t prefix_size = std::min(size, header_cap);
-    std::vector<uint8_t> prefix(prefix_size);
-    if (!file.read(reinterpret_cast<char*>(prefix.data()),
-                   static_cast<std::streamsize>(prefix_size))) {
-        return {false, "Failed to read PLY header", {}, {}};
-    }
-    const std::string_view prefix_view(reinterpret_cast<const char*>(prefix.data()), prefix.size());
-    if (!(prefix_view.rfind("ply\n", 0) == 0 || prefix_view.rfind("ply\r\n", 0) == 0)) {
-        return {false, "Invalid PLY: missing ply magic line", {}, {}};
-    }
-    const bool has_header_end = prefix_view.find("\nend_header\n") != std::string_view::npos ||
-                                prefix_view.find("\nend_header\r\n") != std::string_view::npos;
-    if (!has_header_end && size > prefix_size) {
-        return {false, "Invalid PLY: header exceeds the configured size limit", {}, {}};
+            : size;
+    {
+        const size_t prefix_size = std::min(size, header_cap);
+        std::vector<uint8_t> prefix(prefix_size);
+        if (!file.read(reinterpret_cast<char*>(prefix.data()),
+                       static_cast<std::streamsize>(prefix_size))) {
+            return {false, "Failed to read PLY header", {}, {}};
+        }
+        const std::string_view prefix_view(reinterpret_cast<const char*>(prefix.data()),
+                                           prefix.size());
+        if (!(prefix_view.rfind("ply\n", 0) == 0 || prefix_view.rfind("ply\r\n", 0) == 0)) {
+            return {false, "Invalid PLY: missing ply magic line", {}, {}};
+        }
+        const bool has_header_end = prefix_view.find("\nend_header\n") != std::string_view::npos ||
+                                    prefix_view.find("\nend_header\r\n") != std::string_view::npos;
+        if (!has_header_end && size > prefix_size) {
+            return {false, "Invalid PLY: header exceeds the configured size limit", {}, {}};
+        }
     }
 
     // Charge the whole-file allocation against the budget before making it, so a well-formed but
@@ -319,9 +412,11 @@ PlyReader::ReadResult PlyReader::readFromFile(const std::string& filepath, const
     Budget budget(limits);
     if (auto charged = budget.consume(BudgetKind::input_bytes, size, "ply.file");
         !charged.has_value()) {
-        return {false, charged.diagnostics().empty() ? "PLY file exceeds the input-size limit"
-                                                      : charged.diagnostics()[0].message,
-                {}, {}};
+        return {false,
+                charged.diagnostics().empty() ? "PLY file exceeds the input-size limit"
+                                              : charged.diagnostics()[0].message,
+                {},
+                {}};
     }
 
     std::vector<uint8_t> buffer;
@@ -344,16 +439,18 @@ PlyReader::ReadResult PlyReader::readFromFile(const std::string& filepath, const
 }
 
 PlyReader::ReadResult PlyReader::readFromBuffer(const uint8_t* data, size_t size,
-                                               const Limits& limits) try {
+                                                const Limits& limits) try {
     if (data == nullptr || size == 0) {
         return {false, "Invalid PLY: input buffer is null or empty", {}, {}};
     }
     Budget budget(limits);
     if (auto charged = budget.consume(BudgetKind::input_bytes, size, "ply.input");
         !charged.has_value()) {
-        return {false, charged.diagnostics().empty() ? "PLY input exceeds the input-size limit"
-                                                      : charged.diagnostics()[0].message,
-                {}, {}};
+        return {false,
+                charged.diagnostics().empty() ? "PLY input exceeds the input-size limit"
+                                              : charged.diagnostics()[0].message,
+                {},
+                {}};
     }
     ReadResult result;
     result.success = true;
@@ -364,16 +461,27 @@ PlyReader::ReadResult PlyReader::readFromBuffer(const uint8_t* data, size_t size
     // must resolve to the same size and decoding, otherwise stride computation
     // and binary decoding silently corrupt valid files.
     enum class PropKind { F32, F64, I8, U8, I16, U16, I32, U32, Unknown };
-    struct PropType { PropKind kind; size_t size; };
+    struct PropType {
+        PropKind kind;
+        size_t size;
+    };
     auto prop_type = [](const std::string& t) -> PropType {
-        if (t == "float"  || t == "float32") return {PropKind::F32, 4};
-        if (t == "double" || t == "float64") return {PropKind::F64, 8};
-        if (t == "uchar"  || t == "uint8")   return {PropKind::U8,  1};
-        if (t == "char"   || t == "int8")    return {PropKind::I8,  1};
-        if (t == "ushort" || t == "uint16")  return {PropKind::U16, 2};
-        if (t == "short"  || t == "int16")   return {PropKind::I16, 2};
-        if (t == "uint"   || t == "uint32")  return {PropKind::U32, 4};
-        if (t == "int"    || t == "int32")   return {PropKind::I32, 4};
+        if (t == "float" || t == "float32")
+            return {PropKind::F32, 4};
+        if (t == "double" || t == "float64")
+            return {PropKind::F64, 8};
+        if (t == "uchar" || t == "uint8")
+            return {PropKind::U8, 1};
+        if (t == "char" || t == "int8")
+            return {PropKind::I8, 1};
+        if (t == "ushort" || t == "uint16")
+            return {PropKind::U16, 2};
+        if (t == "short" || t == "int16")
+            return {PropKind::I16, 2};
+        if (t == "uint" || t == "uint32")
+            return {PropKind::U32, 4};
+        if (t == "int" || t == "int32")
+            return {PropKind::I32, 4};
         return {PropKind::Unknown, 4};  // unknown name: assume a 4-byte float
     };
 
@@ -416,10 +524,12 @@ PlyReader::ReadResult PlyReader::readFromBuffer(const uint8_t* data, size_t size
                 return {false, "Invalid PLY: header exceeds the configured size limit", {}, {}};
             }
             size_t nl = view.find('\n', line_start);
-            if (nl == std::string_view::npos) break;  // header lines must end in '\n'
+            if (nl == std::string_view::npos)
+                break;  // header lines must end in '\n'
             std::string line(view.substr(line_start, nl - line_start));
             // Strip trailing CR.
-            if (!line.empty() && line.back() == '\r') line.pop_back();
+            if (!line.empty() && line.back() == '\r')
+                line.pop_back();
             line_start = nl + 1;
             if (line_number++ == 0) {
                 if (line != "ply") {
@@ -483,9 +593,8 @@ PlyReader::ReadResult PlyReader::readFromBuffer(const uint8_t* data, size_t size
                     // Without decoding the preceding element schema, treating
                     // its first record as a vertex would silently corrupt both
                     // ASCII rows and binary strides.
-                    return {false,
-                            "Invalid PLY: non-vertex data precedes the vertex element",
-                            {}, {}};
+                    return {
+                        false, "Invalid PLY: non-vertex data precedes the vertex element", {}, {}};
                 }
             } else if (line.rfind("property ", 0) == 0 && in_vertex) {
                 std::istringstream property(line);
@@ -505,15 +614,16 @@ PlyReader::ReadResult PlyReader::readFromBuffer(const uint8_t* data, size_t size
                 }
                 const PropType type = prop_type(type_name);
                 if (type.kind == PropKind::Unknown) {
-                    return {false, "Invalid PLY: unsupported scalar property type " + type_name,
-                            {}, {}};
+                    return {false,
+                            "Invalid PLY: unsupported scalar property type " + type_name,
+                            {},
+                            {}};
                 }
-                if (std::any_of(vertex_props.begin(), vertex_props.end(),
-                                [&](const Property& existing) {
-                                    return existing.name == property_name;
-                                })) {
-                    return {false, "Invalid PLY: duplicate vertex property " + property_name,
-                            {}, {}};
+                if (std::any_of(
+                        vertex_props.begin(), vertex_props.end(),
+                        [&](const Property& existing) { return existing.name == property_name; })) {
+                    return {
+                        false, "Invalid PLY: duplicate vertex property " + property_name, {}, {}};
                 }
                 vertex_props.push_back({property_name, type, 0});
             }
@@ -531,18 +641,30 @@ PlyReader::ReadResult PlyReader::readFromBuffer(const uint8_t* data, size_t size
     }
 
     result.metadata.declared_vertices = vertex_count;
-    result.metadata.encoding = is_big_endian
-        ? Metadata::Encoding::BinaryBigEndian
-        : is_binary ? Metadata::Encoding::BinaryLittleEndian
-                    : Metadata::Encoding::Ascii;
+    result.metadata.encoding = is_big_endian ? Metadata::Encoding::BinaryBigEndian
+                               : is_binary   ? Metadata::Encoding::BinaryLittleEndian
+                                             : Metadata::Encoding::Ascii;
 
-    if (vertex_count == 0) {
-        // An empty cloud is a valid PLY (the writer emits one for empty input,
-        // and DA3 save_ply can produce one when all samples are filtered out).
-        // Return success with an empty cloud rather than treating it as an
-        // error, so round-trips and downstream consumers don't break on the
-        // degenerate-but-legal case.
-        result.success = true;
+    if (vertex_count == 0 && vertex_props.empty()) {
+        SplatBufferInput input;
+        auto sh = ShBuffer::black(0);
+        if (!sh.has_value()) {
+            return {false,
+                    firstDiagnosticMessage(sh.diagnostics(),
+                                           "Could not create empty canonical SH data"),
+                    {},
+                    {}};
+        }
+        input.sh = std::move(sh).value();
+        auto canonical = SplatData::create(std::move(input));
+        if (!canonical.has_value()) {
+            return {false,
+                    firstDiagnosticMessage(canonical.diagnostics(),
+                                           "Could not create empty canonical scene"),
+                    {},
+                    {}};
+        }
+        result.data.emplace(std::move(canonical).value());
         return result;
     }
     if (vertex_props.empty()) {
@@ -554,7 +676,8 @@ PlyReader::ReadResult PlyReader::readFromBuffer(const uint8_t* data, size_t size
     // are present, 3DGS SH-DC takes precedence.
     auto find_idx = [&](const std::string& name) -> int {
         for (size_t i = 0; i < vertex_props.size(); ++i) {
-            if (vertex_props[i].name == name) return static_cast<int>(i);
+            if (vertex_props[i].name == name)
+                return static_cast<int>(i);
         }
         return -1;
     };
@@ -563,7 +686,8 @@ PlyReader::ReadResult PlyReader::readFromBuffer(const uint8_t* data, size_t size
     int ir = find_idx("red"), ig = find_idx("green"), ib = find_idx("blue");
     int iopacity = find_idx("opacity");
     int is0 = find_idx("scale_0"), is1 = find_idx("scale_1"), is2 = find_idx("scale_2");
-    int ir0 = find_idx("rot_0"), ir1 = find_idx("rot_1"), ir2 = find_idx("rot_2"), ir3 = find_idx("rot_3");
+    int ir0 = find_idx("rot_0"), ir1 = find_idx("rot_1"), ir2 = find_idx("rot_2"),
+        ir3 = find_idx("rot_3");
 
     result.metadata.has_position = ix >= 0 && iy >= 0 && iz >= 0;
     result.metadata.has_sh_dc = ifdc0 >= 0 && ifdc1 >= 0 && ifdc2 >= 0;
@@ -578,6 +702,7 @@ PlyReader::ReadResult PlyReader::readFromBuffer(const uint8_t* data, size_t size
     // corrupts view-dependent color.
     std::vector<int> sh_rest_idx;
     std::vector<std::pair<size_t, int>> indexed_sh_rest;
+    std::uint32_t sh_degree = 0;
     for (size_t property_index = 0; property_index < vertex_props.size(); ++property_index) {
         const auto& p = vertex_props[property_index];
         if (p.name.rfind("f_rest_", 0) == 0) {
@@ -601,23 +726,26 @@ PlyReader::ReadResult PlyReader::readFromBuffer(const uint8_t* data, size_t size
         std::sort(indexed_sh_rest.begin(), indexed_sh_rest.end());
         const size_t coefficient_count = indexed_sh_rest.size();
         if (coefficient_count != 9 && coefficient_count != 24 && coefficient_count != 45) {
-            return {false, "Invalid PLY: f_rest count does not match SH degree 1, 2, or 3",
-                    {}, {}};
+            return {false, "Invalid PLY: f_rest count does not match SH degree 1, 2, or 3", {}, {}};
         }
         for (size_t coefficient = 0; coefficient < coefficient_count; ++coefficient) {
             if (indexed_sh_rest[coefficient].first != coefficient) {
-                return {false, "Invalid PLY: f_rest coefficients must be contiguous from zero",
-                        {}, {}};
+                return {
+                    false, "Invalid PLY: f_rest coefficients must be contiguous from zero", {}, {}};
             }
             sh_rest_idx.push_back(indexed_sh_rest[coefficient].second);
         }
         result.metadata.has_sh_rest = true;
-        result.cloud.setShDegree([&] {
+        sh_degree = static_cast<std::uint32_t>([&] {
             switch (static_cast<int>(coefficient_count)) {
-                case 9: return 1;
-                case 24: return 2;
-                case 45: return 3;
-                default: return 0;
+            case 9:
+                return 1;
+            case 24:
+                return 2;
+            case 45:
+                return 3;
+            default:
+                return 0;
             }
         }());
     }
@@ -653,28 +781,47 @@ PlyReader::ReadResult PlyReader::readFromBuffer(const uint8_t* data, size_t size
         }
     }
 
-    // Charge the reconstructed cloud against the budget before reserving it, so a well-formed
+    // Charge the reconstructed canonical arrays before reserving them, so a well-formed
     // header declaring an enormous vertex count is refused by policy. Per-splat memory includes the
-    // fixed GaussianSplat plus any higher-order SH the file carries. The count is already bounded to
-    // the data section above, so this product cannot overflow.
+    // position, scale, rotation, opacity, and the complete SH block. Both resource-accounting and
+    // host-address-space products are checked explicitly before allocation.
     if (auto charged = budget.consume(BudgetKind::splats, vertex_count, "ply.vertices");
         !charged.has_value()) {
-        return {false, charged.diagnostics().empty() ? "PLY vertex count exceeds the splat limit"
-                                                      : charged.diagnostics()[0].message,
-                {}, {}};
+        return {false,
+                charged.diagnostics().empty() ? "PLY vertex count exceeds the splat limit"
+                                              : charged.diagnostics()[0].message,
+                {},
+                {}};
     }
+    const std::uint64_t coefficients =
+        static_cast<std::uint64_t>(sh_degree + 1) * static_cast<std::uint64_t>(sh_degree + 1);
     const std::uint64_t per_splat_bytes =
-        sizeof(GaussianSplat) + static_cast<std::uint64_t>(sh_rest_idx.size()) * sizeof(float);
+        2 * sizeof(Vec3f) + sizeof(Quatf) + sizeof(float) + coefficients * 3 * sizeof(float);
+    if (static_cast<std::uint64_t>(vertex_count) >
+        std::numeric_limits<std::uint64_t>::max() / per_splat_bytes) {
+        return {false, "PLY canonical allocation size overflows resource accounting", {}, {}};
+    }
     if (auto charged = budget.consume(BudgetKind::memory_bytes,
                                       static_cast<std::uint64_t>(vertex_count) * per_splat_bytes,
-                                      "ply.cloud");
+                                      "ply.canonical_data");
         !charged.has_value()) {
-        return {false, charged.diagnostics().empty() ? "PLY cloud exceeds the memory limit"
-                                                      : charged.diagnostics()[0].message,
-                {}, {}};
+        return {false,
+                charged.diagnostics().empty() ? "PLY cloud exceeds the memory limit"
+                                              : charged.diagnostics()[0].message,
+                {},
+                {}};
     }
 
-    result.cloud.reserve(vertex_count);
+    SplatBufferInput canonical_input;
+    canonical_input.positions.resize(vertex_count);
+    canonical_input.scales.resize(vertex_count);
+    canonical_input.rotations.resize(vertex_count);
+    canonical_input.opacities.resize(vertex_count);
+    if (vertex_count >
+        std::numeric_limits<std::size_t>::max() / (static_cast<std::size_t>(coefficients) * 3)) {
+        return {false, "PLY SH allocation size overflows the host address space", {}, {}};
+    }
+    std::vector<float> sh_values(vertex_count * static_cast<std::size_t>(coefficients) * 3, 0.0f);
     const uint8_t* vertex_data = data + header_bytes;
 
     // True when the file's byte order differs from the host's; the host order
@@ -699,16 +846,42 @@ PlyReader::ReadResult PlyReader::readFromBuffer(const uint8_t* data, size_t size
             std::reverse(raw, raw + p.type.size);
         }
         switch (p.type.kind) {
-            case PropKind::F64: { double d;   std::memcpy(&d, raw, 8); return static_cast<float>(d); }
-            case PropKind::I8:  return static_cast<float>(static_cast<int8_t>(raw[0]));
-            case PropKind::U8:  return static_cast<float>(raw[0]);
-            case PropKind::I16: { int16_t s;  std::memcpy(&s, raw, 2); return static_cast<float>(s); }
-            case PropKind::U16: { uint16_t u; std::memcpy(&u, raw, 2); return static_cast<float>(u); }
-            case PropKind::I32: { int32_t v;  std::memcpy(&v, raw, 4); return static_cast<float>(v); }
-            case PropKind::U32: { uint32_t u; std::memcpy(&u, raw, 4); return static_cast<float>(u); }
-            case PropKind::F32:
-            case PropKind::Unknown:
-            default:            { float f;    std::memcpy(&f, raw, 4); return f; }
+        case PropKind::F64: {
+            double d;
+            std::memcpy(&d, raw, 8);
+            return static_cast<float>(d);
+        }
+        case PropKind::I8:
+            return static_cast<float>(static_cast<int8_t>(raw[0]));
+        case PropKind::U8:
+            return static_cast<float>(raw[0]);
+        case PropKind::I16: {
+            int16_t s;
+            std::memcpy(&s, raw, 2);
+            return static_cast<float>(s);
+        }
+        case PropKind::U16: {
+            uint16_t u;
+            std::memcpy(&u, raw, 2);
+            return static_cast<float>(u);
+        }
+        case PropKind::I32: {
+            int32_t v;
+            std::memcpy(&v, raw, 4);
+            return static_cast<float>(v);
+        }
+        case PropKind::U32: {
+            uint32_t u;
+            std::memcpy(&u, raw, 4);
+            return static_cast<float>(u);
+        }
+        case PropKind::F32:
+        case PropKind::Unknown:
+        default: {
+            float f;
+            std::memcpy(&f, raw, 4);
+            return f;
+        }
         }
     };
 
@@ -732,187 +905,255 @@ PlyReader::ReadResult PlyReader::readFromBuffer(const uint8_t* data, size_t size
     auto color_to_shdc = [](float c, PropKind kind) {
         float divisor = 1.0f;
         switch (kind) {
-            case PropKind::U8:
-            case PropKind::I8:  divisor = 255.0f; break;
-            case PropKind::U16:
-            case PropKind::I16: divisor = 65535.0f; break;
-            case PropKind::U32:
-            case PropKind::I32: divisor = 4294967295.0f; break;
-            case PropKind::F32:
-            case PropKind::F64:
-            case PropKind::Unknown:
-            default:            divisor = 1.0f; break;  // already in [0,1]
+        case PropKind::U8:
+        case PropKind::I8:
+            divisor = 255.0f;
+            break;
+        case PropKind::U16:
+        case PropKind::I16:
+            divisor = 65535.0f;
+            break;
+        case PropKind::U32:
+        case PropKind::I32:
+            divisor = 4294967295.0f;
+            break;
+        case PropKind::F32:
+        case PropKind::F64:
+        case PropKind::Unknown:
+        default:
+            divisor = 1.0f;
+            break;  // already in [0,1]
         }
-        return utils::rgbToShDc(c / divisor);
+        return math::rgb_to_sh_dc(c / divisor);
     };
 
-    auto parse_ascii_value = [](const std::string& token, PropKind kind,
-                                float& output) -> bool {
-        if (token.empty()) return false;
+    auto parse_ascii_value = [](const std::string& token, PropKind kind, float& output) -> bool {
+        if (token.empty())
+            return false;
         char* end = nullptr;
         errno = 0;
         switch (kind) {
-            case PropKind::F32: {
-                const float value = std::strtof(token.c_str(), &end);
-                if (end != token.c_str() + token.size() || errno == ERANGE) return false;
-                output = value;
-                return true;
-            }
-            case PropKind::F64: {
-                const double value = std::strtod(token.c_str(), &end);
-                if (end != token.c_str() + token.size() || errno == ERANGE) return false;
-                if (std::isfinite(value) &&
-                    (std::abs(value) > std::numeric_limits<float>::max() ||
-                     (value != 0.0 && std::abs(value) < std::numeric_limits<float>::denorm_min()))) {
-                    return false;
-                }
-                output = static_cast<float>(value);
-                return true;
-            }
-            case PropKind::U8:
-            case PropKind::U16:
-            case PropKind::U32: {
-                if (token.front() == '-') return false;
-                const unsigned long long value = std::strtoull(token.c_str(), &end, 10);
-                const unsigned long long maximum = kind == PropKind::U8
-                    ? std::numeric_limits<uint8_t>::max()
-                    : kind == PropKind::U16 ? std::numeric_limits<uint16_t>::max()
-                                            : std::numeric_limits<uint32_t>::max();
-                if (end != token.c_str() + token.size() || errno == ERANGE || value > maximum) {
-                    return false;
-                }
-                output = static_cast<float>(value);
-                return true;
-            }
-            case PropKind::I8:
-            case PropKind::I16:
-            case PropKind::I32: {
-                const long long value = std::strtoll(token.c_str(), &end, 10);
-                const long long minimum = kind == PropKind::I8
-                    ? std::numeric_limits<int8_t>::min()
-                    : kind == PropKind::I16 ? std::numeric_limits<int16_t>::min()
-                                           : std::numeric_limits<int32_t>::min();
-                const long long maximum = kind == PropKind::I8
-                    ? std::numeric_limits<int8_t>::max()
-                    : kind == PropKind::I16 ? std::numeric_limits<int16_t>::max()
-                                           : std::numeric_limits<int32_t>::max();
-                if (end != token.c_str() + token.size() || errno == ERANGE ||
-                    value < minimum || value > maximum) {
-                    return false;
-                }
-                output = static_cast<float>(value);
-                return true;
-            }
-            case PropKind::Unknown:
-            default: return false;
+        case PropKind::F32: {
+            const float value = std::strtof(token.c_str(), &end);
+            if (end != token.c_str() + token.size() || errno == ERANGE)
+                return false;
+            output = value;
+            return true;
         }
+        case PropKind::F64: {
+            const double value = std::strtod(token.c_str(), &end);
+            if (end != token.c_str() + token.size() || errno == ERANGE)
+                return false;
+            if (std::isfinite(value) &&
+                (std::abs(value) > std::numeric_limits<float>::max() ||
+                 (value != 0.0 && std::abs(value) < std::numeric_limits<float>::denorm_min()))) {
+                return false;
+            }
+            output = static_cast<float>(value);
+            return true;
+        }
+        case PropKind::U8:
+        case PropKind::U16:
+        case PropKind::U32: {
+            if (token.front() == '-')
+                return false;
+            const unsigned long long value = std::strtoull(token.c_str(), &end, 10);
+            const unsigned long long maximum =
+                kind == PropKind::U8    ? std::numeric_limits<uint8_t>::max()
+                : kind == PropKind::U16 ? std::numeric_limits<uint16_t>::max()
+                                        : std::numeric_limits<uint32_t>::max();
+            if (end != token.c_str() + token.size() || errno == ERANGE || value > maximum) {
+                return false;
+            }
+            output = static_cast<float>(value);
+            return true;
+        }
+        case PropKind::I8:
+        case PropKind::I16:
+        case PropKind::I32: {
+            const long long value = std::strtoll(token.c_str(), &end, 10);
+            const long long minimum = kind == PropKind::I8    ? std::numeric_limits<int8_t>::min()
+                                      : kind == PropKind::I16 ? std::numeric_limits<int16_t>::min()
+                                                              : std::numeric_limits<int32_t>::min();
+            const long long maximum = kind == PropKind::I8    ? std::numeric_limits<int8_t>::max()
+                                      : kind == PropKind::I16 ? std::numeric_limits<int16_t>::max()
+                                                              : std::numeric_limits<int32_t>::max();
+            if (end != token.c_str() + token.size() || errno == ERANGE || value < minimum ||
+                value > maximum) {
+                return false;
+            }
+            output = static_cast<float>(value);
+            return true;
+        }
+        case PropKind::Unknown:
+        default:
+            return false;
+        }
+    };
+
+    auto decode_splat = [&](std::size_t i, auto&& value) -> Result<void> {
+        canonical_input.positions[i] = {value(ix), value(iy), value(iz)};
+
+        const std::size_t coefficient_count = static_cast<std::size_t>(coefficients);
+        const std::size_t sh_base = i * coefficient_count * 3;
+        if (ifdc0 >= 0 && ifdc1 >= 0 && ifdc2 >= 0) {
+            sh_values[sh_base] = value(ifdc0);
+            sh_values[sh_base + 1] = value(ifdc1);
+            sh_values[sh_base + 2] = value(ifdc2);
+        } else if (ir >= 0 && ig >= 0 && ib >= 0) {
+            sh_values[sh_base] =
+                color_to_shdc(value(ir), vertex_props[static_cast<size_t>(ir)].type.kind);
+            sh_values[sh_base + 1] =
+                color_to_shdc(value(ig), vertex_props[static_cast<size_t>(ig)].type.kind);
+            sh_values[sh_base + 2] =
+                color_to_shdc(value(ib), vertex_props[static_cast<size_t>(ib)].type.kind);
+        } else {
+            const float neutral_dc = math::rgb_to_sh_dc(0.5f);
+            sh_values[sh_base] = neutral_dc;
+            sh_values[sh_base + 1] = neutral_dc;
+            sh_values[sh_base + 2] = neutral_dc;
+        }
+
+        // graphdeco stores higher SH channel-major: all R coefficients, then G, then B.
+        // Canonical storage is coefficient/channel interleaved within each splat.
+        const std::size_t higher_per_channel = coefficient_count - 1;
+        for (std::size_t channel = 0; channel < 3; ++channel) {
+            for (std::size_t higher = 0; higher < higher_per_channel; ++higher) {
+                const std::size_t ply_index = channel * higher_per_channel + higher;
+                sh_values[sh_base + (higher + 1) * 3 + channel] = value(sh_rest_idx[ply_index]);
+            }
+        }
+
+        if (iopacity >= 0) {
+            auto opacity = math::sigmoid_from_logit(value(iopacity));
+            if (!opacity.has_value()) {
+                auto diagnostics = opacity.diagnostics();
+                for (auto& diagnostic : diagnostics) {
+                    diagnostic.with_context("splat_index", static_cast<std::uint64_t>(i));
+                }
+                return Result<void>::failure(opacity.error_code(), std::move(diagnostics));
+            }
+            canonical_input.opacities[i] = opacity.value();
+        } else {
+            canonical_input.opacities[i] = 0.9f;
+        }
+
+        Vec3f scale;
+        const int scale_indices[3] = {is0, is1, is2};
+        float* scale_components[3] = {&scale.x, &scale.y, &scale.z};
+        for (std::size_t component = 0; component < 3; ++component) {
+            if (scale_indices[component] < 0) {
+                *scale_components[component] = 0.01f;
+                continue;
+            }
+            auto decoded = math::linear_scale_from_log(value(scale_indices[component]));
+            if (!decoded.has_value()) {
+                auto diagnostics = decoded.diagnostics();
+                for (auto& diagnostic : diagnostics) {
+                    diagnostic.with_context("splat_index", static_cast<std::uint64_t>(i))
+                        .with_context("component", static_cast<std::uint64_t>(component));
+                }
+                return Result<void>::failure(decoded.error_code(), std::move(diagnostics));
+            }
+            *scale_components[component] = decoded.value();
+        }
+        canonical_input.scales[i] = scale;
+
+        // PLY is wxyz; the canonical oracle and SplatData are xyzw. Accept only values already
+        // unit within the documented tolerance, then normalise away serialization round-off.
+        const math::Quat source_rotation{
+            ir1 >= 0 ? value(ir1) : 0.0f,
+            ir2 >= 0 ? value(ir2) : 0.0f,
+            ir3 >= 0 ? value(ir3) : 0.0f,
+            ir0 >= 0 ? value(ir0) : 1.0f,
+        };
+        if (!math::is_unit(source_rotation)) {
+            Diagnostic diagnostic("MK1212_PLY_NON_UNIT_ROTATION", Severity::error,
+                                  "PLY rotation is not unit within the canonical tolerance");
+            diagnostic.with_context("splat_index", static_cast<std::uint64_t>(i))
+                .with_context("norm", math::norm(source_rotation));
+            return Result<void>::failure(ErrorCode::invalid_data, std::move(diagnostic));
+        }
+        auto normalized = math::normalize(source_rotation);
+        if (!normalized.has_value()) {
+            return Result<void>::failure(normalized.error_code(), normalized.diagnostics());
+        }
+        const math::Quat rotation = normalized.value();
+        canonical_input.rotations[i] = {
+            static_cast<float>(rotation.x), static_cast<float>(rotation.y),
+            static_cast<float>(rotation.z), static_cast<float>(rotation.w)};
+        return Result<void>::success();
     };
 
     if (is_binary) {
         for (size_t i = 0; i < vertex_count; ++i) {
             const uint8_t* base = vertex_data + i * stride;
-            GaussianSplat splat;
-            splat.x = read_prop(base, ix);
-            splat.y = read_prop(base, iy);
-            splat.z = read_prop(base, iz);
-
-            if (ifdc0 >= 0 && ifdc1 >= 0 && ifdc2 >= 0) {
-                splat.f_dc_0 = read_prop(base, ifdc0);
-                splat.f_dc_1 = read_prop(base, ifdc1);
-                splat.f_dc_2 = read_prop(base, ifdc2);
-            } else if (ir >= 0 && ig >= 0 && ib >= 0) {
-                splat.f_dc_0 = color_to_shdc(read_prop(base, ir),
-                                            vertex_props[static_cast<size_t>(ir)].type.kind);
-                splat.f_dc_1 = color_to_shdc(read_prop(base, ig),
-                                            vertex_props[static_cast<size_t>(ig)].type.kind);
-                splat.f_dc_2 = color_to_shdc(read_prop(base, ib),
-                                            vertex_props[static_cast<size_t>(ib)].type.kind);
-            } else {
-                splat.f_dc_0 = splat.f_dc_1 = splat.f_dc_2 = utils::rgbToShDc(0.5f);
+            auto decoded = decode_splat(i, [&](int property) { return read_prop(base, property); });
+            if (!decoded.has_value()) {
+                return {false,
+                        "Invalid PLY vertex " + std::to_string(i) + ": " +
+                            firstDiagnosticMessage(decoded.diagnostics(), "invalid value"),
+                        {},
+                        {}};
             }
-
-            if (!sh_rest_idx.empty()) {
-                splat.sh_rest.resize(sh_rest_idx.size());
-                for (size_t j = 0; j < sh_rest_idx.size(); ++j) {
-                    splat.sh_rest[j] = read_prop(base, sh_rest_idx[j]);
-                }
-            }
-
-            splat.opacity = (iopacity >= 0) ? read_prop(base, iopacity) : utils::logit(0.9f);
-            splat.scale_0 = (is0 >= 0) ? read_prop(base, is0) : std::log(0.01f);
-            splat.scale_1 = (is1 >= 0) ? read_prop(base, is1) : std::log(0.01f);
-            splat.scale_2 = (is2 >= 0) ? read_prop(base, is2) : std::log(0.01f);
-            splat.rot_0 = (ir0 >= 0) ? read_prop(base, ir0) : 1.0f;
-            splat.rot_1 = (ir1 >= 0) ? read_prop(base, ir1) : 0.0f;
-            splat.rot_2 = (ir2 >= 0) ? read_prop(base, ir2) : 0.0f;
-            splat.rot_3 = (ir3 >= 0) ? read_prop(base, ir3) : 0.0f;
-
-            result.cloud.addSplat(std::move(splat));
         }
     } else {
-        std::istringstream stream(std::string(reinterpret_cast<const char*>(vertex_data),
-                                              size - header_bytes));
+        std::istringstream stream(
+            std::string(reinterpret_cast<const char*>(vertex_data), size - header_bytes));
         std::vector<float> vals(vertex_props.size());
         std::string token;
         for (size_t i = 0; i < vertex_count; ++i) {
             std::string record_line;
             if (!std::getline(stream, record_line)) {
-                return {false, "Invalid PLY: missing ASCII record for vertex " +
-                    std::to_string(i), {}, {}};
+                return {false,
+                        "Invalid PLY: missing ASCII record for vertex " + std::to_string(i),
+                        {},
+                        {}};
             }
-            if (!record_line.empty() && record_line.back() == '\r') record_line.pop_back();
+            if (!record_line.empty() && record_line.back() == '\r')
+                record_line.pop_back();
             std::istringstream record(record_line);
             for (size_t j = 0; j < vertex_props.size(); ++j) {
                 if (!(record >> token) ||
                     !parse_ascii_value(token, vertex_props[j].type.kind, vals[j])) {
-                    return {false, "Invalid PLY: malformed scalar at vertex " +
-                        std::to_string(i), {}, {}};
+                    return {false,
+                            "Invalid PLY: malformed scalar at vertex " + std::to_string(i),
+                            {},
+                            {}};
                 }
             }
             if (record >> token) {
-                return {false, "Invalid PLY: extra scalar at vertex " +
-                    std::to_string(i), {}, {}};
+                return {false, "Invalid PLY: extra scalar at vertex " + std::to_string(i), {}, {}};
             }
-            GaussianSplat splat;
-            splat.x = vals[ix];
-            splat.y = vals[iy];
-            splat.z = vals[iz];
-
-            if (ifdc0 >= 0 && ifdc1 >= 0 && ifdc2 >= 0) {
-                splat.f_dc_0 = vals[ifdc0];
-                splat.f_dc_1 = vals[ifdc1];
-                splat.f_dc_2 = vals[ifdc2];
-            } else if (ir >= 0 && ig >= 0 && ib >= 0) {
-                splat.f_dc_0 = color_to_shdc(vals[ir],
-                                            vertex_props[static_cast<size_t>(ir)].type.kind);
-                splat.f_dc_1 = color_to_shdc(vals[ig],
-                                            vertex_props[static_cast<size_t>(ig)].type.kind);
-                splat.f_dc_2 = color_to_shdc(vals[ib],
-                                            vertex_props[static_cast<size_t>(ib)].type.kind);
-            } else {
-                splat.f_dc_0 = splat.f_dc_1 = splat.f_dc_2 = utils::rgbToShDc(0.5f);
+            auto decoded = decode_splat(
+                i, [&](int property) { return vals[static_cast<std::size_t>(property)]; });
+            if (!decoded.has_value()) {
+                return {false,
+                        "Invalid PLY vertex " + std::to_string(i) + ": " +
+                            firstDiagnosticMessage(decoded.diagnostics(), "invalid value"),
+                        {},
+                        {}};
             }
-
-            if (!sh_rest_idx.empty()) {
-                splat.sh_rest.resize(sh_rest_idx.size());
-                for (size_t j = 0; j < sh_rest_idx.size(); ++j) {
-                    splat.sh_rest[j] = vals[sh_rest_idx[j]];
-                }
-            }
-
-            splat.opacity = (iopacity >= 0) ? vals[iopacity] : utils::logit(0.9f);
-            splat.scale_0 = (is0 >= 0) ? vals[is0] : std::log(0.01f);
-            splat.scale_1 = (is1 >= 0) ? vals[is1] : std::log(0.01f);
-            splat.scale_2 = (is2 >= 0) ? vals[is2] : std::log(0.01f);
-            splat.rot_0 = (ir0 >= 0) ? vals[ir0] : 1.0f;
-            splat.rot_1 = (ir1 >= 0) ? vals[ir1] : 0.0f;
-            splat.rot_2 = (ir2 >= 0) ? vals[ir2] : 0.0f;
-            splat.rot_3 = (ir3 >= 0) ? vals[ir3] : 0.0f;
-
-            result.cloud.addSplat(std::move(splat));
         }
     }
 
+    auto sh = ShBuffer::create(sh_degree, vertex_count, std::move(sh_values));
+    if (!sh.has_value()) {
+        return {false,
+                firstDiagnosticMessage(sh.diagnostics(), "Invalid PLY spherical harmonics"),
+                {},
+                {}};
+    }
+    canonical_input.sh = std::move(sh).value();
+    auto canonical = SplatData::create(std::move(canonical_input));
+    if (!canonical.has_value()) {
+        return {false,
+                firstDiagnosticMessage(canonical.diagnostics(),
+                                       "PLY data violates canonical scene invariants"),
+                {},
+                {}};
+    }
+    result.data.emplace(std::move(canonical).value());
     return result;
 } catch (const std::bad_alloc&) {
     return {false, "PLY buffer exceeds available memory", {}, {}};
@@ -920,4 +1161,4 @@ PlyReader::ReadResult PlyReader::readFromBuffer(const uint8_t* data, size_t size
     return {false, "PLY buffer exceeds a container size limit", {}, {}};
 }
 
-} // namespace melkor
+}  // namespace melkor

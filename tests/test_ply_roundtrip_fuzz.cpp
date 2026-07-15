@@ -1,345 +1,259 @@
-// Fuzz the binary PLY round-trip (write -> read) across random splats.
+// Canonical PLY boundary and parser regression tests.
 //
-// The header-driven reader (ply_writer.cpp) maps fields by name and computes a
-// stride from declared property types. This test generates random Gaussian
-// splats, writes them as binary PLY, reads them back, and asserts every field
-// survives exactly. It catches regressions in: stride arithmetic, field
-// ordering, the f_dc/opacity/scale/rotation name lookups, and endian handling
-// (binary_little_endian).
-//
-// Coverage:
-//   - random positions spanning a wide range (including negatives)
-//   - random SH-DC, log-scale, logit-opacity values
-//   - random quaternions (including non-unit, to confirm the reader doesn't
-//     silently renormalize)
-//   - a mix of cloud sizes including the empty and single-splat edge cases
+// PLY stores graphdeco training domains (log scale, logit opacity, wxyz rotation, and
+// channel-major higher SH). SplatData stores linear scale, linear opacity, xyzw rotation, and
+// coefficient/channel-interleaved SH. These tests pin both directions independently so a
+// symmetric double-conversion or double-transpose cannot make a round trip pass by accident.
 
-#include "melkor/gaussian_data.hpp"
+#include "melkor/math/color.hpp"
+#include "melkor/math/quaternion.hpp"
 #include "melkor/ply_writer.hpp"
 
+#include <algorithm>
+#include <cmath>
 #include <cstdint>
 #include <cstdio>
+#include <cstdlib>
 #include <cstring>
-#include <cmath>
 #include <random>
 #include <string>
 #include <vector>
 
 namespace {
 
-constexpr float EPS = 1e-5f;
+constexpr float kEpsilon = 2.0e-5f;
 
-bool approx(float a, float b) {
-    // Use relative tolerance for large magnitudes, absolute for small.
-    float scale = std::max({1.0f, std::abs(a), std::abs(b)});
-    return std::abs(a - b) <= EPS * scale;
+bool approx(float a, float b, float tolerance = kEpsilon) {
+    const float scale = std::max({1.0f, std::abs(a), std::abs(b)});
+    return std::abs(a - b) <= tolerance * scale;
+}
+
+melkor::SplatData make_data(std::size_t count, std::uint32_t degree, std::mt19937& rng) {
+    using namespace melkor;
+    std::uniform_real_distribution<float> position(-100.0f, 100.0f);
+    std::uniform_real_distribution<float> log_scale(-7.0f, 1.0f);
+    std::uniform_real_distribution<float> opacity(0.002f, 0.998f);
+    std::uniform_real_distribution<float> quaternion(-1.0f, 1.0f);
+    std::uniform_real_distribution<float> sh(-3.0f, 3.0f);
+
+    SplatBufferInput input;
+    input.positions.reserve(count);
+    input.scales.reserve(count);
+    input.rotations.reserve(count);
+    input.opacities.reserve(count);
+    const std::size_t coefficients = static_cast<std::size_t>(degree + 1) * (degree + 1);
+    std::vector<float> sh_values(count * coefficients * 3);
+
+    for (std::size_t i = 0; i < count; ++i) {
+        input.positions.push_back({position(rng), position(rng), position(rng)});
+        input.scales.push_back(
+            {std::exp(log_scale(rng)), std::exp(log_scale(rng)), std::exp(log_scale(rng))});
+        auto unit = melkor::math::normalize(
+            {quaternion(rng), quaternion(rng), quaternion(rng), quaternion(rng)});
+        if (!unit.has_value())
+            std::abort();
+        input.rotations.push_back(
+            {static_cast<float>(unit.value().x), static_cast<float>(unit.value().y),
+             static_cast<float>(unit.value().z), static_cast<float>(unit.value().w)});
+        input.opacities.push_back(opacity(rng));
+        for (std::size_t j = 0; j < coefficients * 3; ++j) {
+            sh_values[i * coefficients * 3 + j] = sh(rng);
+        }
+    }
+    input.sh = ShBuffer::create(degree, count, std::move(sh_values)).value();
+    return SplatData::create(std::move(input)).value();
+}
+
+bool same_data(const melkor::SplatData& expected, const melkor::SplatData& actual) {
+    if (expected.size() != actual.size() || expected.sh().degree() != actual.sh().degree() ||
+        expected.sh().raw().size() != actual.sh().raw().size()) {
+        return false;
+    }
+    for (std::size_t i = 0; i < expected.size(); ++i) {
+        const auto a = expected.positions()[i];
+        const auto b = actual.positions()[i];
+        const auto as = expected.scales()[i];
+        const auto bs = actual.scales()[i];
+        if (!approx(a.x, b.x) || !approx(a.y, b.y) || !approx(a.z, b.z) || !approx(as.x, bs.x) ||
+            !approx(as.y, bs.y) || !approx(as.z, bs.z) ||
+            !approx(expected.opacities()[i], actual.opacities()[i])) {
+            return false;
+        }
+        const auto aq = expected.rotations()[i];
+        const auto bq = actual.rotations()[i];
+        if (melkor::math::angular_distance({aq.x, aq.y, aq.z, aq.w}, {bq.x, bq.y, bq.z, bq.w}) >
+            1.0e-3) {
+            return false;
+        }
+    }
+    for (std::size_t i = 0; i < expected.sh().raw().size(); ++i) {
+        if (!approx(expected.sh().raw()[i], actual.sh().raw()[i]))
+            return false;
+    }
+    return true;
+}
+
+bool has_diagnostic(const melkor::PlyWriteResult& result, const char* code) {
+    return std::any_of(result.diagnostics.begin(), result.diagnostics.end(),
+                       [&](const auto& diagnostic) { return diagnostic.code == code; });
 }
 
 }  // namespace
 
 int main() {
     using namespace melkor;
-    std::mt19937 rng(7);  // fixed seed for reproducibility
-    std::uniform_real_distribution<float> pos(-100.0f, 100.0f);
-    std::uniform_real_distribution<float> shdc(-3.0f, 3.0f);
-    std::uniform_real_distribution<float> lscale(-8.0f, 2.0f);
-    std::uniform_real_distribution<float> lopacity(-6.0f, 6.0f);
-    std::uniform_real_distribution<float> quat(-1.0f, 1.0f);
-
-    auto rand_splat = [&](GaussianSplat& s) {
-        s.x = pos(rng); s.y = pos(rng); s.z = pos(rng);
-        s.f_dc_0 = shdc(rng); s.f_dc_1 = shdc(rng); s.f_dc_2 = shdc(rng);
-        s.opacity = lopacity(rng);
-        s.scale_0 = lscale(rng); s.scale_1 = lscale(rng); s.scale_2 = lscale(rng);
-        s.rot_0 = quat(rng); s.rot_1 = quat(rng); s.rot_2 = quat(rng); s.rot_3 = quat(rng);
-    };
-
     int failures = 0;
-    auto check_round_trip = [&](const char* label, const GaussianCloud& in) {
-        PlyWriter w;
-        std::vector<uint8_t> buf;
-        PlyWriteConfig cfg;
-        cfg.format = PlyFormat::Binary;
-        auto wres = w.writeToBuffer(buf, in, cfg);
-        if (!wres.success) {
-            printf("  FAIL [%s]: write failed\n", label);
+    auto expect = [&](const char* label, bool condition) {
+        std::printf(condition ? "  PASS [%s]\n" : "  FAIL [%s]\n", label);
+        if (!condition)
             ++failures;
-            return;
-        }
-        PlyReader r;
-        auto rres = r.readFromBuffer(buf.data(), buf.size());
-        if (!rres.success) {
-            printf("  FAIL [%s]: read failed: %s\n", label, rres.error_message.c_str());
-            ++failures;
-            return;
-        }
-        if (rres.cloud.size() != in.size()) {
-            printf("  FAIL [%s]: count %zu != %zu\n", label, rres.cloud.size(), in.size());
-            ++failures;
-            return;
-        }
-        for (size_t i = 0; i < in.size(); ++i) {
-            const auto& a = in[i];
-            const auto& b = rres.cloud[i];
-            if (!approx(a.x, b.x) || !approx(a.y, b.y) || !approx(a.z, b.z) ||
-                !approx(a.f_dc_0, b.f_dc_0) || !approx(a.f_dc_1, b.f_dc_1) || !approx(a.f_dc_2, b.f_dc_2) ||
-                !approx(a.opacity, b.opacity) ||
-                !approx(a.scale_0, b.scale_0) || !approx(a.scale_1, b.scale_1) || !approx(a.scale_2, b.scale_2) ||
-                !approx(a.rot_0, b.rot_0) || !approx(a.rot_1, b.rot_1) ||
-                !approx(a.rot_2, b.rot_2) || !approx(a.rot_3, b.rot_3)) {
-                printf("  FAIL [%s]: field mismatch at index %zu\n", label, i);
-                ++failures;
-                return;
-            }
-        }
-        printf("  PASS [%s]: %zu splats round-trip exact\n", label, in.size());
     };
+    std::mt19937 rng(7);
 
-    printf("[fuzz] PLY binary round-trip\n");
-
-    // Empty cloud.
-    { GaussianCloud empty; check_round_trip("empty", empty); }
-
-    // Single splat.
-    {
-        GaussianCloud c; GaussianSplat s{}; rand_splat(s); c.addSplat(s);
-        check_round_trip("single", c);
-    }
-
-    // Random sizes.
-    for (int n : {2, 3, 17, 100, 1000}) {
-        GaussianCloud c;
-        for (int i = 0; i < n; ++i) { GaussianSplat s{}; rand_splat(s); c.addSplat(s); }
-        char label[32];
-        std::snprintf(label, sizeof(label), "n=%d", n);
-        check_round_trip(label, c);
-    }
-
-    // Higher-order SH round-trip. The reader infers shDegree from the number
-    // of f_rest_* properties; the writer emits them only when
-    // include_sh_rest is set. Verify every coefficient survives and the
-    // degree is recovered, for all three SH degrees.
-    for (int degree : {1, 2, 3}) {
-        const int nrest = degree == 1 ? 9 : (degree == 2 ? 24 : 45);
-        GaussianCloud c;
-        c.setShDegree(degree);
-        for (int i = 0; i < 20; ++i) {
-            GaussianSplat s{}; rand_splat(s);
-            s.sh_rest.resize(nrest);
-            for (int j = 0; j < nrest; ++j) s.sh_rest[j] = shdc(rng);
-            c.addSplat(s);
+    std::printf("[ply] canonical binary round trips\n");
+    for (std::uint32_t degree : {0u, 1u, 2u, 3u}) {
+        for (std::size_t count : {0u, 1u, 17u, 100u}) {
+            auto input = make_data(count, degree, rng);
+            PlyWriteConfig config;
+            config.include_sh_rest = degree != 0;
+            std::vector<std::uint8_t> bytes;
+            const auto written = PlyWriter{}.writeToBuffer(bytes, input, config);
+            const auto read = PlyReader{}.readFromBuffer(bytes.data(), bytes.size());
+            const bool ok = written.success && read.success && read.data.has_value() &&
+                            same_data(input, *read.data);
+            char label[64];
+            std::snprintf(label, sizeof(label), "degree=%u count=%zu", degree, count);
+            expect(label, ok);
         }
-        PlyWriter w;
-        std::vector<uint8_t> buf;
-        PlyWriteConfig cfg;
-        cfg.format = PlyFormat::Binary;
-        cfg.include_sh_rest = true;
-        w.writeToBuffer(buf, c, cfg);
-        PlyReader r;
-        auto rres = r.readFromBuffer(buf.data(), buf.size());
-        bool ok = rres.success && rres.cloud.size() == c.size() &&
-                  rres.cloud.shDegree() == degree;
-        for (size_t i = 0; ok && i < c.size(); ++i) {
-            if (rres.cloud[i].sh_rest.size() != static_cast<size_t>(nrest)) { ok = false; break; }
-            for (int j = 0; j < nrest; ++j) {
-                if (!approx(c[i].sh_rest[j], rres.cloud[i].sh_rest[j])) { ok = false; break; }
-            }
+    }
+
+    std::printf("[ply] explicit boundary semantics\n");
+    {
+        // Hand-authored training-domain values: logit(0)=0 -> 0.5, ln scales -> linear scales,
+        // and PLY wxyz -> canonical xyzw. A distinct unit quaternion makes reordering observable.
+        const std::string source =
+            "ply\nformat ascii 1.0\nelement vertex 1\n"
+            "property float x\nproperty float y\nproperty float z\n"
+            "property float f_dc_0\nproperty float f_dc_1\nproperty float f_dc_2\n"
+            "property float opacity\n"
+            "property float scale_0\nproperty float scale_1\nproperty float scale_2\n"
+            "property float rot_0\nproperty float rot_1\nproperty float rot_2\nproperty float "
+            "rot_3\n"
+            "end_header\n1 2 3 0.1 0.2 0.3 0 -2.3025851 -1.609438 -1.2039728 "
+            "0.5 0.5 0.5 0.5\n";
+        const auto read = PlyReader{}.readFromBuffer(
+            reinterpret_cast<const std::uint8_t*>(source.data()), source.size());
+        const bool ok =
+            read.success && read.data.has_value() && read.data->size() == 1 &&
+            approx(read.data->opacities()[0], 0.5f) && approx(read.data->scales()[0].x, 0.1f) &&
+            approx(read.data->scales()[0].y, 0.2f) && approx(read.data->scales()[0].z, 0.3f) &&
+            approx(read.data->rotations()[0].x, 0.5f) && approx(read.data->rotations()[0].w, 0.5f);
+        expect("training domains decode exactly once", ok);
+    }
+    {
+        // graphdeco f_rest is channel-major. Give every property a unique value and prove the
+        // canonical [coefficient][channel] transpose independently of Melkor's writer.
+        std::string source =
+            "ply\nformat ascii 1.0\nelement vertex 1\n"
+            "property float x\nproperty float y\nproperty float z\n"
+            "property float f_dc_0\nproperty float f_dc_1\nproperty float f_dc_2\n";
+        for (int i = 0; i < 9; ++i) {
+            source += "property float f_rest_" + std::to_string(i) + "\n";
         }
-        char label[32];
-        std::snprintf(label, sizeof(label), "SH deg=%d (%d coeffs)", degree, nrest);
-        printf(ok ? "  PASS [%s]: all coefficients + degree round-trip\n"
-                  : "  FAIL [%s]: SH round-trip mismatch\n", label);
-        if (!ok) ++failures;
+        source += "end_header\n0 0 0 10 11 12 20 21 22 30 31 32 40 41 42\n";
+        const auto read = PlyReader{}.readFromBuffer(
+            reinterpret_cast<const std::uint8_t*>(source.data()), source.size());
+        bool ok = read.success && read.data.has_value() && read.data->sh().degree() == 1;
+        const std::vector<float> expected{10, 11, 12, 20, 30, 40, 21, 31, 41, 22, 32, 42};
+        if (ok)
+            ok = read.data->sh().raw() == expected;
+        expect("channel-major higher SH transposes to canonical layout", ok);
     }
-
-    // Writer default drops SH (include_sh_rest defaults false); the CLI opts
-    // in when shDegree>0 (src/main.cpp). Lock the default so a regression in
-    // it is visible here.
     {
-        GaussianCloud c; c.setShDegree(1);
-        GaussianSplat s{}; rand_splat(s); s.sh_rest.assign(9, 1.0f); c.addSplat(s);
-        PlyWriter w; std::vector<uint8_t> buf; PlyWriteConfig cfg;  // default config
-        w.writeToBuffer(buf, c, cfg);
-        PlyReader r;
-        auto rres = r.readFromBuffer(buf.data(), buf.size());
-        bool ok = rres.success && rres.cloud.shDegree() == 0;  // SH omitted by default
-        printf(ok ? "  PASS [SH default]: default config omits f_rest (degree 0)\n"
-                  : "  FAIL [SH default]: default config unexpectedly wrote SH\n");
-        if (!ok) ++failures;
+        auto endpoints = make_data(2, 0, rng);
+        auto edit = endpoints.edit();
+        edit.set_opacities({0.0f, 1.0f});
+        endpoints = edit.commit().value();
+        std::vector<std::uint8_t> bytes;
+        const auto written = PlyWriter{}.writeToBuffer(bytes, endpoints);
+        const auto read = PlyReader{}.readFromBuffer(bytes.data(), bytes.size());
+        expect("endpoint clamp is explicit and finite",
+               written.success && has_diagnostic(written, "MK1210_PLY_OPACITY_ENDPOINT_CLAMPED") &&
+                   read.success && read.data.has_value() && read.data->opacities()[0] > 0.0f &&
+                   read.data->opacities()[1] < 1.0f);
     }
-
-    // ASCII round-trip too (separate path in the reader).
     {
-        GaussianCloud c;
-        for (int i = 0; i < 50; ++i) { GaussianSplat s{}; rand_splat(s); c.addSplat(s); }
-        PlyWriter w;
-        std::vector<uint8_t> buf;
-        PlyWriteConfig cfg;
-        cfg.format = PlyFormat::Ascii;
-        w.writeToBuffer(buf, c, cfg);
-        PlyReader r;
-        auto rres = r.readFromBuffer(buf.data(), buf.size());
-        bool ok = rres.success && rres.cloud.size() == c.size();
-        if (ok) {
-            for (size_t i = 0; i < c.size() && ok; ++i) {
-                const auto& a = c[i];
-                const auto& b = rres.cloud[i];
-                // ASCII is written at 8-digit precision; allow slightly looser tol.
-                ok = approx(a.x, b.x) && approx(a.y, b.y) && approx(a.z, b.z) &&
-                     approx(a.rot_0, b.rot_0) && approx(a.opacity, b.opacity);
-            }
-        }
-        printf(ok ? "  PASS [ascii n=50]: round-trip within precision\n"
-                  : "  FAIL [ascii n=50]\n");
-        if (!ok) ++failures;
+        auto degree_one = make_data(1, 1, rng);
+        std::vector<std::uint8_t> bytes;
+        const auto written = PlyWriter{}.writeToBuffer(bytes, degree_one);
+        const auto read = PlyReader{}.readFromBuffer(bytes.data(), bytes.size());
+        expect("configured SH omission is reported",
+               written.success && has_diagnostic(written, "MK1211_PLY_SH_OMITTED") &&
+                   read.success && read.data.has_value() && read.data->sh().degree() == 0);
+    }
+    {
+        auto degree_four = make_data(1, 4, rng);
+        PlyWriteConfig config;
+        config.include_sh_rest = true;
+        std::vector<std::uint8_t> bytes;
+        expect("degree 4 cannot be silently truncated",
+               !PlyWriter{}.writeToBuffer(bytes, degree_four, config).success && bytes.empty());
+    }
+    {
+        const std::string non_unit = "ply\nformat ascii 1.0\nelement vertex 1\n"
+                                     "property float x\nproperty float y\nproperty float z\n"
+                                     "property float rot_0\nproperty float rot_1\nproperty float "
+                                     "rot_2\nproperty float rot_3\n"
+                                     "end_header\n0 0 0 2 0 0 0\n";
+        const auto read = PlyReader{}.readFromBuffer(
+            reinterpret_cast<const std::uint8_t*>(non_unit.data()), non_unit.size());
+        expect("far non-unit quaternion fails closed", !read.success && !read.data.has_value());
     }
 
-    // Hand-crafted reader cases: type aliases, big-endian, CRLF headers,
-    // end_header inside a comment, and malformed vertex counts.
-    printf("[fuzz] PLY reader hand-crafted cases\n");
-
-    auto append_str = [](std::vector<uint8_t>& v, const std::string& s) {
-        v.insert(v.end(), s.begin(), s.end());
+    std::printf("[ply] parser encodings and limits\n");
+    auto append = [](std::vector<std::uint8_t>& target, const std::string& text) {
+        target.insert(target.end(), text.begin(), text.end());
     };
-    auto push_be_float = [](std::vector<uint8_t>& v, float f) {
-        uint32_t bits; std::memcpy(&bits, &f, 4);
-        v.push_back(static_cast<uint8_t>(bits >> 24));
-        v.push_back(static_cast<uint8_t>(bits >> 16));
-        v.push_back(static_cast<uint8_t>(bits >> 8));
-        v.push_back(static_cast<uint8_t>(bits));
+    auto push_be_float = [](std::vector<std::uint8_t>& target, float value) {
+        std::uint32_t bits = 0;
+        std::memcpy(&bits, &value, sizeof(bits));
+        target.push_back(static_cast<std::uint8_t>(bits >> 24));
+        target.push_back(static_cast<std::uint8_t>(bits >> 16));
+        target.push_back(static_cast<std::uint8_t>(bits >> 8));
+        target.push_back(static_cast<std::uint8_t>(bits));
     };
-    auto push_le_double = [](std::vector<uint8_t>& v, double d) {
-        uint64_t bits; std::memcpy(&bits, &d, 8);
-        for (int i = 0; i < 8; ++i) v.push_back(static_cast<uint8_t>(bits >> (8 * i)));
-    };
-    auto expect = [&](const char* label, bool ok) {
-        printf(ok ? "  PASS [%s]\n" : "  FAIL [%s]\n", label);
-        if (!ok) ++failures;
-    };
-
-    // Big-endian binary: three float positions, hand-encoded most-significant
-    // byte first. Must decode to the exact values, not silent garbage.
     {
-        std::vector<uint8_t> buf;
-        append_str(buf,
-            "ply\n"
-            "format binary_big_endian 1.0\n"
-            "element vertex 1\n"
-            "property float x\n"
-            "property float y\n"
-            "property float z\n"
-            "end_header\n");
-        push_be_float(buf, 1.0f);
-        push_be_float(buf, -2.5f);
-        push_be_float(buf, 3.25f);
-        PlyReader r;
-        auto res = r.readFromBuffer(buf.data(), buf.size());
-        expect("big-endian binary", res.success && res.cloud.size() == 1 &&
-               approx(res.cloud[0].x, 1.0f) && approx(res.cloud[0].y, -2.5f) &&
-               approx(res.cloud[0].z, 3.25f));
+        std::vector<std::uint8_t> bytes;
+        append(bytes, "ply\nformat binary_big_endian 1.0\nelement vertex 1\n"
+                      "property float x\nproperty float y\nproperty float z\nend_header\n");
+        push_be_float(bytes, 1.0f);
+        push_be_float(bytes, -2.5f);
+        push_be_float(bytes, 3.25f);
+        const auto read = PlyReader{}.readFromBuffer(bytes.data(), bytes.size());
+        expect("big-endian binary", read.success && read.data.has_value() &&
+                                        approx(read.data->positions()[0].x, 1.0f) &&
+                                        approx(read.data->positions()[0].y, -2.5f) &&
+                                        approx(read.data->positions()[0].z, 3.25f));
+    }
+    {
+        const std::string crlf =
+            "ply\r\nformat ascii 1.0\r\nelement vertex 1\r\n"
+            "property float x\r\nproperty float y\r\nproperty float z\r\n"
+            "comment end_header is not a terminator here\r\nend_header\r\n1 2 3\r\n";
+        const auto read = PlyReader{}.readFromBuffer(
+            reinterpret_cast<const std::uint8_t*>(crlf.data()), crlf.size());
+        expect("CRLF and end_header in comment",
+               read.success && read.data.has_value() && approx(read.data->positions()[0].y, 2.0f));
+    }
+    {
+        const std::string huge = "ply\nformat binary_little_endian 1.0\nelement vertex 4294967295\n"
+                                 "property float x\nend_header\n\0\0\0\0";
+        const auto read = PlyReader{}.readFromBuffer(
+            reinterpret_cast<const std::uint8_t*>(huge.data()), huge.size());
+        expect("huge declaration versus tiny payload", !read.success);
     }
 
-    // Sized type aliases: float64 positions (8-byte stride) plus uint8 colors
-    // (1-byte stride). Wrong alias sizes would garble vertex 1 or reject the
-    // buffer as too small. Also checks the uint8 color /255 -> SH-DC path.
-    {
-        std::vector<uint8_t> buf;
-        append_str(buf,
-            "ply\n"
-            "format binary_little_endian 1.0\n"
-            "element vertex 2\n"
-            "property float64 x\n"
-            "property float64 y\n"
-            "property float64 z\n"
-            "property uint8 red\n"
-            "property uint8 green\n"
-            "property uint8 blue\n"
-            "end_header\n");
-        push_le_double(buf, 1.5);  push_le_double(buf, -2.25); push_le_double(buf, 3.0);
-        buf.push_back(255); buf.push_back(0); buf.push_back(128);
-        push_le_double(buf, -4.5); push_le_double(buf, 5.0);   push_le_double(buf, -6.75);
-        buf.push_back(0); buf.push_back(255); buf.push_back(64);
-        PlyReader r;
-        auto res = r.readFromBuffer(buf.data(), buf.size());
-        expect("float64 + uint8 aliases", res.success && res.cloud.size() == 2 &&
-               approx(res.cloud[0].x, 1.5f)  && approx(res.cloud[0].y, -2.25f) &&
-               approx(res.cloud[0].z, 3.0f)  &&
-               approx(res.cloud[0].f_dc_0, melkor::utils::rgbToShDc(1.0f)) &&
-               approx(res.cloud[1].x, -4.5f) && approx(res.cloud[1].y, 5.0f) &&
-               approx(res.cloud[1].z, -6.75f));
-    }
-
-    // CRLF-terminated header lines must parse (data starts after end_header's
-    // newline).
-    {
-        std::vector<uint8_t> buf;
-        append_str(buf,
-            "ply\r\n"
-            "format ascii 1.0\r\n"
-            "element vertex 1\r\n"
-            "property float x\r\n"
-            "property float y\r\n"
-            "property float z\r\n"
-            "end_header\r\n"
-            "1 2 3\r\n");
-        PlyReader r;
-        auto res = r.readFromBuffer(buf.data(), buf.size());
-        expect("CRLF header", res.success && res.cloud.size() == 1 &&
-               approx(res.cloud[0].x, 1.0f) && approx(res.cloud[0].y, 2.0f) &&
-               approx(res.cloud[0].z, 3.0f));
-    }
-
-    // A comment merely containing "end_header" must not truncate the header.
-    {
-        std::vector<uint8_t> buf;
-        append_str(buf,
-            "ply\n"
-            "format ascii 1.0\n"
-            "comment beware end_header appears here\n"
-            "element vertex 1\n"
-            "property float x\n"
-            "property float y\n"
-            "property float z\n"
-            "end_header\n"
-            "7 8 9\n");
-        PlyReader r;
-        auto res = r.readFromBuffer(buf.data(), buf.size());
-        expect("end_header in comment", res.success && res.cloud.size() == 1 &&
-               approx(res.cloud[0].x, 7.0f) && approx(res.cloud[0].z, 9.0f));
-    }
-
-    // Overflowing vertex count: must return an error, not throw/terminate.
-    {
-        std::vector<uint8_t> buf;
-        append_str(buf,
-            "ply\n"
-            "format ascii 1.0\n"
-            "element vertex 99999999999999999999999999\n"
-            "property float x\n"
-            "end_header\n"
-            "1\n");
-        PlyReader r;
-        auto res = r.readFromBuffer(buf.data(), buf.size());
-        expect("overflowing vertex count", !res.success);
-    }
-
-    // Huge-but-parseable count with a tiny binary payload: must be rejected
-    // before reserve(), not crash with bad_alloc or read out of bounds.
-    {
-        std::vector<uint8_t> buf;
-        append_str(buf,
-            "ply\n"
-            "format binary_little_endian 1.0\n"
-            "element vertex 4294967295\n"
-            "property float x\n"
-            "end_header\n");
-        buf.push_back(0); buf.push_back(0); buf.push_back(0); buf.push_back(0);
-        PlyReader r;
-        auto res = r.readFromBuffer(buf.data(), buf.size());
-        expect("huge count vs tiny data", !res.success);
-    }
-
-    printf(failures == 0 ? "\n  ALL PLY ROUND-TRIP TESTS PASSED\n"
-                         : "\n  %d FAILURES\n", failures);
+    std::printf(failures == 0 ? "\n  ALL CANONICAL PLY TESTS PASSED\n" : "\n  %d FAILURES\n",
+                failures);
     return failures == 0 ? 0 : 1;
 }

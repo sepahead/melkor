@@ -6,11 +6,13 @@
 //
 // Self-contained (no external test framework).
 
-#include "melkor/gaussian_data.hpp"
 #include "melkor/limits.hpp"
 #include "melkor/ply_writer.hpp"
 
+#include <chrono>
 #include <cstdio>
+#include <filesystem>
+#include <fstream>
 #include <string>
 #include <vector>
 
@@ -31,21 +33,20 @@ void check(bool condition, const char* what, int line) {
 
 #define CHECK(cond) check((cond), #cond, __LINE__)
 
-GaussianCloud make_cloud(int n) {
-    GaussianCloud cloud;
+SplatData make_data(int n) {
+    SplatBufferInput input;
+    input.positions.reserve(static_cast<std::size_t>(n));
+    input.scales.reserve(static_cast<std::size_t>(n));
+    input.rotations.reserve(static_cast<std::size_t>(n));
+    input.opacities.reserve(static_cast<std::size_t>(n));
     for (int i = 0; i < n; ++i) {
-        GaussianSplat s{};
-        s.x = static_cast<float>(i);
-        s.y = 0.0f;
-        s.z = 0.0f;
-        s.f_dc_0 = s.f_dc_1 = s.f_dc_2 = 0.0f;
-        s.opacity = 0.5f;
-        s.scale_0 = s.scale_1 = s.scale_2 = -3.0f;
-        s.rot_0 = 1.0f;  // identity quaternion (w,x,y,z)
-        s.rot_1 = s.rot_2 = s.rot_3 = 0.0f;
-        cloud.addSplat(s);
+        input.positions.push_back({static_cast<float>(i), 0.0f, 0.0f});
+        input.scales.push_back({0.05f, 0.05f, 0.05f});
+        input.rotations.push_back({});
+        input.opacities.push_back(0.5f);
     }
-    return cloud;
+    input.sh = ShBuffer::black(static_cast<std::size_t>(n)).value();
+    return SplatData::create(std::move(input)).value();
 }
 
 }  // namespace
@@ -54,7 +55,7 @@ int main() {
     // A valid 3-splat PLY.
     PlyWriter writer;
     std::vector<std::uint8_t> buffer;
-    auto written = writer.writeToBuffer(buffer, make_cloud(3));
+    auto written = writer.writeToBuffer(buffer, make_data(3));
     CHECK(written.success);
     CHECK(!buffer.empty());
 
@@ -63,7 +64,7 @@ int main() {
     // Generous default limits accept it and decode all three splats.
     auto ok = reader.readFromBuffer(buffer.data(), buffer.size());
     CHECK(ok.success);
-    CHECK(ok.cloud.size() == 3);
+    CHECK(ok.data.has_value() && ok.data->size() == 3);
 
     // A splat limit below the declared count refuses it before reserving the cloud.
     Limits tight = Limits::for_profile(LimitsProfile::desktop);
@@ -79,7 +80,7 @@ int main() {
 
     // A memory limit below the cloud's footprint refuses it before reserving.
     Limits tiny_mem = Limits::for_profile(LimitsProfile::desktop);
-    tiny_mem.max_memory_bytes = 16;  // less than 3 * sizeof(GaussianSplat)
+    tiny_mem.max_memory_bytes = 16;  // less than three canonical splat records
     auto rejected_mem = reader.readFromBuffer(buffer.data(), buffer.size(), tiny_mem);
     CHECK(!rejected_mem.success);
 
@@ -87,12 +88,34 @@ int main() {
     // configured header-size limit, instead of scanning the whole buffer with an O(n^2) property
     // check.
     std::string header_bomb = "ply\n";
-    for (int i = 0; i < 200; ++i) header_bomb += "comment padding to grow the header without end\n";
+    for (int i = 0; i < 200; ++i)
+        header_bomb += "comment padding to grow the header without end\n";
     Limits tiny_header = Limits::for_profile(LimitsProfile::desktop);
     tiny_header.max_ply_header_bytes = 64;
     auto rejected_header = reader.readFromBuffer(
         reinterpret_cast<const std::uint8_t*>(header_bomb.data()), header_bomb.size(), tiny_header);
     CHECK(!rejected_header.success);
+
+    // Zero means unlimited for every Limits field. The file preflight must not substitute an
+    // undocumented 1 MiB cap while the in-memory path correctly permits the same header.
+    const auto nonce = std::chrono::steady_clock::now().time_since_epoch().count();
+    const std::filesystem::path large_header_path =
+        std::filesystem::temp_directory_path() /
+        ("melkor-ply-unlimited-header-" + std::to_string(nonce) + ".ply");
+    {
+        std::ofstream file(large_header_path, std::ios::binary | std::ios::trunc);
+        file << "ply\nformat ascii 1.0\nelement vertex 0\ncomment ";
+        file << std::string(1024 * 1024 + 64, 'x');
+        file << "\nend_header\n";
+    }
+    Limits unlimited_header = Limits::for_profile(LimitsProfile::desktop);
+    unlimited_header.max_ply_header_bytes = 0;
+    const auto accepted_large_header =
+        reader.readFromFile(large_header_path.string(), unlimited_header);
+    std::error_code remove_error;
+    std::filesystem::remove(large_header_path, remove_error);
+    CHECK(accepted_large_header.success && accepted_large_header.data.has_value() &&
+          accepted_large_header.data->empty());
 
     if (g_failures == 0) {
         std::printf("ply budget: %d checks passed\n", g_checks);

@@ -16,7 +16,7 @@
 // SpzDecoder. A symmetric double-bug (wrong order in BOTH encode and decode)
 // would pass a melkor-only round trip but fail this test.
 
-#include "melkor/gaussian_data.hpp"
+#include "melkor/math/quaternion.hpp"
 #include "melkor/spz_encoder.hpp"
 
 #ifdef MELKOR_HAS_SPZ
@@ -40,23 +40,24 @@ constexpr int N_TRIALS_PER_QUAT = 1;
 // generous-but-meaningful bar; if ordering were wrong the error would be ~pi/2.
 constexpr float ROT_TOL = 0.02f;
 
-float mat_diff(const float a[9], const float b[9]) {
-    float max_abs = 0.0f;
-    for (int i = 0; i < 9; ++i) {
-        max_abs = std::max(max_abs, std::abs(a[i] - b[i]));
-    }
-    return max_abs;
-}
-
 // Build a unit quaternion from a rotation axis (arbitrary) and angle.
-void axis_angle_quat(float ax, float ay, float az, float angle,
-                     float& w, float& x, float& y, float& z) {
+void axis_angle_quat(float ax, float ay, float az, float angle, float& w, float& x, float& y,
+                     float& z) {
     float len = std::sqrt(ax * ax + ay * ay + az * az);
-    if (len < 1e-9f) { w = 1; x = y = z = 0; return; }
-    ax /= len; ay /= len; az /= len;
+    if (len < 1e-9f) {
+        w = 1;
+        x = y = z = 0;
+        return;
+    }
+    ax /= len;
+    ay /= len;
+    az /= len;
     float h = angle * 0.5f;
     float s = std::sin(h);
-    w = std::cos(h); x = ax * s; y = ay * s; z = az * s;
+    w = std::cos(h);
+    x = ax * s;
+    y = ay * s;
+    z = az * s;
 }
 
 }  // namespace
@@ -76,11 +77,11 @@ int main() {
         quats.push_back({w, x, y, z});
     }
     // Edge cases.
-    quats.push_back({1, 0, 0, 0});               // identity
-    quats.push_back({0, 1, 0, 0});               // 180deg around X
-    quats.push_back({0, 0, 1, 0});               // 180deg around Y
-    quats.push_back({0, 0, 0, 1});               // 180deg around Z
-    quats.push_back({0.5, 0.5, 0.5, 0.5});       // 120deg, symmetric
+    quats.push_back({1, 0, 0, 0});                      // identity
+    quats.push_back({0, 1, 0, 0});                      // 180deg around X
+    quats.push_back({0, 0, 1, 0});                      // 180deg around Y
+    quats.push_back({0, 0, 0, 1});                      // 180deg around Z
+    quats.push_back({0.5, 0.5, 0.5, 0.5});              // 120deg, symmetric
     quats.push_back({0.70710678f, 0.70710678f, 0, 0});  // 90deg X
     quats.push_back({0.9999f, 0.01f, 0.01f, 0.01f});    // near-identity
 
@@ -89,21 +90,20 @@ int main() {
     float worst = 0.0f;
 
     for (const auto& q : quats) {
-        // Encode through melkor (w-first).
-        GaussianCloud cloud;
-        GaussianSplat s{};
-        s.x = s.y = s.z = 0.0f;
-        s.f_dc_0 = s.f_dc_1 = s.f_dc_2 = 0.0f;
-        s.opacity = 5.0f;
-        s.scale_0 = s.scale_1 = s.scale_2 = -2.0f;
-        s.rot_0 = q[0]; s.rot_1 = q[1]; s.rot_2 = q[2]; s.rot_3 = q[3];
-        cloud.addSplat(s);
-        cloud.setShDegree(0);
+        const auto unit = math::normalize({q[1], q[2], q[3], q[0]}).value();
+        SplatBufferInput input;
+        input.positions.push_back({});
+        input.scales.push_back({std::exp(-2.0f), std::exp(-2.0f), std::exp(-2.0f)});
+        input.rotations.push_back({static_cast<float>(unit.x), static_cast<float>(unit.y),
+                                   static_cast<float>(unit.z), static_cast<float>(unit.w)});
+        input.opacities.push_back(0.99f);
+        input.sh = ShBuffer::black(1).value();
+        auto data = SplatData::create(std::move(input)).value();
 
         SpzEncoder enc;
         SpzEncodeConfig cfg;
         std::vector<uint8_t> buf;
-        auto res = enc.encodeToBuffer(buf, cloud, cfg);
+        auto res = enc.encodeToBuffer(buf, data, cfg);
         if (!res.success) {
             printf("FAIL: encode failed for quaternion\n");
             return 1;
@@ -118,23 +118,21 @@ int main() {
             return 1;
         }
 
-        // spz gives xyzw; back to melkor w-first for comparison.
+        // spz gives the same canonical xyzw ordering.
         float dx = spz_cloud.rotations[0], dy = spz_cloud.rotations[1];
         float dz = spz_cloud.rotations[2], dw = spz_cloud.rotations[3];
 
-        float m_in[9], m_out[9];
-        utils::quatToRotationMatrix(q[0], q[1], q[2], q[3], m_in);
-        utils::quatToRotationMatrix(dw, dx, dy, dz, m_out);
-
-        float diff = mat_diff(m_in, m_out);
+        const float diff =
+            static_cast<float>(math::angular_distance(unit, math::Quat{dx, dy, dz, dw}));
         worst = std::max(worst, diff);
         ++checked;
-        if (diff > ROT_TOL) ++over_tol;
+        if (diff > ROT_TOL)
+            ++over_tol;
     }
 
     printf("[fuzz] SPZ quaternion rotation preservation\n");
     printf("    checked: %d quaternions (random + edge cases)\n", checked);
-    printf("    worst matrix-element diff: %.6f\n", worst);
+    printf("    worst angular error (rad): %.6f\n", worst);
     printf("    over tolerance (%.4f): %d\n", ROT_TOL, over_tol);
     float pct = over_tol == 0 ? 0.0f : 100.0f * over_tol / checked;
     // Allow a small fraction to marginally exceed due to quantization, but the

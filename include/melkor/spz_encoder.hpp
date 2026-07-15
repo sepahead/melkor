@@ -1,7 +1,11 @@
 #pragma once
 
-#include "melkor/gaussian_data.hpp"
 #include "melkor/limits.hpp"
+#include "melkor/scene.hpp"
+
+#include <cstddef>
+#include <cstdint>
+#include <optional>
 #include <string>
 #include <vector>
 
@@ -18,8 +22,9 @@ struct SpzDecodeMetadata {
 
 // SPZ encoding configuration
 struct SpzEncodeConfig {
-    // Spherical harmonics degree to encode (0-3)
-    int sh_degree = 0;
+    // Spherical harmonics degree to encode (0-3). -1 preserves the source degree. An explicit
+    // lower degree is a reported truncation; an explicit higher degree never invents coefficients.
+    int sh_degree = -1;
 
     // Note: position quantization precision (fractional bits) is fixed by
     // the spz container format writer (12 bits) and is not configurable —
@@ -31,6 +36,7 @@ struct SpzEncodeResult {
     bool success = false;
     std::string error_message;
     size_t bytes_written = 0;
+    std::vector<Diagnostic> diagnostics;
 };
 
 // SPZ encoder using nianticlabs/spz library
@@ -38,15 +44,13 @@ class SpzEncoder {
 public:
     SpzEncoder();
     ~SpzEncoder();
-    
+
     // Encode to file
-    SpzEncodeResult encodeToFile(const std::string& filepath,
-                                 const GaussianCloud& cloud,
+    SpzEncodeResult encodeToFile(const std::string& filepath, const SplatData& data,
                                  const SpzEncodeConfig& config = {});
-    
+
     // Encode to memory buffer
-    SpzEncodeResult encodeToBuffer(std::vector<uint8_t>& buffer,
-                                   const GaussianCloud& cloud,
+    SpzEncodeResult encodeToBuffer(std::vector<uint8_t>& buffer, const SplatData& data,
                                    const SpzEncodeConfig& config = {});
 };
 
@@ -57,14 +61,14 @@ public:
     ~SpzDecoder();
 
     using Metadata = SpzDecodeMetadata;
-    
+
     struct DecodeResult {
         bool success = false;
         std::string error_message;
-        GaussianCloud cloud;
+        std::optional<SplatData> data;
         Metadata metadata;
     };
-    
+
     // Decode from file. `limits` bounds the compressed input size charged against a Budget before
     // the decode. (The decoded allocation happens inside vendored upstream after a whole-stream
     // inflate; bounding that fully needs a header peek and is tracked with the SPZ v4 upgrade.)
@@ -72,8 +76,9 @@ public:
                                 const Limits& limits = Limits::for_profile(LimitsProfile::desktop));
 
     // Decode from memory buffer (see decodeFromFile for `limits`).
-    DecodeResult decodeFromBuffer(const uint8_t* data, size_t size,
-                                  const Limits& limits = Limits::for_profile(LimitsProfile::desktop));
+    DecodeResult
+    decodeFromBuffer(const uint8_t* data, size_t size,
+                     const Limits& limits = Limits::for_profile(LimitsProfile::desktop));
 };
 
 #else
@@ -83,18 +88,17 @@ class SpzEncoder {
 public:
     SpzEncoder() = default;
     ~SpzEncoder() = default;
-    
+
     struct SpzEncodeResult {
         bool success = false;
         std::string error_message = "SPZ support not compiled";
         size_t bytes_written = 0;
+        std::vector<Diagnostic> diagnostics;
     };
-    
-    template<typename... Args>
-    SpzEncodeResult encodeToFile(Args&&...) { return {}; }
-    
-    template<typename... Args>
-    SpzEncodeResult encodeToBuffer(Args&&...) { return {}; }
+
+    template <typename... Args> SpzEncodeResult encodeToFile(Args&&...) { return {}; }
+
+    template <typename... Args> SpzEncodeResult encodeToBuffer(Args&&...) { return {}; }
 };
 
 class SpzDecoder {
@@ -103,22 +107,20 @@ public:
     ~SpzDecoder() = default;
 
     using Metadata = SpzDecodeMetadata;
-    
+
     struct DecodeResult {
         bool success = false;
         std::string error_message = "SPZ support not compiled";
-        GaussianCloud cloud;
+        std::optional<SplatData> data;
         Metadata metadata;
     };
-    
-    template<typename... Args>
-    DecodeResult decodeFromFile(Args&&...) { return {}; }
-    
-    template<typename... Args>
-    DecodeResult decodeFromBuffer(Args&&...) { return {}; }
+
+    template <typename... Args> DecodeResult decodeFromFile(Args&&...) { return {}; }
+
+    template <typename... Args> DecodeResult decodeFromBuffer(Args&&...) { return {}; }
 };
 
-#endif // MELKOR_HAS_SPZ
+#endif  // MELKOR_HAS_SPZ
 
 // Check if SPZ support is available at runtime
 inline bool isSpzAvailable() {
@@ -129,4 +131,4 @@ inline bool isSpzAvailable() {
 #endif
 }
 
-} // namespace melkor
+}  // namespace melkor

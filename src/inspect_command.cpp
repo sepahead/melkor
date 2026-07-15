@@ -56,10 +56,10 @@ struct InspectDocument {
 
 std::string extensionOf(const std::string& path) {
     std::string extension = fs::path(path).extension().string();
-    std::transform(extension.begin(), extension.end(), extension.begin(), [](unsigned char ch) {
-        return static_cast<char>(std::tolower(ch));
-    });
-    if (!extension.empty() && extension.front() == '.') extension.erase(extension.begin());
+    std::transform(extension.begin(), extension.end(), extension.begin(),
+                   [](unsigned char ch) { return static_cast<char>(std::tolower(ch)); });
+    if (!extension.empty() && extension.front() == '.')
+        extension.erase(extension.begin());
     return extension;
 }
 
@@ -74,35 +74,39 @@ const char* severityName(InspectionSeverity severity) {
 
 const char* plyEncodingName(PlyReader::Metadata::Encoding encoding) {
     switch (encoding) {
-        case PlyReader::Metadata::Encoding::Ascii: return "ascii";
-        case PlyReader::Metadata::Encoding::BinaryLittleEndian: return "binary_little_endian";
-        case PlyReader::Metadata::Encoding::BinaryBigEndian: return "binary_big_endian";
-        case PlyReader::Metadata::Encoding::Unknown:
-        default: return "unknown";
+    case PlyReader::Metadata::Encoding::Ascii:
+        return "ascii";
+    case PlyReader::Metadata::Encoding::BinaryLittleEndian:
+        return "binary_little_endian";
+    case PlyReader::Metadata::Encoding::BinaryBigEndian:
+        return "binary_big_endian";
+    case PlyReader::Metadata::Encoding::Unknown:
+    default:
+        return "unknown";
     }
 }
 
 void addPlyFieldWarnings(InspectDocument& document, const PlyReader::Metadata& metadata) {
-    if (metadata.declared_vertices == 0) return;
+    if (metadata.declared_vertices == 0)
+        return;
     if (!metadata.has_sh_dc && metadata.has_rgb) {
-        addInspectionIssue(document.inspection, InspectionSeverity::Warning,
-                           "rgb_color_converted",
+        addInspectionIssue(document.inspection, InspectionSeverity::Warning, "rgb_color_converted",
                            "RGB byte colors were converted to spherical-harmonics DC values.");
     } else if (!metadata.has_sh_dc && !metadata.has_rgb) {
-        addInspectionIssue(document.inspection, InspectionSeverity::Warning,
-                           "defaulted_color", "Color was absent and defaulted by the reader.");
+        addInspectionIssue(document.inspection, InspectionSeverity::Warning, "defaulted_color",
+                           "Color was absent and defaulted by the reader.");
     }
     if (!metadata.has_opacity) {
-        addInspectionIssue(document.inspection, InspectionSeverity::Warning,
-                           "defaulted_opacity", "Opacity was absent and defaulted by the reader.");
+        addInspectionIssue(document.inspection, InspectionSeverity::Warning, "defaulted_opacity",
+                           "Opacity was absent and defaulted by the reader.");
     }
     if (!metadata.has_scale) {
-        addInspectionIssue(document.inspection, InspectionSeverity::Warning,
-                           "defaulted_scale", "Scale was absent and defaulted by the reader.");
+        addInspectionIssue(document.inspection, InspectionSeverity::Warning, "defaulted_scale",
+                           "Scale was absent and defaulted by the reader.");
     }
     if (!metadata.has_rotation) {
-        addInspectionIssue(document.inspection, InspectionSeverity::Warning,
-                           "defaulted_rotation", "Rotation was absent and defaulted by the reader.");
+        addInspectionIssue(document.inspection, InspectionSeverity::Warning, "defaulted_rotation",
+                           "Rotation was absent and defaulted by the reader.");
     }
 }
 
@@ -110,7 +114,8 @@ InspectDocument inspectPath(const std::string& path) {
     InspectDocument document;
     document.path = path;
     const std::string extension = extensionOf(path);
-    if (!extension.empty()) document.format = extension;
+    if (!extension.empty())
+        document.format = extension;
 
     std::error_code error;
     const auto status = fs::status(path, error);
@@ -129,7 +134,6 @@ InspectDocument inspectPath(const std::string& path) {
     }
     document.has_bytes = true;
 
-    GaussianCloud cloud;
     if (document.format == "ply") {
         PlyReader reader;
         auto result = reader.readFromFile(path);
@@ -137,21 +141,27 @@ InspectDocument inspectPath(const std::string& path) {
             addSourceError(document, "read_error", result.error_message);
             return document;
         }
-        cloud = std::move(result.cloud);
-        document.kind = "gaussian_cloud";
+        if (!result.data.has_value()) {
+            addSourceError(document, "internal_error",
+                           "PLY reader succeeded without canonical scene data.");
+            return document;
+        }
+        const SplatData& data = *result.data;
+        document.kind = "splat_data";
         document.encoding = plyEncodingName(result.metadata.encoding);
         document.declared_splats = result.metadata.declared_vertices;
         document.has_declared_splats = true;
         document.fields.position = result.metadata.has_position ? "explicit" : "missing";
-        document.fields.color = result.metadata.has_sh_dc
-            ? "explicit_sh_dc" : result.metadata.has_rgb ? "converted_rgb" : "defaulted";
+        document.fields.color = result.metadata.has_sh_dc ? "explicit_sh_dc"
+                                : result.metadata.has_rgb ? "converted_rgb"
+                                                          : "defaulted";
         document.fields.opacity = result.metadata.has_opacity ? "explicit" : "defaulted";
         document.fields.scale = result.metadata.has_scale ? "explicit" : "defaulted";
         document.fields.rotation = result.metadata.has_rotation ? "explicit" : "defaulted";
         document.fields.sh_rest = result.metadata.has_sh_rest ? "explicit" : "absent";
         document.has_cloud = true;
-        document.inspection = inspectLegacyCloud(cloud);
-        if (result.metadata.declared_vertices != cloud.size()) {
+        document.inspection = inspectCloud(data);
+        if (result.metadata.declared_vertices != data.size()) {
             addInspectionIssue(document.inspection, InspectionSeverity::Error,
                                "decoded_count_mismatch",
                                "Decoded PLY count differs from the declared count.");
@@ -164,22 +174,27 @@ InspectDocument inspectPath(const std::string& path) {
         if (!result.success) {
             const bool unsupported_version =
                 result.error_message.rfind("Unsupported SPZ version", 0) == 0;
-            addSourceError(document,
-                           unsupported_version ? "unsupported_spz_version" : "read_error",
+            addSourceError(document, unsupported_version ? "unsupported_spz_version" : "read_error",
                            result.error_message);
             return document;
         }
-        cloud = std::move(result.cloud);
-        document.kind = "gaussian_cloud";
+        if (!result.data.has_value()) {
+            addSourceError(document, "internal_error",
+                           "SPZ decoder succeeded without canonical scene data.");
+            return document;
+        }
+        const SplatData& data = *result.data;
+        document.kind = "splat_data";
         document.encoding = "spz";
         document.declared_splats = result.metadata.declared_points;
         document.has_declared_splats = true;
         document.antialiased = result.metadata.antialiased;
         document.has_antialiased = true;
-        document.fields = {"explicit", "explicit_sh_dc", "explicit", "explicit", "explicit",
-                           result.metadata.sh_degree > 0 ? "explicit" : "absent"};
+        document.fields = {"explicit", "explicit_sh_dc",
+                           "explicit", "explicit",
+                           "explicit", result.metadata.sh_degree > 0 ? "explicit" : "absent"};
         document.has_cloud = true;
-        document.inspection = inspectLegacyCloud(cloud);
+        document.inspection = inspectCloud(data);
         if (result.metadata.decoded_points != result.metadata.declared_points) {
             addInspectionIssue(document.inspection, InspectionSeverity::Error,
                                "decoded_count_mismatch",
@@ -198,21 +213,21 @@ InspectDocument inspectPath(const std::string& path) {
         std::vector<std::uint8_t> bytes((std::istreambuf_iterator<char>(in)),
                                         std::istreambuf_iterator<char>());
         auto scene = melkor::format::gltf::read_glb(bytes.data(), bytes.size());
-        const bool no_splat_primitive =
-            !scene.has_value() && !scene.diagnostics().empty() &&
-            scene.diagnostics()[0].code == "MK2161_GLTF_NO_SPLATS";
+        const bool no_splat_primitive = !scene.has_value() && !scene.diagnostics().empty() &&
+                                        scene.diagnostics()[0].code == "MK2161_GLTF_NO_SPLATS";
 
         if (scene.has_value()) {
             // KHR_gaussian_splatting is already canonical. Inspect it directly: converting linear
             // scale/opacity back into the legacy log/logit model merely to compute bounds created
             // exactly the double-activation bug class A1 is removing.
             const auto& sd = scene.value().data;
-            document.kind = "gaussian_cloud";
+            document.kind = "splat_data";
             document.encoding = "khr_gaussian_splatting";
             document.declared_splats = sd.size();
             document.has_declared_splats = true;
-            document.fields = {"explicit", "explicit_sh_dc", "explicit", "explicit", "explicit",
-                               scene.value().sh_degree > 0 ? "explicit" : "absent"};
+            document.fields = {"explicit", "explicit_sh_dc",
+                               "explicit", "explicit",
+                               "explicit", scene.value().sh_degree > 0 ? "explicit" : "absent"};
             document.has_cloud = true;
             document.inspection = inspectCloud(sd);
             // Surface the conversion loss report so an inspector sees what a conversion would lose.
@@ -222,7 +237,7 @@ InspectDocument inspectPath(const std::string& path) {
                                                                : item.source_feature);
             }
         } else if (no_splat_primitive) {
-            // Not a splat asset: fall back to the legacy vertices-as-splats reading.
+            // Not a splat asset: sample mesh vertices into the same canonical scene contract.
             GlbReader reader;
             GlbConversionConfig config;
             config.convert_coordinate_system = false;
@@ -231,15 +246,20 @@ InspectDocument inspectPath(const std::string& path) {
                 addSourceError(document, "read_error", result.error_message);
                 return document;
             }
-            cloud = std::move(result.cloud);
+            if (!result.data.has_value()) {
+                addSourceError(document, "internal_error",
+                               "Mesh reader succeeded without canonical scene data.");
+                return document;
+            }
             document.kind = "mesh_vertices";
             document.encoding = document.format == "glb" ? "binary" : "json";
             document.declared_splats = result.total_vertices;
             document.has_declared_splats = true;
-            document.fields = {"explicit", "converted_or_defaulted", "generated", "generated",
+            document.fields = {"explicit",  "converted_or_defaulted",
+                               "generated", "generated",
                                "generated", "absent"};
             document.has_cloud = true;
-            document.inspection = inspectLegacyCloud(cloud);
+            document.inspection = inspectCloud(*result.data);
         } else {
             addSourceError(document, "read_error",
                            scene.diagnostics().empty() ? "failed to read GLB"
@@ -273,19 +293,33 @@ void writeJsonString(std::ostream& stream, const std::string& value) {
             continue;
         }
         switch (ch) {
-            case '"': stream << "\\\""; break;
-            case '\\': stream << "\\\\"; break;
-            case '\b': stream << "\\b"; break;
-            case '\f': stream << "\\f"; break;
-            case '\n': stream << "\\n"; break;
-            case '\r': stream << "\\r"; break;
-            case '\t': stream << "\\t"; break;
-            default:
-                if (ch < 0x20) {
-                    stream << "\\u00" << hex[ch >> 4] << hex[ch & 0x0f];
-                } else {
-                    stream.put(static_cast<char>(ch));
-                }
+        case '"':
+            stream << "\\\"";
+            break;
+        case '\\':
+            stream << "\\\\";
+            break;
+        case '\b':
+            stream << "\\b";
+            break;
+        case '\f':
+            stream << "\\f";
+            break;
+        case '\n':
+            stream << "\\n";
+            break;
+        case '\r':
+            stream << "\\r";
+            break;
+        case '\t':
+            stream << "\\t";
+            break;
+        default:
+            if (ch < 0x20) {
+                stream << "\\u00" << hex[ch >> 4] << hex[ch & 0x0f];
+            } else {
+                stream.put(static_cast<char>(ch));
+            }
         }
         ++index;
     }
@@ -304,17 +338,23 @@ void writeFloat(std::ostream& stream, float value) {
 }
 
 void writeNullableSize(std::ostream& stream, bool available, uintmax_t value) {
-    if (available) stream << value;
-    else stream << "null";
+    if (available)
+        stream << value;
+    else
+        stream << "null";
 }
 
 void writeJson(const InspectDocument& document, std::ostream& stream) {
     stream << "{\"schema\":\"melkor.inspect.v1\",\"valid\":"
            << (document.inspection.valid ? "true" : "false") << ",\"source\":{";
-    stream << "\"path\":"; writeJsonString(stream, document.path);
-    stream << ",\"format\":"; writeJsonString(stream, document.format);
-    stream << ",\"kind\":"; writeJsonString(stream, document.kind);
-    stream << ",\"bytes\":"; writeNullableSize(stream, document.has_bytes, document.bytes);
+    stream << "\"path\":";
+    writeJsonString(stream, document.path);
+    stream << ",\"format\":";
+    writeJsonString(stream, document.format);
+    stream << ",\"kind\":";
+    writeJsonString(stream, document.kind);
+    stream << ",\"bytes\":";
+    writeNullableSize(stream, document.has_bytes, document.bytes);
     stream << "},\"cloud\":";
     if (!document.has_cloud) {
         stream << "null";
@@ -326,23 +366,32 @@ void writeJson(const InspectDocument& document, std::ostream& stream) {
         } else {
             stream << "{\"min\":[";
             for (int i = 0; i < 3; ++i) {
-                if (i) stream << ',';
+                if (i)
+                    stream << ',';
                 writeFloat(stream, document.inspection.bounds.min[i]);
             }
             stream << "],\"max\":[";
             for (int i = 0; i < 3; ++i) {
-                if (i) stream << ',';
+                if (i)
+                    stream << ',';
                 writeFloat(stream, document.inspection.bounds.max[i]);
             }
             stream << "]},\"fields\":{";
         }
-        if (!document.inspection.bounds.available) stream << ",\"fields\":{";
-        stream << "\"position\":"; writeJsonString(stream, document.fields.position);
-        stream << ",\"color\":"; writeJsonString(stream, document.fields.color);
-        stream << ",\"opacity\":"; writeJsonString(stream, document.fields.opacity);
-        stream << ",\"scale\":"; writeJsonString(stream, document.fields.scale);
-        stream << ",\"rotation\":"; writeJsonString(stream, document.fields.rotation);
-        stream << ",\"sh_rest\":"; writeJsonString(stream, document.fields.sh_rest);
+        if (!document.inspection.bounds.available)
+            stream << ",\"fields\":{";
+        stream << "\"position\":";
+        writeJsonString(stream, document.fields.position);
+        stream << ",\"color\":";
+        writeJsonString(stream, document.fields.color);
+        stream << ",\"opacity\":";
+        writeJsonString(stream, document.fields.opacity);
+        stream << ",\"scale\":";
+        writeJsonString(stream, document.fields.scale);
+        stream << ",\"rotation\":";
+        writeJsonString(stream, document.fields.rotation);
+        stream << ",\"sh_rest\":";
+        writeJsonString(stream, document.fields.sh_rest);
         stream << "}}";
     }
     stream << ",\"container\":{\"encoding\":";
@@ -350,19 +399,27 @@ void writeJson(const InspectDocument& document, std::ostream& stream) {
     stream << ",\"declared_splats\":";
     writeNullableSize(stream, document.has_declared_splats, document.declared_splats);
     stream << ",\"antialiased\":";
-    if (document.has_antialiased) stream << (document.antialiased ? "true" : "false");
-    else stream << "null";
+    if (document.has_antialiased)
+        stream << (document.antialiased ? "true" : "false");
+    else
+        stream << "null";
     stream << "},\"validation\":{\"errors\":" << document.inspection.error_count
            << ",\"warnings\":" << document.inspection.warning_count << ",\"issues\":[";
     for (size_t index = 0; index < document.inspection.issues.size(); ++index) {
         const auto& issue = document.inspection.issues[index];
-        if (index) stream << ',';
-        stream << "{\"severity\":"; writeJsonString(stream, severityName(issue.severity));
-        stream << ",\"code\":"; writeJsonString(stream, issue.code);
-        stream << ",\"message\":"; writeJsonString(stream, issue.message);
+        if (index)
+            stream << ',';
+        stream << "{\"severity\":";
+        writeJsonString(stream, severityName(issue.severity));
+        stream << ",\"code\":";
+        writeJsonString(stream, issue.code);
+        stream << ",\"message\":";
+        writeJsonString(stream, issue.message);
         stream << ",\"count\":" << issue.count << ",\"first_index\":";
-        if (issue.has_index) stream << issue.first_index;
-        else stream << "null";
+        if (issue.has_index)
+            stream << issue.first_index;
+        else
+            stream << "null";
         stream << '}';
     }
     stream << "]}}\n";
@@ -377,7 +434,8 @@ void writeHuman(const InspectDocument& document, std::ostream& stream) {
     stream << " (";
     text::writeDisplayString(stream, document.encoding);
     stream << ")\n";
-    if (document.has_bytes) stream << "  Bytes: " << document.bytes << '\n';
+    if (document.has_bytes)
+        stream << "  Bytes: " << document.bytes << '\n';
     stream << "  Valid: " << (document.inspection.valid ? "yes" : "no") << '\n';
     if (document.has_cloud) {
         stream << "  Kind: ";
@@ -388,12 +446,14 @@ void writeHuman(const InspectDocument& document, std::ostream& stream) {
         if (document.inspection.bounds.available) {
             stream << "  Bounds: [";
             for (int i = 0; i < 3; ++i) {
-                if (i) stream << ", ";
+                if (i)
+                    stream << ", ";
                 writeFloat(stream, document.inspection.bounds.min[i]);
             }
             stream << "] to [";
             for (int i = 0; i < 3; ++i) {
-                if (i) stream << ", ";
+                if (i)
+                    stream << ", ";
                 writeFloat(stream, document.inspection.bounds.max[i]);
             }
             stream << "]\n";
@@ -405,8 +465,10 @@ void writeHuman(const InspectDocument& document, std::ostream& stream) {
         text::writeDisplayString(stream, issue.code);
         stream << "] ";
         text::writeDisplayString(stream, issue.message);
-        if (issue.count > 1) stream << " (" << issue.count << " occurrences)";
-        if (issue.has_index) stream << " First index: " << issue.first_index << '.';
+        if (issue.count > 1)
+            stream << " (" << issue.count << " occurrences)";
+        if (issue.has_index)
+            stream << " First index: " << issue.first_index << '.';
         stream << '\n';
     }
 }
@@ -480,11 +542,15 @@ int runInspectCommand(int argc, char* argv[], const char* program) {
         addSourceError(document, "read_error",
                        std::string("Inspection failed safely: ") + error.what());
     }
-    if (json) writeJson(document, std::cout);
-    else writeHuman(document, std::cout);
+    if (json)
+        writeJson(document, std::cout);
+    else
+        writeHuman(document, std::cout);
 
-    if (!document.inspection.valid) return 1;
-    if (strict && document.inspection.warning_count > 0) return 1;
+    if (!document.inspection.valid)
+        return 1;
+    if (strict && document.inspection.warning_count > 0)
+        return 1;
     return 0;
 }
 

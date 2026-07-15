@@ -52,7 +52,7 @@ printf '%s\n' \
     'property float rot_3' \
     'end_header' \
     'nan 0 0 0 0 0 0 -2 -2 -2 1 0 0 0' > "$nan_ply"
-expect_fail "nonfinite_position" "$nan_ply" "$nan_output" --no-gpu
+expect_fail "MK1504_NONFINITE_POSITION" "$nan_ply" "$nan_output" --no-gpu
 if [[ -e "$nan_output" ]]; then
     echo "FAIL: rejected non-finite input left an output artifact" >&2
     exit 1

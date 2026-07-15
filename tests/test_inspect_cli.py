@@ -171,7 +171,7 @@ def main() -> int:
             khr_result = run(binary, str(khr_glb), "--json")
             assert khr_result.returncode == 0, khr_result.stderr
             khr_report = json.loads(khr_result.stdout)
-            assert khr_report["source"]["kind"] == "gaussian_cloud", khr_report["source"]
+            assert khr_report["source"]["kind"] == "splat_data", khr_report["source"]
             assert khr_report["cloud"]["splats"] == 3, khr_report["cloud"]
             assert khr_report["cloud"]["sh_degree"] == 1, khr_report["cloud"]
             assert khr_report["cloud"]["fields"]["color"] == "explicit_sh_dc"

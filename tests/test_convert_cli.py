@@ -31,9 +31,17 @@ def main() -> None:
                                    capture_output=True, text=True)
         assert inspected.returncode == 0, inspected.stderr
         report = json.loads(inspected.stdout)
-        assert report["source"]["kind"] == "gaussian_cloud", report["source"]
+        assert report["source"]["kind"] == "splat_data", report["source"]
         assert report["cloud"]["splats"] == 3, report["cloud"]
         assert report["cloud"]["sh_degree"] == 1, report["cloud"]
+
+        # The historical positional GLB path is only a mesh-vertex sampler. It must not treat a
+        # KHR splat primitive as a mesh and silently discard scale, rotation, opacity, and SH.
+        positional = subprocess.run([str(binary), str(seed), str(root / "positional.ply")],
+                                    capture_output=True, text=True)
+        assert positional.returncode != 0, positional.stdout
+        assert "KHR_gaussian_splatting" in positional.stderr, positional.stderr
+        assert not (root / "positional.ply").exists()
 
         # Cross-format conversion is not yet supported and must be refused cleanly (exit 2).
         cross = subprocess.run([str(binary), "convert", str(seed), str(root / "out.ply")],

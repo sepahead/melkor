@@ -49,13 +49,22 @@ void check(bool condition, const char* what, int line) {
 
 #define CHECK(cond) check((cond), #cond, __LINE__)
 
+SplatData make_ply_data(std::vector<Vec3f> positions = {}) {
+    SplatBufferInput input;
+    input.positions = std::move(positions);
+    input.scales.assign(input.positions.size(), Vec3f{1.0f, 1.0f, 1.0f});
+    input.rotations.assign(input.positions.size(), Quatf{});
+    input.opacities.assign(input.positions.size(), 0.5f);
+    input.sh = ShBuffer::black(input.positions.size()).value();
+    return SplatData::create(std::move(input)).value();
+}
+
 // A scratch directory that cleans itself up.
 class TempDir {
-  public:
+public:
     TempDir() {
-        path_ = fs::temp_directory_path() /
-                ("melkor-atomic-test-" + std::to_string(::getpid()) + "-" +
-                 std::to_string(counter_++));
+        path_ = fs::temp_directory_path() / ("melkor-atomic-test-" + std::to_string(::getpid()) +
+                                             "-" + std::to_string(counter_++));
         fs::create_directories(path_);
     }
     ~TempDir() {
@@ -64,7 +73,7 @@ class TempDir {
     }
     const fs::path& path() const { return path_; }
 
-  private:
+private:
     fs::path path_;
     static int counter_;
 };
@@ -92,8 +101,7 @@ void assert_destination_intact(const fs::path& destination, const std::string& o
     ++g_checks;
     if (actual != original) {
         ++g_failures;
-        std::fprintf(stderr,
-                     "FAIL [%s]: the destination was MODIFIED (%zu bytes, expected %zu)\n",
+        std::fprintf(stderr, "FAIL [%s]: the destination was MODIFIED (%zu bytes, expected %zu)\n",
                      scenario, actual.size(), original.size());
     }
 }
@@ -112,7 +120,9 @@ void assert_no_temp_files(const fs::path& directory, const char* scenario) {
     }
 }
 
-Budget make_budget() { return Budget(Limits::for_profile(LimitsProfile::desktop)); }
+Budget make_budget() {
+    return Budget(Limits::for_profile(LimitsProfile::desktop));
+}
 
 // ---------------------------------------------------------------------------
 // The happy path
@@ -270,7 +280,7 @@ void test_budget_exhaustion_mid_write_preserves_destination() {
         const std::vector<char> chunk(60, 'x');
         CHECK(writer.value()->write(chunk.data(), chunk.size()).has_value());  // 60 <= 100
 
-        auto failed = writer.value()->write(chunk.data(), chunk.size());       // 120 > 100
+        auto failed = writer.value()->write(chunk.data(), chunk.size());  // 120 > 100
         CHECK(!failed.has_value());
         CHECK(failed.error_code() == ErrorCode::resource_limit);
     }
@@ -454,11 +464,10 @@ void test_ply_writer_does_not_truncate_on_open() {
     // A failure after that point left a zero-length file where the user's asset had been.
     //
     // Here, a destination whose parent does not exist is rejected before a single byte moves.
-    GaussianCloud cloud;
+    const SplatData data = make_ply_data();
     PlyWriter writer;
-    const PlyWriteResult result =
-        writer.writeToFile((dir.path() / "no-such-dir" / "out.ply").string(), cloud,
-                           PlyWriteConfig{});
+    const PlyWriteResult result = writer.writeToFile(
+        (dir.path() / "no-such-dir" / "out.ply").string(), data, PlyWriteConfig{});
     CHECK(!result.success);
 
     // And the real file, elsewhere, is untouched.
@@ -468,7 +477,7 @@ void test_ply_writer_does_not_truncate_on_open() {
     const fs::path dir_destination = dir.path() / "a_dir";
     fs::create_directories(dir_destination);
     const PlyWriteResult to_dir =
-        writer.writeToFile(dir_destination.string(), cloud, PlyWriteConfig{});
+        writer.writeToFile(dir_destination.string(), data, PlyWriteConfig{});
     CHECK(!to_dir.success);
     CHECK(fs::is_directory(dir_destination));
 
@@ -481,15 +490,10 @@ void test_ply_writer_commits_atomically() {
     const fs::path destination = dir.path() / "scene.ply";
     write_file(destination, "old asset");
 
-    GaussianCloud cloud;
-    GaussianSplat splat;
-    splat.x = 1.0f;
-    splat.y = 2.0f;
-    splat.z = 3.0f;
-    cloud.addSplat(splat);
+    const SplatData data = make_ply_data({Vec3f{1.0f, 2.0f, 3.0f}});
 
     PlyWriter writer;
-    const PlyWriteResult result = writer.writeToFile(destination.string(), cloud, PlyWriteConfig{});
+    const PlyWriteResult result = writer.writeToFile(destination.string(), data, PlyWriteConfig{});
     CHECK(result.success);
     CHECK(result.bytes_written > 0);
 

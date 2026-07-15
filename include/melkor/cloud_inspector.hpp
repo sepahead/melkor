@@ -1,6 +1,5 @@
 #pragma once
 
-#include "melkor/gaussian_data.hpp"
 #include "melkor/scene.hpp"
 
 #include <cstddef>
@@ -45,15 +44,10 @@ struct CloudInspection {
 // as float32 covariance entries. Issue order is stable for deterministic CI artifacts.
 [[nodiscard]] CloudInspection inspectCloud(const SplatData& cloud);
 
-// Temporary validator for the backend/algorithm cluster that still uses the training-domain
-// GaussianCloud internally. New format or CLI code must use the canonical overload above. This is
-// deleted with the last legacy caller during A1; spelling out "Legacy" prevents new accidental use.
-[[nodiscard]] CloudInspection inspectLegacyCloud(const GaussianCloud& cloud);
-
 // Source-format adapters use this to append metadata warnings/errors while
 // preserving the same deterministic summary accounting.
-void addInspectionIssue(CloudInspection& inspection, InspectionSeverity severity,
-                        std::string code, std::string message, size_t count = 1,
-                        size_t first_index = 0, bool has_index = false);
+void addInspectionIssue(CloudInspection& inspection, InspectionSeverity severity, std::string code,
+                        std::string message, size_t count = 1, size_t first_index = 0,
+                        bool has_index = false);
 
 }  // namespace melkor

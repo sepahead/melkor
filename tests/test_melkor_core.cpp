@@ -7,7 +7,7 @@
 //
 // Coverage:
 //   1. SPZ quaternion round-trip against the canonical spz decoder (proves the
-//      xyzw/wxyz reordering is correct and not a symmetric double-bug).
+//      canonical xyzw boundary independently, without a symmetric Melkor-only double-bug).
 //   2. Header-driven PLY reader against three layouts: 3DGS ascii, plain
 //      red/green/blue ascii, and melkor-written binary.
 //   3. PCA normal estimation on a sphere surface (normals should align with the
@@ -17,6 +17,8 @@
 #include "melkor/enhanced_converter.hpp"
 #include "melkor/gaussian_data.hpp"
 #include "melkor/glb_reader.hpp"
+#include "melkor/math/color.hpp"
+#include "melkor/math/quaternion.hpp"
 #include "melkor/ply_writer.hpp"
 
 #ifdef MELKOR_HAS_SPZ
@@ -52,310 +54,172 @@ void check(bool cond, const char* msg) {
     }
 }
 
-// ---- Test 1: SPZ quaternion order -----------------------------------------
+// ---- Test 1: SPZ canonical boundary ---------------------------------------
 #ifdef MELKOR_HAS_SPZ
+melkor::SplatData make_spz_data(std::uint32_t degree, std::vector<float> sh_values = {}) {
+    using namespace melkor;
+    const std::size_t coefficient_count = static_cast<std::size_t>(degree + 1) * (degree + 1);
+    if (sh_values.empty())
+        sh_values.assign(coefficient_count * 3, 0.0f);
+    SplatBufferInput input;
+    input.positions.push_back({});
+    input.scales.push_back({0.1f, 0.2f, 0.3f});
+    input.rotations.push_back({});
+    input.opacities.push_back(0.75f);
+    input.sh = ShBuffer::create(degree, 1, std::move(sh_values)).value();
+    return SplatData::create(std::move(input)).value();
+}
+
+bool has_diagnostic(const melkor::SpzEncodeResult& result, const char* code) {
+    return std::any_of(result.diagnostics.begin(), result.diagnostics.end(),
+                       [&](const auto& diagnostic) { return diagnostic.code == code; });
+}
+
 bool test_spz_quaternion_order() {
     printf("[test] SPZ quaternion order against canonical decoder\n");
     using namespace melkor;
-    GaussianCloud cloud;
-    GaussianSplat s{};
-    s.x = s.y = s.z = 0.0f;
-    s.f_dc_0 = s.f_dc_1 = s.f_dc_2 = 0.0f;
-    s.opacity = 5.0f;
-    s.scale_0 = s.scale_1 = s.scale_2 = -2.0f;
-    // Non-symmetric quaternion (all four components differ) so any permutation
-    // changes the rotation: w=0.8, x=0.4, y=0.2, z=0.4 (normalized below).
-    float w = 0.8f, x = 0.4f, y = 0.2f, z = 0.4f;
-    float n = std::sqrt(w * w + x * x + y * y + z * z);
-    w /= n; x /= n; y /= n; z /= n;
-    s.rot_0 = w; s.rot_1 = x; s.rot_2 = y; s.rot_3 = z;
-    cloud.addSplat(s);
-    cloud.setShDegree(0);
+    auto data = make_spz_data(0);
+    const auto q = math::normalize({0.4, 0.2, 0.4, 0.8}).value();
+    auto edit = data.edit();
+    edit.set_rotations({{static_cast<float>(q.x), static_cast<float>(q.y), static_cast<float>(q.z),
+                         static_cast<float>(q.w)}});
+    data = edit.commit().value();
 
-    // Unique per-process path so concurrent CI runners (or different users
-    // sharing /tmp) cannot collide; removed on every exit path below.
-    const std::string spz_path =
-        (std::filesystem::temp_directory_path() /
-         ("melkor_test_quat_" + std::to_string(getpid()) + ".spz")).string();
-
-    SpzEncoder enc;
-    SpzEncodeConfig cfg;
-    auto res = enc.encodeToFile(spz_path, cloud, cfg);
-    if (!res.success) {
-        check(false, "encode to file");
-        std::filesystem::remove(spz_path);
-        return false;
-    }
-
-    // Decode with spz's own loader (NOT melkor's) so a symmetric double-bug
-    // cannot hide: melkor stores w-first, spz expects xyzw.
-    spz::UnpackOptions uo;
-    uo.to = spz::CoordinateSystem::RDF;
-    auto spz_cloud = spz::loadSpz(spz_path, uo);
-    if (spz_cloud.numPoints != 1) {
-        check(false, "spz decoded point count");
-        std::filesystem::remove(spz_path);
-        return false;
-    }
-    // spz rotations are xyzw; melkor wrote (w,x,y,z), so after reordering we
-    // expect the same values back within quantization tolerance (9-bit for the
-    // smallest-three encoding).
-    float gx = spz_cloud.rotations[0], gy = spz_cloud.rotations[1];
-    float gz = spz_cloud.rotations[2], gw = spz_cloud.rotations[3];
-    const float tol = 2e-2f;  // accounts for 9-bit quaternion quantization
-    check(std::abs(gx - x) < tol && std::abs(gy - y) < tol &&
-          std::abs(gz - z) < tol && std::abs(gw - w) < tol,
-          "spz decoded quaternion matches input (xyzw order)");
-    std::filesystem::remove(spz_path);
+    const std::string path = (std::filesystem::temp_directory_path() /
+                              ("melkor_test_quat_" + std::to_string(getpid()) + ".spz"))
+                                 .string();
+    const auto encoded = SpzEncoder{}.encodeToFile(path, data);
+    spz::UnpackOptions options;
+    options.to = spz::CoordinateSystem::RDF;
+    const auto external = encoded.success ? spz::loadSpz(path, options) : spz::GaussianCloud{};
+    const bool ok =
+        external.numPoints == 1 && external.rotations.size() == 4 &&
+        math::angular_distance(q, {external.rotations[0], external.rotations[1],
+                                   external.rotations[2], external.rotations[3]}) < 0.03;
+    check(encoded.success && ok, "SPZ external decoder preserves canonical xyzw rotation");
+    std::filesystem::remove(path);
     return true;
 }
 
-// ---- Test 1b: SPZ SH-rest channel order against canonical decoder ---------
-// Melkor stores sh_rest channel-major (all R coefficients, then G, then B —
-// the 3DGS PLY convention); SPZ interleaves the channel as the fastest axis.
-// Decode with spz's own loader so a symmetric transpose double-bug in
-// melkor's encode+decode cannot hide.
 bool test_spz_sh_channel_order() {
-    printf("[test] SPZ SH-rest channel order against canonical decoder\n");
+    printf("[test] SPZ SH coefficient/channel order\n");
     using namespace melkor;
-    GaussianCloud cloud;
-    GaussianSplat s{};
-    s.opacity = 5.0f;
-    s.scale_0 = s.scale_1 = s.scale_2 = -2.0f;
-    s.rot_0 = 1.0f;
-    // Degree 1: 3 coefficients x 3 channels, channel-major. All nine values
-    // pairwise distinct by >= 0.2 so any mis-ordering exceeds the
-    // quantization tolerance below.
-    const float r[3] = {0.8f, 0.4f, 0.0f};
-    const float g[3] = {-0.4f, -0.8f, 0.6f};
-    const float b[3] = {-0.6f, 0.2f, -0.2f};
-    for (float v : r) s.sh_rest.push_back(v);
-    for (float v : g) s.sh_rest.push_back(v);
-    for (float v : b) s.sh_rest.push_back(v);
-    cloud.addSplat(s);
-    cloud.setShDegree(1);
-
-    const std::string spz_path =
-        (std::filesystem::temp_directory_path() /
-         ("melkor_test_sh_" + std::to_string(getpid()) + ".spz")).string();
-
-    SpzEncoder enc;
-    SpzEncodeConfig cfg;
-    cfg.sh_degree = 1;
-    if (!enc.encodeToFile(spz_path, cloud, cfg).success) {
-        check(false, "SH encode to file");
-        std::filesystem::remove(spz_path);
-        return false;
+    const std::vector<float> canonical{
+        0.1f, 0.2f, 0.3f, 0.8f, -0.4f, -0.6f, 0.4f, -0.8f, 0.2f, 0.0f, 0.6f, -0.2f,
+    };
+    auto data = make_spz_data(1, canonical);
+    std::vector<std::uint8_t> buffer;
+    SpzEncodeConfig config;
+    config.sh_degree = 1;
+    const auto encoded = SpzEncoder{}.encodeToBuffer(buffer, data, config);
+    spz::UnpackOptions options;
+    options.to = spz::CoordinateSystem::RDF;
+    const auto external =
+        encoded.success ? spz::loadSpz(buffer.data(), static_cast<int32_t>(buffer.size()), options)
+                        : spz::GaussianCloud{};
+    bool external_ok = external.sh.size() == 9;
+    for (std::size_t i = 0; external_ok && i < 9; ++i) {
+        external_ok = std::abs(external.sh[i] - canonical[i + 3]) < 0.09f;
     }
-
-    spz::UnpackOptions uo;
-    uo.to = spz::CoordinateSystem::RDF;
-    auto spz_cloud = spz::loadSpz(spz_path, uo);
-    if (spz_cloud.numPoints != 1 || spz_cloud.sh.size() != 9) {
-        check(false, "spz decoded SH size");
-        std::filesystem::remove(spz_path);
-        return false;
+    const auto decoded = encoded.success
+                             ? SpzDecoder{}.decodeFromBuffer(buffer.data(), buffer.size())
+                             : SpzDecoder::DecodeResult{};
+    bool internal_ok = decoded.success && decoded.data.has_value() &&
+                       decoded.data->sh().raw().size() == canonical.size();
+    for (std::size_t i = 0; internal_ok && i < canonical.size(); ++i) {
+        internal_ok = std::abs(decoded.data->sh().raw()[i] - canonical[i]) < 0.09f;
     }
-    // Expected SPZ layout: c0r c0g c0b, c1r c1g c1b, c2r c2g c2b.
-    const float expected[9] = {r[0], g[0], b[0], r[1], g[1], b[1],
-                               r[2], g[2], b[2]};
-    const float tol = 0.09f;  // 8-bit SH quantization
-    bool interleaved_ok = true;
-    for (int i = 0; i < 9; ++i) {
-        if (std::abs(spz_cloud.sh[i] - expected[i]) > tol) interleaved_ok = false;
-    }
-    check(interleaved_ok, "spz stores SH channel-interleaved (c0 rgb, c1 rgb, ...)");
-
-    // Melkor's own decoder must transpose back to channel-major.
-    SpzDecoder dec;
-    check(!dec.decodeFromBuffer(nullptr, 0).success &&
-          !dec.decodeFromBuffer(nullptr, 1).success,
-          "SPZ decoder rejects null and empty buffers");
-    const uint8_t dummy = 0;
-    check(!dec.decodeFromBuffer(
-              &dummy, static_cast<size_t>(std::numeric_limits<int32_t>::max()) + 1).success,
-          "SPZ decoder rejects sizes that would narrow to int32");
-    auto round = dec.decodeFromFile(spz_path);
-    bool round_ok = round.success && round.cloud.size() == 1 &&
-                    round.cloud[0].sh_rest.size() == 9;
-    if (round_ok) {
-        for (int i = 0; i < 9; ++i) {
-            if (std::abs(round.cloud[0].sh_rest[i] - s.sh_rest[i]) > tol)
-                round_ok = false;
-        }
-    }
-    check(round_ok, "melkor decode restores channel-major sh_rest");
-    std::filesystem::remove(spz_path);
+    check(encoded.success && external_ok && internal_ok,
+          "SPZ and SplatData share coefficient-major RGB-interleaved higher SH");
     return true;
 }
 
 bool test_spz_encoder_input_validation() {
-    printf("[test] SPZ encoder rejects unsafe public-API inputs\n");
+    printf("[test] SPZ encoder canonical validation and reported adjustments\n");
     using namespace melkor;
-
     SpzEncoder encoder;
+    std::vector<std::uint8_t> buffer = {1, 2, 3};
+
+    SplatBufferInput empty_input;
+    empty_input.sh = ShBuffer::black(0).value();
+    auto empty = SplatData::create(std::move(empty_input)).value();
+    check(!encoder.encodeToBuffer(buffer, empty).success && buffer.empty(),
+          "SPZ encoder rejects empty canonical data and clears stale output");
+
+    auto data = make_spz_data(0);
     SpzEncodeConfig config;
-    std::vector<uint8_t> buffer = {1, 2, 3};
-
-    GaussianCloud empty;
-    auto empty_result = encoder.encodeToBuffer(buffer, empty, config);
-    check(!empty_result.success && buffer.empty(),
-          "SPZ encoder rejects an empty cloud and clears stale output");
-
-    GaussianCloud cloud;
-    GaussianSplat splat{};
-    splat.opacity = 0.0f;
-    splat.scale_0 = splat.scale_1 = splat.scale_2 = -2.0f;
-    splat.rot_0 = 1.0f;
-    cloud.addSplat(splat);
-    cloud.setShDegree(0);
-
-    config.sh_degree = -1;
-    buffer = {9};
-    auto negative_degree = encoder.encodeToBuffer(buffer, cloud, config);
-    check(!negative_degree.success && buffer.empty() &&
-              negative_degree.error_message.find("requested SH degree") != std::string::npos,
-          "SPZ encoder rejects a negative requested SH degree");
-
+    config.sh_degree = -2;
+    check(!encoder.encodeToBuffer(buffer, data, config).success,
+          "SPZ encoder rejects degrees below the preserve-source sentinel");
     config.sh_degree = 4;
-    auto high_degree = encoder.encodeToBuffer(buffer, cloud, config);
-    check(!high_degree.success &&
-              high_degree.error_message.find("requested SH degree") != std::string::npos,
-          "SPZ encoder rejects a requested SH degree above three");
+    check(!encoder.encodeToBuffer(buffer, data, config).success,
+          "SPZ encoder rejects requested degree above three");
 
-    config.sh_degree = 0;
-    cloud[0].x = std::numeric_limits<float>::quiet_NaN();
-    auto nonfinite = encoder.encodeToBuffer(buffer, cloud, config);
-    check(!nonfinite.success &&
-              nonfinite.error_message.find("nonfinite_position") != std::string::npos,
-          "SPZ encoder rejects non-finite positions before integer quantization");
+    auto range_edit = data.edit();
+    range_edit.set_positions({{std::numeric_limits<float>::max(), 0.0f, 0.0f}});
+    auto out_of_range = range_edit.commit().value();
+    config.sh_degree = -1;
+    check(!encoder.encodeToBuffer(buffer, out_of_range, config).success,
+          "SPZ encoder rejects finite positions outside signed 24-bit fixed point");
 
     const std::string preserved_path =
         (std::filesystem::temp_directory_path() /
-         ("melkor_spz_preserve_" + std::to_string(getpid()) + ".spz")).string();
+         ("melkor_spz_preserve_" + std::to_string(getpid()) + ".spz"))
+            .string();
     {
         std::ofstream existing(preserved_path, std::ios::binary | std::ios::trunc);
         existing << "preserve-existing-output";
     }
-    auto invalid_file = encoder.encodeToFile(preserved_path, cloud, config);
+    const auto invalid_file = encoder.encodeToFile(preserved_path, out_of_range, config);
     std::ifstream preserved_stream(preserved_path, std::ios::binary);
     const std::string preserved((std::istreambuf_iterator<char>(preserved_stream)),
                                 std::istreambuf_iterator<char>());
     check(!invalid_file.success && preserved == "preserve-existing-output",
-          "SPZ validation failure preserves an existing destination file");
+          "SPZ validation failure preserves an existing destination");
     std::filesystem::remove(preserved_path);
-    cloud[0].x = 0.0f;
 
-    cloud[0].x = std::numeric_limits<float>::max();
-    auto position_range = encoder.encodeToBuffer(buffer, cloud, config);
-    check(!position_range.success &&
-              position_range.error_message.find("24-bit fixed-point range") != std::string::npos,
-          "SPZ encoder rejects finite positions that would overflow or wrap quantization");
-    cloud[0].x = 0.0f;
+    auto degree_four = make_spz_data(4);
+    check(!encoder.encodeToBuffer(buffer, degree_four, config).success,
+          "SPZ v1-v3 rejects degree four rather than silently truncating");
 
-    cloud[0].rot_0 = 0.0f;
-    auto zero_rotation = encoder.encodeToBuffer(buffer, cloud, config);
-    check(!zero_rotation.success &&
-              zero_rotation.error_message.find("zero_quaternion") != std::string::npos,
-          "SPZ encoder rejects a zero quaternion");
-    cloud[0].rot_0 = 1.0f;
-
-    cloud.setShDegree(1);
+    std::vector<float> degree_three_sh(16 * 3);
+    for (std::size_t i = 0; i < degree_three_sh.size(); ++i) {
+        degree_three_sh[i] = -0.8f + 0.025f * static_cast<float>(i);
+    }
+    auto degree_three = make_spz_data(3, degree_three_sh);
     config.sh_degree = 1;
-    auto short_sh = encoder.encodeToBuffer(buffer, cloud, config);
-    check(!short_sh.success &&
-              short_sh.error_message.find("sh_count_mismatch") != std::string::npos,
-          "SPZ encoder rejects SH arrays that do not match the cloud degree");
-
-    cloud[0].sh_rest.assign(9, 0.0f);
-    cloud[0].sh_rest[0] = std::numeric_limits<float>::max();
-    auto unsafe_sh = encoder.encodeToBuffer(buffer, cloud, config);
-    check(!unsafe_sh.success &&
-              unsafe_sh.error_message.find("safe quantization range") != std::string::npos,
-          "SPZ encoder rejects finite SH values that would overflow float-to-int conversion");
-
-    // Lower-degree export must retain the first coefficients from each source
-    // channel, not treat the shortened destination stride as the source stride.
-    GaussianCloud degree_three;
-    GaussianSplat degree_three_splat = splat;
-    degree_three_splat.sh_rest.resize(45);
-    for (int coefficient = 0; coefficient < 15; ++coefficient) {
-        degree_three_splat.sh_rest[coefficient] = -0.8f + 0.03f * coefficient;
-        degree_three_splat.sh_rest[15 + coefficient] = -0.2f + 0.02f * coefficient;
-        degree_three_splat.sh_rest[30 + coefficient] = 0.3f - 0.01f * coefficient;
+    const auto truncated = encoder.encodeToBuffer(buffer, degree_three, config);
+    spz::UnpackOptions options;
+    options.to = spz::CoordinateSystem::RDF;
+    const auto external =
+        truncated.success
+            ? spz::loadSpz(buffer.data(), static_cast<int32_t>(buffer.size()), options)
+            : spz::GaussianCloud{};
+    bool prefix_ok = external.sh.size() == 9;
+    for (std::size_t i = 0; prefix_ok && i < 9; ++i) {
+        prefix_ok = std::abs(external.sh[i] - degree_three_sh[i + 3]) < 0.09f;
     }
-    degree_three.addSplat(degree_three_splat);
-    degree_three.setShDegree(3);
-    config.sh_degree = 1;
-    auto truncated_degree = encoder.encodeToBuffer(buffer, degree_three, config);
-    spz::UnpackOptions unpack_options;
-    unpack_options.to = spz::CoordinateSystem::RDF;
-    const auto truncated_cloud = truncated_degree.success
-        ? spz::loadSpz(buffer.data(), static_cast<int32_t>(buffer.size()), unpack_options)
-        : spz::GaussianCloud{};
-    bool truncated_channels_ok = truncated_cloud.numPoints == 1 &&
-                                 truncated_cloud.shDegree == 1 &&
-                                 truncated_cloud.sh.size() == 9;
-    if (truncated_channels_ok) {
-        const float expected[9] = {
-            degree_three_splat.sh_rest[0], degree_three_splat.sh_rest[15],
-            degree_three_splat.sh_rest[30], degree_three_splat.sh_rest[1],
-            degree_three_splat.sh_rest[16], degree_three_splat.sh_rest[31],
-            degree_three_splat.sh_rest[2], degree_three_splat.sh_rest[17],
-            degree_three_splat.sh_rest[32],
-        };
-        for (int coefficient = 0; coefficient < 9; ++coefficient) {
-            if (std::abs(truncated_cloud.sh[coefficient] - expected[coefficient]) > 0.09f) {
-                truncated_channels_ok = false;
-            }
-        }
-    }
-    check(truncated_degree.success && truncated_channels_ok,
-          "SPZ lower-degree export preserves source channel strides");
+    check(truncated.success && prefix_ok && has_diagnostic(truncated, "MK1322_SPZ_SH_TRUNCATED"),
+          "SPZ lower-degree export preserves canonical coefficient prefix and reports loss");
 
-    cloud[0].sh_rest.clear();
-    cloud.setShDegree(4);
-    config.sh_degree = 3;
-    auto invalid_cloud_degree = encoder.encodeToBuffer(buffer, cloud, config);
-    check(!invalid_cloud_degree.success &&
-              invalid_cloud_degree.error_message.find("cloud SH degree") != std::string::npos,
-          "SPZ encoder rejects an invalid cloud SH degree");
-
-    cloud.setShDegree(0);
-    config.sh_degree = 0;
-    cloud[0].rot_0 = cloud[0].rot_1 = cloud[0].rot_2 = cloud[0].rot_3 =
-        std::numeric_limits<float>::max();
-    auto valid = encoder.encodeToBuffer(buffer, cloud, config);
-    const auto normalized_cloud = valid.success
-        ? spz::loadSpz(buffer.data(), static_cast<int32_t>(buffer.size()), unpack_options)
-        : spz::GaussianCloud{};
-    bool normalized_finite = normalized_cloud.numPoints == 1 &&
-                             normalized_cloud.rotations.size() == 4;
-    if (normalized_finite) {
-        for (float component : normalized_cloud.rotations) {
-            normalized_finite &= std::isfinite(component);
-        }
-    }
-    check(valid.success && !buffer.empty() && normalized_finite,
-          "SPZ encoder safely normalizes a finite large quaternion");
-
-    GaussianCloud alpha_endpoints;
-    for (const float probability : {0.0f, 1.0f}) {
-        GaussianSplat endpoint = splat;
-        endpoint.opacity = utils::logit(probability);
-        alpha_endpoints.addSplat(endpoint);
-    }
-    alpha_endpoints.setShDegree(0);
-    auto endpoint_encode = encoder.encodeToBuffer(buffer, alpha_endpoints, config);
-    auto endpoint_decode = endpoint_encode.success
-        ? SpzDecoder{}.decodeFromBuffer(buffer.data(), buffer.size())
-        : SpzDecoder::DecodeResult{};
-    const bool finite_endpoints = endpoint_decode.success &&
-                                  endpoint_decode.cloud.size() == 2 &&
-                                  std::isfinite(endpoint_decode.cloud[0].opacity) &&
-                                  std::isfinite(endpoint_decode.cloud[1].opacity);
-    check(finite_endpoints,
-          "SPZ alpha bytes 0 and 255 decode to finite endpoint logits");
+    SplatBufferInput endpoint_input;
+    endpoint_input.positions.resize(2);
+    endpoint_input.scales.assign(2, {0.1f, 0.1f, 0.1f});
+    endpoint_input.rotations.resize(2);
+    endpoint_input.opacities = {0.0f, 1.0f};
+    endpoint_input.sh = ShBuffer::black(2).value();
+    auto endpoints = SplatData::create(std::move(endpoint_input)).value();
+    config.sh_degree = -1;
+    const auto endpoint_encode = encoder.encodeToBuffer(buffer, endpoints, config);
+    const auto endpoint_decode = endpoint_encode.success
+                                     ? SpzDecoder{}.decodeFromBuffer(buffer.data(), buffer.size())
+                                     : SpzDecoder::DecodeResult{};
+    check(endpoint_encode.success &&
+              has_diagnostic(endpoint_encode, "MK1321_SPZ_OPACITY_ENDPOINT_CLAMPED") &&
+              endpoint_decode.success && endpoint_decode.data.has_value() &&
+              endpoint_decode.data->opacities()[0] > 0.0f &&
+              endpoint_decode.data->opacities()[1] < 1.0f,
+          "SPZ opacity endpoint clamp is explicit and decodes to finite probabilities");
     return true;
 }
 
@@ -369,8 +233,7 @@ bool test_spz_fractional_bits_validation() {
         std::vector<uint8_t> unpacked(16 + 20, 0);
         auto write_le32 = [&](size_t offset, uint32_t value) {
             for (size_t byte = 0; byte < 4; ++byte) {
-                unpacked[offset + byte] =
-                    static_cast<uint8_t>((value >> (byte * 8)) & 0xffu);
+                unpacked[offset + byte] = static_cast<uint8_t>((value >> (byte * 8)) & 0xffu);
             }
         };
         write_le32(0, 0x5053474eu);
@@ -387,16 +250,15 @@ bool test_spz_fractional_bits_validation() {
     };
 
     const auto boundary = make_spz(23);
-    const auto boundary_result =
-        SpzDecoder{}.decodeFromBuffer(boundary.data(), boundary.size());
-    check(boundary_result.success && boundary_result.cloud.size() == 1 &&
-              std::isfinite(boundary_result.cloud[0].x),
+    const auto boundary_result = SpzDecoder{}.decodeFromBuffer(boundary.data(), boundary.size());
+    check(boundary_result.success && boundary_result.data.has_value() &&
+              boundary_result.data->size() == 1 &&
+              std::isfinite(boundary_result.data->positions()[0].x),
           "23 fractional bits are accepted for a signed 24-bit coordinate");
 
     const auto invalid = make_spz(255);
-    const auto invalid_result =
-        SpzDecoder{}.decodeFromBuffer(invalid.data(), invalid.size());
-    check(!invalid_result.success && invalid_result.cloud.empty(),
+    const auto invalid_result = SpzDecoder{}.decodeFromBuffer(invalid.data(), invalid.size());
+    check(!invalid_result.success && !invalid_result.data.has_value(),
           "fractional-bit counts wider than the signed 24-bit field are rejected");
     return true;
 }
@@ -423,36 +285,32 @@ bool test_enhanced_converter_short_attributes() {
     EnhancedConversionConfig cfg;
     cfg.knn_neighbors = 3;
     auto result = converter.convertFromMesh(positions, normals, colors, {}, cfg);
-    check(result.success && result.cloud.size() == 8,
-          "short attributes: all points converted");
+    check(result.success && result.cloud.size() == 8, "short attributes: all points converted");
     bool finite = true;
     for (size_t i = 0; i < result.cloud.size(); ++i) {
         const auto& sp = result.cloud[i];
-        if (!std::isfinite(sp.x) || !std::isfinite(sp.f_dc_0) ||
-            !std::isfinite(sp.scale_0) || !std::isfinite(sp.rot_0))
+        if (!std::isfinite(sp.x) || !std::isfinite(sp.f_dc_0) || !std::isfinite(sp.scale_0) ||
+            !std::isfinite(sp.rot_0))
             finite = false;
     }
     check(finite, "short attributes: all outputs finite");
     if (result.cloud.size() == 8) {
         // Points past the color array get the default color (0.5 -> SH DC 0).
-        check(std::abs(result.cloud[5].f_dc_0) < 1e-5f &&
-              std::abs(result.cloud[5].f_dc_1) < 1e-5f,
+        check(std::abs(result.cloud[5].f_dc_0) < 1e-5f && std::abs(result.cloud[5].f_dc_1) < 1e-5f,
               "short attributes: padded points use default color");
     }
 
     // Single point with explicit normal: degenerate extent must not crash
     // and must produce a finite splat.
-    auto single = converter.convertFromMesh({0.f, 0.f, 0.f}, {0.f, 0.f, 1.f},
-                                            {}, {}, cfg);
-    check(single.success && single.cloud.size() == 1 &&
-          std::isfinite(single.cloud[0].scale_0),
+    auto single = converter.convertFromMesh({0.f, 0.f, 0.f}, {0.f, 0.f, 1.f}, {}, {}, cfg);
+    check(single.success && single.cloud.size() == 1 && std::isfinite(single.cloud[0].scale_0),
           "single-point input yields one finite splat");
 
     // Grid coordinates must be relative to the cloud origin. Absolute hashing
     // casts a large finite translation to int (undefined behavior) even when
     // the local shape and distances are completely ordinary.
-    auto translated = converter.convertFromMesh(
-        {1.0e30f, 0.0f, 0.0f, 1.0e30f, 1.0f, 0.0f}, {}, {}, {}, cfg);
+    auto translated =
+        converter.convertFromMesh({1.0e30f, 0.0f, 0.0f, 1.0e30f, 1.0f, 0.0f}, {}, {}, {}, cfg);
     check(translated.success && translated.cloud.size() == 2 &&
               std::isfinite(translated.cloud[0].scale_0) &&
               std::isfinite(translated.cloud[1].scale_0),
@@ -466,7 +324,7 @@ bool test_enhanced_converter_accessor_validation() {
     using namespace melkor;
 
     const auto base = std::filesystem::temp_directory_path() /
-        ("melkor_enhanced_accessor_" + std::to_string(getpid()));
+                      ("melkor_enhanced_accessor_" + std::to_string(getpid()));
     const auto gltf_path = base.string() + ".gltf";
     const auto bin_path = base.string() + ".bin";
     const auto bin_name = std::filesystem::path(bin_path).filename().string();
@@ -481,7 +339,9 @@ bool test_enhanced_converter_accessor_validation() {
     {
         std::ofstream gltf(gltf_path);
         gltf << "{\"asset\":{\"version\":\"2.0\"},"
-                "\"buffers\":[{\"uri\":\"" << bin_name << "\",\"byteLength\":12}],"
+                "\"buffers\":[{\"uri\":\""
+             << bin_name
+             << "\",\"byteLength\":12}],"
                 "\"bufferViews\":[{\"buffer\":0,\"byteOffset\":0,\"byteLength\":12}],"
                 "\"accessors\":[{\"bufferView\":0,\"componentType\":5126,"
                 "\"count\":100,\"type\":\"VEC3\"}],"
@@ -497,7 +357,7 @@ bool test_enhanced_converter_accessor_validation() {
           "oversized accessor span is rejected without producing splats");
     GlbReader basic_reader;
     auto malformed_basic = basic_reader.loadFromFile(gltf_path);
-    check(!malformed_basic.success && malformed_basic.cloud.empty(),
+    check(!malformed_basic.success && !malformed_basic.data.has_value(),
           "basic reader rejects the same oversized accessor span");
 
     // Exercise alignment-safe scalar decoding with a valid point beginning at
@@ -513,7 +373,9 @@ bool test_enhanced_converter_accessor_validation() {
     {
         std::ofstream gltf(gltf_path, std::ios::trunc);
         gltf << "{\"asset\":{\"version\":\"2.0\"},"
-                "\"buffers\":[{\"uri\":\"" << bin_name << "\",\"byteLength\":13}],"
+                "\"buffers\":[{\"uri\":\""
+             << bin_name
+             << "\",\"byteLength\":13}],"
                 "\"bufferViews\":[{\"buffer\":0,\"byteOffset\":1,\"byteLength\":12}],"
                 "\"accessors\":[{\"bufferView\":0,\"componentType\":5126,"
                 "\"count\":1,\"type\":\"VEC3\"}],"
@@ -522,27 +384,33 @@ bool test_enhanced_converter_accessor_validation() {
     }
     auto unaligned = converter.convertFromFile(gltf_path, cfg);
     check(unaligned.success && unaligned.cloud.size() == 1 &&
-          std::abs(unaligned.cloud[0].x - 1.0f) < 1e-6f &&
-          std::abs(unaligned.cloud[0].y + 3.0f) < 1e-6f &&
-          std::abs(unaligned.cloud[0].z - 2.0f) < 1e-6f,
+              std::abs(unaligned.cloud[0].x - 1.0f) < 1e-6f &&
+              std::abs(unaligned.cloud[0].y + 3.0f) < 1e-6f &&
+              std::abs(unaligned.cloud[0].z - 2.0f) < 1e-6f,
           "unaligned float accessor is decoded safely");
 
     auto basic_unaligned = basic_reader.loadFromFile(gltf_path);
-    check(basic_unaligned.success && basic_unaligned.cloud.size() == 1 &&
-          std::abs(basic_unaligned.cloud[0].x - 1.0f) < 1e-6f,
-          "basic reader decodes an unaligned float accessor safely");
+    check(basic_unaligned.success && basic_unaligned.data.has_value() &&
+              basic_unaligned.data->size() == 1 &&
+              std::abs(basic_unaligned.data->positions()[0].x - 1.0f) < 1e-6f &&
+              std::abs(basic_unaligned.data->scales()[0].x - 0.01f) < 1e-7f &&
+              basic_unaligned.data->opacities()[0] == 1.0f &&
+              basic_unaligned.data->rotations()[0].w == 1.0f &&
+              std::abs(basic_unaligned.data->sh().dc(0, 0) - math::rgb_to_sh_dc(0.5f)) < 1e-6f,
+          "basic reader produces canonical linear defaults from an unaligned accessor");
     auto null_memory = basic_reader.loadFromMemory(nullptr, 0);
     check(!null_memory.success, "null in-memory glTF input is rejected");
     const std::string external_memory_gltf =
         "{\"asset\":{\"version\":\"2.0\"},"
-        "\"buffers\":[{\"uri\":\"" + bin_name + "\",\"byteLength\":13}],"
+        "\"buffers\":[{\"uri\":\"" +
+        bin_name +
+        "\",\"byteLength\":13}],"
         "\"bufferViews\":[{\"buffer\":0,\"byteOffset\":1,\"byteLength\":12}],"
         "\"accessors\":[{\"bufferView\":0,\"componentType\":5126,"
         "\"count\":1,\"type\":\"VEC3\"}],"
         "\"meshes\":[{\"primitives\":[{\"attributes\":{\"POSITION\":0}}]}]}";
     auto inherited_root = basic_reader.loadFromMemory(
-        reinterpret_cast<const uint8_t*>(external_memory_gltf.data()),
-        external_memory_gltf.size());
+        reinterpret_cast<const uint8_t*>(external_memory_gltf.data()), external_memory_gltf.size());
     check(!inherited_root.success,
           "in-memory glTF cannot inherit an external-file root from a prior load");
     GlbConversionConfig invalid_cfg;
@@ -560,10 +428,13 @@ bool test_enhanced_converter_accessor_validation() {
     {
         std::ofstream gltf(gltf_path, std::ios::trunc);
         gltf << "{\"asset\":{\"version\":\"2.0\"},"
-                "\"buffers\":[{\"uri\":\"" << bin_name << "\",\"byteLength\":24}],"
+                "\"buffers\":[{\"uri\":\""
+             << bin_name
+             << "\",\"byteLength\":24}],"
                 "\"bufferViews\":[{\"buffer\":0,\"byteOffset\":0,\"byteLength\":12},"
                 "{\"buffer\":0,\"byteOffset\":12,\"byteLength\":12}],"
-                "\"accessors\":[{\"bufferView\":0,\"componentType\":5126,\"count\":1,\"type\":\"VEC3\"},"
+                "\"accessors\":[{\"bufferView\":0,\"componentType\":5126,\"count\":1,\"type\":"
+                "\"VEC3\"},"
                 "{\"bufferView\":1,\"componentType\":5126,\"count\":1,\"type\":\"VEC3\"}],"
                 "\"meshes\":[{\"primitives\":[{\"attributes\":{\"POSITION\":0,\"NORMAL\":1}}]}],"
                 "\"nodes\":[{\"mesh\":0,\"translation\":[10,0,0]},"
@@ -576,34 +447,43 @@ bool test_enhanced_converter_accessor_validation() {
           "enhanced reader traverses active scene and preserves mesh instances");
     if (transformed.cloud.size() == 2) {
         check(std::abs(transformed.cloud[0].x - 11.0f) < 1e-5f &&
-              std::abs(transformed.cloud[0].y + 3.0f) < 1e-5f &&
-              std::abs(transformed.cloud[0].z - 2.0f) < 1e-5f &&
-              std::abs(transformed.cloud[1].x - 2.0f) < 1e-5f &&
-              std::abs(transformed.cloud[1].y + 3.0f) < 1e-5f &&
-              std::abs(transformed.cloud[1].z - 7.0f) < 1e-5f,
+                  std::abs(transformed.cloud[0].y + 3.0f) < 1e-5f &&
+                  std::abs(transformed.cloud[0].z - 2.0f) < 1e-5f &&
+                  std::abs(transformed.cloud[1].x - 2.0f) < 1e-5f &&
+                  std::abs(transformed.cloud[1].y + 3.0f) < 1e-5f &&
+                  std::abs(transformed.cloud[1].z - 7.0f) < 1e-5f,
               "node translations and non-uniform scale affect positions");
         float rotation[9];
-        utils::quatToRotationMatrix(transformed.cloud[1].rot_0,
-                                    transformed.cloud[1].rot_1,
-                                    transformed.cloud[1].rot_2,
-                                    transformed.cloud[1].rot_3, rotation);
-        check(std::abs(rotation[2] - 0.4472136f) < 1e-4f &&
-              std::abs(rotation[5]) < 1e-4f &&
-              std::abs(rotation[8] - 0.8944272f) < 1e-4f,
+        utils::quatToRotationMatrix(transformed.cloud[1].rot_0, transformed.cloud[1].rot_1,
+                                    transformed.cloud[1].rot_2, transformed.cloud[1].rot_3,
+                                    rotation);
+        check(std::abs(rotation[2] - 0.4472136f) < 1e-4f && std::abs(rotation[5]) < 1e-4f &&
+                  std::abs(rotation[8] - 0.8944272f) < 1e-4f,
               "non-uniform node scale uses inverse-transpose normal transform");
     }
     auto transformed_basic = basic_reader.loadFromFile(gltf_path);
-    check(transformed_basic.success && transformed_basic.cloud.size() == 2 &&
-          std::abs(transformed_basic.cloud[0].x - 11.0f) < 1e-5f &&
-          std::abs(transformed_basic.cloud[1].z - 7.0f) < 1e-5f,
+    check(transformed_basic.success && transformed_basic.data.has_value() &&
+              transformed_basic.data->size() == 2 &&
+              std::abs(transformed_basic.data->positions()[0].x - 11.0f) < 1e-5f &&
+              std::abs(transformed_basic.data->positions()[1].z - 7.0f) < 1e-5f,
           "basic reader applies active-scene node transforms and instancing");
+    if (transformed_basic.success && transformed_basic.data.has_value() &&
+        transformed_basic.data->size() == 2) {
+        const auto& q = transformed_basic.data->rotations()[1];
+        const auto rotation = math::to_matrix({q.x, q.y, q.z, q.w});
+        check(std::abs(rotation[2] - 0.4472136) < 1e-4 && std::abs(rotation[5]) < 1e-4 &&
+                  std::abs(rotation[8] - 0.8944272) < 1e-4,
+              "basic reader stores transformed normal orientation as canonical xyzw");
+    }
 
     // A malformed primitive after a valid one must fail the complete asset;
     // enhanced conversion may not silently emit only the valid prefix.
     {
         std::ofstream gltf(gltf_path, std::ios::trunc);
         gltf << "{\"asset\":{\"version\":\"2.0\"},"
-                "\"buffers\":[{\"uri\":\"" << bin_name << "\",\"byteLength\":24}],"
+                "\"buffers\":[{\"uri\":\""
+             << bin_name
+             << "\",\"byteLength\":24}],"
                 "\"bufferViews\":[{\"buffer\":0,\"byteOffset\":0,\"byteLength\":12}],"
                 "\"accessors\":[{\"bufferView\":0,\"componentType\":5126,"
                 "\"count\":1,\"type\":\"VEC3\"}],"
@@ -619,18 +499,21 @@ bool test_enhanced_converter_accessor_validation() {
     const auto write_invalid_optional_attribute = [&](const char* attribute) {
         std::ofstream gltf(gltf_path, std::ios::trunc);
         gltf << "{\"asset\":{\"version\":\"2.0\"},"
-                "\"buffers\":[{\"uri\":\"" << bin_name << "\",\"byteLength\":24}],"
+                "\"buffers\":[{\"uri\":\""
+             << bin_name
+             << "\",\"byteLength\":24}],"
                 "\"bufferViews\":[{\"buffer\":0,\"byteOffset\":0,\"byteLength\":12}],"
                 "\"accessors\":[{\"bufferView\":0,\"componentType\":5126,"
                 "\"count\":1,\"type\":\"VEC3\"}],"
                 "\"meshes\":[{\"primitives\":[{\"attributes\":{\"POSITION\":0,\""
-             << attribute << "\":99}}]}],"
+             << attribute
+             << "\":99}}]}],"
                 "\"nodes\":[{\"mesh\":0}],\"scenes\":[{\"nodes\":[0]}],\"scene\":0}";
     };
     for (const char* attribute : {"COLOR_0", "NORMAL"}) {
         write_invalid_optional_attribute(attribute);
-        const std::string message = std::string("malformed ") + attribute +
-                                    " is rejected consistently by both readers";
+        const std::string message =
+            std::string("malformed ") + attribute + " is rejected consistently by both readers";
         check(!converter.convertFromFile(gltf_path, cfg).success &&
                   !basic_reader.loadFromFile(gltf_path).success,
               message.c_str());
@@ -640,12 +523,15 @@ bool test_enhanced_converter_accessor_validation() {
                                          const std::string& scene = "{\"nodes\":[0]}") {
         std::ofstream gltf(gltf_path, std::ios::trunc);
         gltf << "{\"asset\":{\"version\":\"2.0\"},"
-                "\"buffers\":[{\"uri\":\"" << bin_name << "\",\"byteLength\":24}],"
+                "\"buffers\":[{\"uri\":\""
+             << bin_name
+             << "\",\"byteLength\":24}],"
                 "\"bufferViews\":[{\"buffer\":0,\"byteOffset\":0,\"byteLength\":12}],"
                 "\"accessors\":[{\"bufferView\":0,\"componentType\":5126,"
                 "\"count\":1,\"type\":\"VEC3\"}],"
                 "\"meshes\":[{\"primitives\":[{\"attributes\":{\"POSITION\":0}}]}],"
-                "\"nodes\":" << nodes << ",\"scenes\":[" << scene << "],\"scene\":0}";
+                "\"nodes\":"
+             << nodes << ",\"scenes\":[" << scene << "],\"scene\":0}";
     };
     const auto graph_is_rejected = [&]() {
         return !converter.convertFromFile(gltf_path, cfg).success &&
@@ -671,7 +557,7 @@ bool test_ply_reader() {
 
     PlyReader invalid_buffer_reader;
     check(!invalid_buffer_reader.readFromBuffer(nullptr, 0).success &&
-          !invalid_buffer_reader.readFromBuffer(nullptr, 1).success,
+              !invalid_buffer_reader.readFromBuffer(nullptr, 1).success,
           "null and empty PLY buffers fail closed");
 
     // 2a: classic 3DGS ascii.
@@ -689,39 +575,42 @@ bool test_ply_reader() {
     PlyReader r1;
     auto res1 = r1.readFromBuffer(reinterpret_cast<const uint8_t*>(f1.data()), f1.size());
     check(res1.success, "3DGS ascii: parse succeeds");
-    if (res1.success) {
-        const auto& s = res1.cloud[0];
-        check(s.x == 1 && s.y == 2 && s.z == 3, "3DGS ascii: position");
-        check(std::abs(s.rot_0 - 0.707f) < 1e-3 && std::abs(s.rot_3 - 0.707f) < 1e-3,
-              "3DGS ascii: quaternion (last two components)");
+    if (res1.success && res1.data.has_value()) {
+        const auto& position = res1.data->positions()[0];
+        const auto& rotation = res1.data->rotations()[0];
+        check(position.x == 1 && position.y == 2 && position.z == 3, "3DGS ascii: position");
+        check(std::abs(rotation.z - 0.7071f) < 1e-3 && std::abs(rotation.w - 0.7071f) < 1e-3,
+              "3DGS ascii: wxyz converted to canonical xyzw");
     }
 
     // 2b: non-3DGS PLY with red/green/blue uchar and no normals/scale/rot.
-    const char* hdr2 =
-        "ply\nformat ascii 1.0\nelement vertex 1\n"
-        "property float x\nproperty float y\nproperty float z\n"
-        "property uchar red\nproperty uchar green\nproperty uchar blue\n"
-        "end_header\n"
-        "10 20 30 255 0 0\n";
+    const char* hdr2 = "ply\nformat ascii 1.0\nelement vertex 1\n"
+                       "property float x\nproperty float y\nproperty float z\n"
+                       "property uchar red\nproperty uchar green\nproperty uchar blue\n"
+                       "end_header\n"
+                       "10 20 30 255 0 0\n";
     std::string f2(hdr2);
     PlyReader r2;
     auto res2 = r2.readFromBuffer(reinterpret_cast<const uint8_t*>(f2.data()), f2.size());
     check(res2.success, "rgb-only ascii: parse succeeds");
-    if (res2.success) {
-        const auto& s = res2.cloud[0];
-        check(s.x == 10 && s.y == 20 && s.z == 30, "rgb-only ascii: position");
-        float expect_r = utils::rgbToShDc(1.0f);
-        check(std::abs(s.f_dc_0 - expect_r) < 1e-2f, "rgb-only ascii: red mapped to SH DC");
-        check(s.rot_0 == 1.0f, "rgb-only ascii: missing rotation defaults to identity");
+    if (res2.success && res2.data.has_value()) {
+        const auto& position = res2.data->positions()[0];
+        check(position.x == 10 && position.y == 20 && position.z == 30, "rgb-only ascii: position");
+        const float expect_r = math::rgb_to_sh_dc(1.0f);
+        check(std::abs(res2.data->sh().dc(0, 0) - expect_r) < 1e-2f,
+              "rgb-only ascii: red mapped to SH DC");
+        check(res2.data->rotations()[0].w == 1.0f,
+              "rgb-only ascii: missing rotation defaults to identity");
     }
 
     // 2c: binary round-trip through the writer.
-    GaussianCloud c3;
-    GaussianSplat s3{};
-    s3.x = 5; s3.y = 6; s3.z = 7;
-    s3.opacity = 0.0f;
-    s3.rot_0 = 1.0f;
-    c3.addSplat(s3);
+    SplatBufferInput c3_input;
+    c3_input.positions.push_back({5.0f, 6.0f, 7.0f});
+    c3_input.scales.push_back({1.0f, 1.0f, 1.0f});
+    c3_input.rotations.push_back({});
+    c3_input.opacities.push_back(0.5f);
+    c3_input.sh = ShBuffer::black(1).value();
+    auto c3 = SplatData::create(std::move(c3_input)).value();
     PlyWriter w;
     std::vector<uint8_t> buf;
     PlyWriteConfig cfg;
@@ -731,9 +620,10 @@ bool test_ply_reader() {
     PlyReader r3;
     auto res3 = r3.readFromBuffer(buf.data(), buf.size());
     check(res3.success, "binary round-trip: parse succeeds");
-    if (res3.success) {
-        const auto& s = res3.cloud[0];
-        check(std::abs(s.x - 5) < 1e-5f && std::abs(s.y - 6) < 1e-5f && std::abs(s.z - 7) < 1e-5f,
+    if (res3.success && res3.data.has_value()) {
+        const auto& position = res3.data->positions()[0];
+        check(std::abs(position.x - 5) < 1e-5f && std::abs(position.y - 6) < 1e-5f &&
+                  std::abs(position.z - 7) < 1e-5f,
               "binary round-trip: position preserved");
     }
     return g_failures == 0;
@@ -763,12 +653,18 @@ bool test_pca_normals() {
     for (size_t i = 0; i < num; ++i) {
         float ex = positions[i * 3 + 0], ey = positions[i * 3 + 1], ez = positions[i * 3 + 2];
         float el = std::sqrt(ex * ex + ey * ey + ez * ez);
-        ex /= el; ey /= el; ez /= el;
+        ex /= el;
+        ey /= el;
+        ez /= el;
         float nx = normals[i * 3 + 0], ny = normals[i * 3 + 1], nz = normals[i * 3 + 2];
         float nl = std::sqrt(nx * nx + ny * ny + nz * nz);
-        if (nl < 1e-6f) continue;
-        nx /= nl; ny /= nl; nz /= nl;
-        if (ex * nx + ey * ny + ez * nz > 0.9f) ++aligned;
+        if (nl < 1e-6f)
+            continue;
+        nx /= nl;
+        ny /= nl;
+        nz /= nl;
+        if (ex * nx + ey * ny + ez * nz > 0.9f)
+            ++aligned;
     }
     float pct = 100.0f * aligned / static_cast<float>(num);
     printf("    aligned %d/%zu (%.1f%%)\n", aligned, num, pct);
@@ -812,8 +708,14 @@ bool test_logit_sigmoid() {
     bool edge_ok = true;
     float l0 = utils::logit(0.0f);
     float l1 = utils::logit(1.0f);
-    if (std::isnan(l0) || std::isinf(l0)) { edge_ok = false; printf("    logit(0) = %f\n", l0); }
-    if (std::isnan(l1) || std::isinf(l1)) { edge_ok = false; printf("    logit(1) = %f\n", l1); }
+    if (std::isnan(l0) || std::isinf(l0)) {
+        edge_ok = false;
+        printf("    logit(0) = %f\n", l0);
+    }
+    if (std::isnan(l1) || std::isinf(l1)) {
+        edge_ok = false;
+        printf("    logit(1) = %f\n", l1);
+    }
     check(edge_ok, "logit(0) and logit(1) are finite (no div-by-zero)");
 
     // Sigmoid stability for extreme values: must not produce NaN/inf.
@@ -822,10 +724,22 @@ bool test_logit_sigmoid() {
     bool sig_ok = true;
     float s_big = utils::sigmoid(100.0f);
     float s_neg = utils::sigmoid(-100.0f);
-    if (std::isnan(s_big) || std::isinf(s_big)) { sig_ok = false; printf("    sigmoid(100) = %f\n", s_big); }
-    if (std::isnan(s_neg) || std::isinf(s_neg)) { sig_ok = false; printf("    sigmoid(-100) = %f\n", s_neg); }
-    if (s_big < 0.99f || s_big > 1.0f) { sig_ok = false; printf("    sigmoid(100) = %f (expected ~1)\n", s_big); }
-    if (s_neg < 0.0f || s_neg > 0.01f) { sig_ok = false; printf("    sigmoid(-100) = %f (expected ~0)\n", s_neg); }
+    if (std::isnan(s_big) || std::isinf(s_big)) {
+        sig_ok = false;
+        printf("    sigmoid(100) = %f\n", s_big);
+    }
+    if (std::isnan(s_neg) || std::isinf(s_neg)) {
+        sig_ok = false;
+        printf("    sigmoid(-100) = %f\n", s_neg);
+    }
+    if (s_big < 0.99f || s_big > 1.0f) {
+        sig_ok = false;
+        printf("    sigmoid(100) = %f (expected ~1)\n", s_big);
+    }
+    if (s_neg < 0.0f || s_neg > 0.01f) {
+        sig_ok = false;
+        printf("    sigmoid(-100) = %f (expected ~0)\n", s_neg);
+    }
     check(sig_ok, "sigmoid is stable for extreme values");
     return ok && edge_ok && sig_ok;
 }
@@ -886,7 +800,7 @@ int main() {
 #else
     printf("[skip] SPZ tests (built without MELKOR_HAS_SPZ)\n");
 #endif
-    printf("\n=== %s (%d failures) ===\n",
-           g_failures == 0 ? "ALL TESTS PASSED" : "FAILURES", g_failures);
+    printf("\n=== %s (%d failures) ===\n", g_failures == 0 ? "ALL TESTS PASSED" : "FAILURES",
+           g_failures);
     return g_failures == 0 ? 0 : 1;
 }

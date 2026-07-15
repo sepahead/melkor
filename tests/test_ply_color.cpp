@@ -18,7 +18,7 @@
 //
 // Self-contained (no external test framework), matching the existing suite's convention.
 
-#include "melkor/gaussian_data.hpp"
+#include "melkor/math/color.hpp"
 #include "melkor/ply_writer.hpp"
 
 #include <cmath>
@@ -43,14 +43,17 @@ void check(bool condition, const char* what, int line) {
 
 #define CHECK(cond) check((cond), #cond, __LINE__)
 
-using melkor::GaussianCloud;
 using melkor::PlyReader;
 
 // The DC coefficient that a linear RGB value canonically maps to. This is the value the reader
 // must produce; comparing against it is how we prove no spurious /255 crept in.
-float expected_dc(float linear_rgb) { return melkor::utils::rgbToShDc(linear_rgb); }
+float expected_dc(float linear_rgb) {
+    return melkor::math::rgb_to_sh_dc(linear_rgb);
+}
 
-bool approx(float a, float b, float tol = 1e-5f) { return std::fabs(a - b) <= tol; }
+bool approx(float a, float b, float tol = 1e-5f) {
+    return std::fabs(a - b) <= tol;
+}
 
 // ---------------------------------------------------------------------------
 // The regression: float RGB in [0,1] must NOT be divided by 255.
@@ -58,81 +61,90 @@ bool approx(float a, float b, float tol = 1e-5f) { return std::fabs(a - b) <= to
 
 void test_ascii_float_rgb_is_not_divided_by_255() {
     // Three grey levels the blueprint names explicitly: 0.25, 0.5, 1.0.
-    const std::string ply =
-        "ply\n"
-        "format ascii 1.0\n"
-        "element vertex 3\n"
-        "property float x\n"
-        "property float y\n"
-        "property float z\n"
-        "property float red\n"
-        "property float green\n"
-        "property float blue\n"
-        "end_header\n"
-        "0 0 0 0.25 0.25 0.25\n"
-        "1 0 0 0.5 0.5 0.5\n"
-        "2 0 0 1.0 1.0 1.0\n";
+    const std::string ply = "ply\n"
+                            "format ascii 1.0\n"
+                            "element vertex 3\n"
+                            "property float x\n"
+                            "property float y\n"
+                            "property float z\n"
+                            "property float red\n"
+                            "property float green\n"
+                            "property float blue\n"
+                            "end_header\n"
+                            "0 0 0 0.25 0.25 0.25\n"
+                            "1 0 0 0.5 0.5 0.5\n"
+                            "2 0 0 1.0 1.0 1.0\n";
 
     PlyReader reader;
-    auto result =
-        reader.readFromBuffer(reinterpret_cast<const uint8_t*>(ply.data()), ply.size());
+    auto result = reader.readFromBuffer(reinterpret_cast<const uint8_t*>(ply.data()), ply.size());
     CHECK(result.success);
-    CHECK(result.cloud.size() == 3);
-    if (result.cloud.size() != 3) return;
-
-    const auto& splats = result.cloud.splats();
+    CHECK(result.data.has_value());
+    if (!result.data.has_value())
+        return;
+    const auto& splats = *result.data;
+    CHECK(splats.size() == 3);
+    if (splats.size() != 3)
+        return;
 
     // If the bug were present, these would be rgbToShDc(0.25/255) -- a completely different,
     // near-black value. The assertion is against the honest linear value.
-    CHECK(approx(splats[0].f_dc_0, expected_dc(0.25f)));
-    CHECK(approx(splats[1].f_dc_0, expected_dc(0.5f)));
-    CHECK(approx(splats[2].f_dc_0, expected_dc(1.0f)));
+    CHECK(approx(splats.sh().dc(0, 0), expected_dc(0.25f)));
+    CHECK(approx(splats.sh().dc(1, 0), expected_dc(0.5f)));
+    CHECK(approx(splats.sh().dc(2, 0), expected_dc(1.0f)));
 
     // And prove it is NOT the buggy value, so a future regression that reintroduces /255
     // cannot pass this test by coincidence.
-    CHECK(!approx(splats[1].f_dc_0, expected_dc(0.5f / 255.0f)));
+    CHECK(!approx(splats.sh().dc(1, 0), expected_dc(0.5f / 255.0f)));
 }
 
 void test_binary_float_rgb_is_not_divided_by_255() {
     // Same content, binary little-endian, so both decode paths are covered.
     std::vector<std::uint8_t> ply;
-    auto append = [&](const char* s) {
-        ply.insert(ply.end(), s, s + std::strlen(s));
-    };
+    auto append = [&](const char* s) { ply.insert(ply.end(), s, s + std::strlen(s)); };
     auto append_float = [&](float value) {
         std::uint8_t bytes[4];
         std::memcpy(bytes, &value, 4);  // host is little-endian on every supported platform
         ply.insert(ply.end(), bytes, bytes + 4);
     };
 
-    append(
-        "ply\n"
-        "format binary_little_endian 1.0\n"
-        "element vertex 2\n"
-        "property float x\n"
-        "property float y\n"
-        "property float z\n"
-        "property float red\n"
-        "property float green\n"
-        "property float blue\n"
-        "end_header\n");
+    append("ply\n"
+           "format binary_little_endian 1.0\n"
+           "element vertex 2\n"
+           "property float x\n"
+           "property float y\n"
+           "property float z\n"
+           "property float red\n"
+           "property float green\n"
+           "property float blue\n"
+           "end_header\n");
     // Vertex 0: grey 0.5
-    append_float(0.0f); append_float(0.0f); append_float(0.0f);
-    append_float(0.5f); append_float(0.5f); append_float(0.5f);
+    append_float(0.0f);
+    append_float(0.0f);
+    append_float(0.0f);
+    append_float(0.5f);
+    append_float(0.5f);
+    append_float(0.5f);
     // Vertex 1: white 1.0
-    append_float(1.0f); append_float(0.0f); append_float(0.0f);
-    append_float(1.0f); append_float(1.0f); append_float(1.0f);
+    append_float(1.0f);
+    append_float(0.0f);
+    append_float(0.0f);
+    append_float(1.0f);
+    append_float(1.0f);
+    append_float(1.0f);
 
     PlyReader reader;
     auto result = reader.readFromBuffer(ply.data(), ply.size());
     CHECK(result.success);
-    CHECK(result.cloud.size() == 2);
-    if (result.cloud.size() != 2) return;
-
-    const auto& splats = result.cloud.splats();
-    CHECK(approx(splats[0].f_dc_0, expected_dc(0.5f)));
-    CHECK(approx(splats[1].f_dc_0, expected_dc(1.0f)));
-    CHECK(!approx(splats[0].f_dc_0, expected_dc(0.5f / 255.0f)));
+    CHECK(result.data.has_value());
+    if (!result.data.has_value())
+        return;
+    const auto& splats = *result.data;
+    CHECK(splats.size() == 2);
+    if (splats.size() != 2)
+        return;
+    CHECK(approx(splats.sh().dc(0, 0), expected_dc(0.5f)));
+    CHECK(approx(splats.sh().dc(1, 0), expected_dc(1.0f)));
+    CHECK(!approx(splats.sh().dc(0, 0), expected_dc(0.5f / 255.0f)));
 }
 
 // ---------------------------------------------------------------------------
@@ -148,34 +160,44 @@ void test_uchar_rgb_is_divided_by_255() {
         ply.insert(ply.end(), bytes, bytes + 4);
     };
 
-    append(
-        "ply\n"
-        "format binary_little_endian 1.0\n"
-        "element vertex 2\n"
-        "property float x\n"
-        "property float y\n"
-        "property float z\n"
-        "property uchar red\n"
-        "property uchar green\n"
-        "property uchar blue\n"
-        "end_header\n");
+    append("ply\n"
+           "format binary_little_endian 1.0\n"
+           "element vertex 2\n"
+           "property float x\n"
+           "property float y\n"
+           "property float z\n"
+           "property uchar red\n"
+           "property uchar green\n"
+           "property uchar blue\n"
+           "end_header\n");
     // Vertex 0: byte 128 -> ~0.502 linear
-    append_float(0.0f); append_float(0.0f); append_float(0.0f);
-    ply.push_back(128); ply.push_back(128); ply.push_back(128);
+    append_float(0.0f);
+    append_float(0.0f);
+    append_float(0.0f);
+    ply.push_back(128);
+    ply.push_back(128);
+    ply.push_back(128);
     // Vertex 1: byte 255 -> 1.0 linear
-    append_float(1.0f); append_float(0.0f); append_float(0.0f);
-    ply.push_back(255); ply.push_back(255); ply.push_back(255);
+    append_float(1.0f);
+    append_float(0.0f);
+    append_float(0.0f);
+    ply.push_back(255);
+    ply.push_back(255);
+    ply.push_back(255);
 
     PlyReader reader;
     auto result = reader.readFromBuffer(ply.data(), ply.size());
     CHECK(result.success);
-    CHECK(result.cloud.size() == 2);
-    if (result.cloud.size() != 2) return;
-
-    const auto& splats = result.cloud.splats();
+    CHECK(result.data.has_value());
+    if (!result.data.has_value())
+        return;
+    const auto& splats = *result.data;
+    CHECK(splats.size() == 2);
+    if (splats.size() != 2)
+        return;
     // 128/255 = 0.50196..., which must round-trip through the DC mapping.
-    CHECK(approx(splats[0].f_dc_0, expected_dc(128.0f / 255.0f)));
-    CHECK(approx(splats[1].f_dc_0, expected_dc(255.0f / 255.0f)));
+    CHECK(approx(splats.sh().dc(0, 0), expected_dc(128.0f / 255.0f)));
+    CHECK(approx(splats.sh().dc(1, 0), expected_dc(255.0f / 255.0f)));
 }
 
 // ---------------------------------------------------------------------------
@@ -196,30 +218,36 @@ void test_ushort_rgb_is_divided_by_65535() {
         ply.insert(ply.end(), bytes, bytes + 2);
     };
 
-    append(
-        "ply\n"
-        "format binary_little_endian 1.0\n"
-        "element vertex 1\n"
-        "property float x\n"
-        "property float y\n"
-        "property float z\n"
-        "property ushort red\n"
-        "property ushort green\n"
-        "property ushort blue\n"
-        "end_header\n");
-    append_float(0.0f); append_float(0.0f); append_float(0.0f);
-    append_u16(32768); append_u16(32768); append_u16(32768);  // ~0.5 in 16-bit
+    append("ply\n"
+           "format binary_little_endian 1.0\n"
+           "element vertex 1\n"
+           "property float x\n"
+           "property float y\n"
+           "property float z\n"
+           "property ushort red\n"
+           "property ushort green\n"
+           "property ushort blue\n"
+           "end_header\n");
+    append_float(0.0f);
+    append_float(0.0f);
+    append_float(0.0f);
+    append_u16(32768);
+    append_u16(32768);
+    append_u16(32768);  // ~0.5 in 16-bit
 
     PlyReader reader;
     auto result = reader.readFromBuffer(ply.data(), ply.size());
     CHECK(result.success);
-    CHECK(result.cloud.size() == 1);
-    if (result.cloud.size() != 1) return;
-
-    const auto& splats = result.cloud.splats();
+    CHECK(result.data.has_value());
+    if (!result.data.has_value())
+        return;
+    const auto& splats = *result.data;
+    CHECK(splats.size() == 1);
+    if (splats.size() != 1)
+        return;
     // If this were scaled by 255 instead of 65535, the value would be ~128x too large and
     // wildly out of range.
-    CHECK(approx(splats[0].f_dc_0, expected_dc(32768.0f / 65535.0f)));
+    CHECK(approx(splats.sh().dc(0, 0), expected_dc(32768.0f / 65535.0f)));
 }
 
 // ---------------------------------------------------------------------------
@@ -227,32 +255,33 @@ void test_ushort_rgb_is_divided_by_65535() {
 // ---------------------------------------------------------------------------
 
 void test_fdc_is_not_colour_scaled() {
-    const std::string ply =
-        "ply\n"
-        "format ascii 1.0\n"
-        "element vertex 1\n"
-        "property float x\n"
-        "property float y\n"
-        "property float z\n"
-        "property float f_dc_0\n"
-        "property float f_dc_1\n"
-        "property float f_dc_2\n"
-        "end_header\n"
-        "0 0 0 1.5 -0.5 0.25\n";
+    const std::string ply = "ply\n"
+                            "format ascii 1.0\n"
+                            "element vertex 1\n"
+                            "property float x\n"
+                            "property float y\n"
+                            "property float z\n"
+                            "property float f_dc_0\n"
+                            "property float f_dc_1\n"
+                            "property float f_dc_2\n"
+                            "end_header\n"
+                            "0 0 0 1.5 -0.5 0.25\n";
 
     PlyReader reader;
-    auto result =
-        reader.readFromBuffer(reinterpret_cast<const uint8_t*>(ply.data()), ply.size());
+    auto result = reader.readFromBuffer(reinterpret_cast<const uint8_t*>(ply.data()), ply.size());
     CHECK(result.success);
-    CHECK(result.cloud.size() == 1);
-    if (result.cloud.size() != 1) return;
+    CHECK(result.data.has_value());
+    if (!result.data.has_value())
+        return;
+    CHECK(result.data->size() == 1);
+    if (result.data->size() != 1)
+        return;
 
     // f_dc_* values are SH coefficients already. They pass through unchanged -- no division,
     // no rgbToShDc, and they may legitimately be negative or exceed 1.
-    const auto& splat = result.cloud.splats()[0];
-    CHECK(approx(splat.f_dc_0, 1.5f));
-    CHECK(approx(splat.f_dc_1, -0.5f));
-    CHECK(approx(splat.f_dc_2, 0.25f));
+    CHECK(approx(result.data->sh().dc(0, 0), 1.5f));
+    CHECK(approx(result.data->sh().dc(0, 1), -0.5f));
+    CHECK(approx(result.data->sh().dc(0, 2), 0.25f));
 }
 
 }  // namespace
