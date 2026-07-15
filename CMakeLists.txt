@@ -142,6 +142,7 @@ add_library(melkor_core STATIC
     src/core/limits.cpp
     src/core/budget.cpp
     src/core/backend_registry.cpp
+    src/core/scene.cpp
 
     # Canonical math oracle: the single semantic authority for activation domains, quaternion
     # handling, and covariance transform/decomposition. The place transforms are done correctly
@@ -518,6 +519,13 @@ add_executable(test_math_oracle tests/test_math_oracle.cpp)
 target_link_libraries(test_math_oracle PRIVATE melkor_core)
 target_compile_options(test_math_oracle PRIVATE ${MELKOR_WARNING_FLAGS})
 add_test(NAME math_oracle_tests COMMAND test_math_oracle)
+
+# Canonical scene model: validated invariants, no uninitialised scalars, no invariant-violating
+# mutation (P0-06).
+add_executable(test_scene tests/test_scene.cpp)
+target_link_libraries(test_scene PRIVATE melkor_core)
+target_compile_options(test_scene PRIVATE ${MELKOR_WARNING_FLAGS})
+add_test(NAME scene_tests COMMAND test_scene)
 
 # ---------------------------------------------------------------------------
 # Fuzzing.

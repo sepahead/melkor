@@ -9,6 +9,17 @@ register is in `docs/audit/production-blockers.md`.
 
 ### Added
 
+- Canonical scene model (`melkor/scene.hpp`), the validated replacement for the plain
+  `std::vector<GaussianSplat>` (P0-06). `SplatData` is structure-of-arrays; its only construction
+  path (`SplatData::create`) validates every array length and every domain — finite positions,
+  strictly positive scales, opacity in `[0,1]`, unit quaternions (using the math oracle's
+  definition so the model and the transforms agree) — and names the offending splat and field on
+  failure. There is no mutable accessor, so a caller cannot inject a NaN or resize one array out
+  of step behind the type's back, which is how the old mutable `data()` broke invariants.
+  `ShBuffer` stores SH coefficient-major for degree 0–4 with a checked length (degree 5 is
+  rejected, not clamped) and no per-splat heap allocation. Default storage types are valid (a
+  default `Quatf` is the identity rotation). `scene_tests`: 36 checks, clean under ASan+UBSan. It
+  is additive — it coexists with the legacy model while adapters migrate onto it.
 - Canonical math oracle (`include/melkor/math/`), the single semantic authority for the
   transforms P0-17 is about. `activation` converts opacity/scale between training (logit/log)
   and canonical (linear) domains exactly once, with bounded exp and interval checks that make
