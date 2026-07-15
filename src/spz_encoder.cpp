@@ -59,7 +59,7 @@ static std::string validateEncodeInput(const GaussianCloud& cloud,
         return "Cannot encode SPZ: cloud exceeds the 10-million-point format limit";
     }
 
-    const CloudInspection inspection = inspectCloud(cloud);
+    const CloudInspection inspection = inspectLegacyCloud(cloud);
     if (!inspection.valid) {
         const auto issue = std::find_if(
             inspection.issues.begin(), inspection.issues.end(),

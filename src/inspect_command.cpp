@@ -150,7 +150,7 @@ InspectDocument inspectPath(const std::string& path) {
         document.fields.rotation = result.metadata.has_rotation ? "explicit" : "defaulted";
         document.fields.sh_rest = result.metadata.has_sh_rest ? "explicit" : "absent";
         document.has_cloud = true;
-        document.inspection = inspectCloud(cloud);
+        document.inspection = inspectLegacyCloud(cloud);
         if (result.metadata.declared_vertices != cloud.size()) {
             addInspectionIssue(document.inspection, InspectionSeverity::Error,
                                "decoded_count_mismatch",
@@ -179,7 +179,7 @@ InspectDocument inspectPath(const std::string& path) {
         document.fields = {"explicit", "explicit_sh_dc", "explicit", "explicit", "explicit",
                            result.metadata.sh_degree > 0 ? "explicit" : "absent"};
         document.has_cloud = true;
-        document.inspection = inspectCloud(cloud);
+        document.inspection = inspectLegacyCloud(cloud);
         if (result.metadata.decoded_points != result.metadata.declared_points) {
             addInspectionIssue(document.inspection, InspectionSeverity::Error,
                                "decoded_count_mismatch",
@@ -203,37 +203,10 @@ InspectDocument inspectPath(const std::string& path) {
             scene.diagnostics()[0].code == "MK2161_GLTF_NO_SPLATS";
 
         if (scene.has_value()) {
-            // Bridge the validated canonical splats into a GaussianCloud for the inspection stats.
-            // SplatData guarantees finite, in-domain values, so the finiteness checks all pass and
-            // the bounds are the true world-space canonical values.
+            // KHR_gaussian_splatting is already canonical. Inspect it directly: converting linear
+            // scale/opacity back into the legacy log/logit model merely to compute bounds created
+            // exactly the double-activation bug class A1 is removing.
             const auto& sd = scene.value().data;
-            cloud.splats().reserve(sd.size());
-            for (std::size_t s = 0; s < sd.size(); ++s) {
-                GaussianSplat g{};
-                g.x = sd.positions()[s].x;
-                g.y = sd.positions()[s].y;
-                g.z = sd.positions()[s].z;
-                g.f_dc_0 = sd.sh().dc(s, 0);
-                g.f_dc_1 = sd.sh().dc(s, 1);
-                g.f_dc_2 = sd.sh().dc(s, 2);
-                // SplatData is canonical (linear scale, linear opacity in [0,1]); GaussianCloud and
-                // inspectCloud use the 3DGS training domains (log scale, logit opacity) -- e.g.
-                // inspectCloud applies std::exp to the scale to recover the linear value. Convert,
-                // or the linear scale would be double-exponentiated and the covariance range
-                // mis-reported. Opacity is clamped off the {0,1} endpoints so a fully-opaque splat
-                // does not map to a +/-inf logit that inspectCloud would flag as non-finite.
-                const float op = std::min(std::max(sd.opacities()[s], 1e-6f), 1.0f - 1e-6f);
-                g.opacity = std::log(op / (1.0f - op));
-                g.scale_0 = std::log(sd.scales()[s].x);
-                g.scale_1 = std::log(sd.scales()[s].y);
-                g.scale_2 = std::log(sd.scales()[s].z);
-                const auto& q = sd.rotations()[s];  // canonical x,y,z,w -> GaussianCloud w,x,y,z
-                g.rot_0 = q.w;
-                g.rot_1 = q.x;
-                g.rot_2 = q.y;
-                g.rot_3 = q.z;
-                cloud.addSplat(g);
-            }
             document.kind = "gaussian_cloud";
             document.encoding = "khr_gaussian_splatting";
             document.declared_splats = sd.size();
@@ -241,10 +214,7 @@ InspectDocument inspectPath(const std::string& path) {
             document.fields = {"explicit", "explicit_sh_dc", "explicit", "explicit", "explicit",
                                scene.value().sh_degree > 0 ? "explicit" : "absent"};
             document.has_cloud = true;
-            document.inspection = inspectCloud(cloud);
-            // Report the true source SH degree: the bridged GaussianCloud carries only the DC term,
-            // so inspectCloud would otherwise under-report it as 0.
-            document.inspection.sh_degree = static_cast<int>(scene.value().sh_degree);
+            document.inspection = inspectCloud(sd);
             // Surface the conversion loss report so an inspector sees what a conversion would lose.
             for (const auto& item : scene.value().losses.items()) {
                 addInspectionIssue(document.inspection, InspectionSeverity::Warning, item.code,
@@ -269,7 +239,7 @@ InspectDocument inspectPath(const std::string& path) {
             document.fields = {"explicit", "converted_or_defaulted", "generated", "generated",
                                "generated", "absent"};
             document.has_cloud = true;
-            document.inspection = inspectCloud(cloud);
+            document.inspection = inspectLegacyCloud(cloud);
         } else {
             addSourceError(document, "read_error",
                            scene.diagnostics().empty() ? "failed to read GLB"

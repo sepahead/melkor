@@ -1,6 +1,7 @@
 #pragma once
 
 #include "melkor/gaussian_data.hpp"
+#include "melkor/scene.hpp"
 
 #include <cstddef>
 #include <string>
@@ -38,9 +39,16 @@ struct CloudInspection {
     std::vector<InspectionIssue> issues;
 };
 
-// Inspect without mutating or normalizing the cloud. Issue order is stable so
-// callers can serialize the result deterministically for CI artifacts.
-[[nodiscard]] CloudInspection inspectCloud(const GaussianCloud& cloud);
+// Inspect canonical data without mutating it. SplatData already guarantees finite values,
+// canonical domains, complete SH storage, and unit rotations, so this concentrates on useful
+// derived diagnostics: empty input, bounds, and whether squared linear scales are representable
+// as float32 covariance entries. Issue order is stable for deterministic CI artifacts.
+[[nodiscard]] CloudInspection inspectCloud(const SplatData& cloud);
+
+// Temporary validator for the backend/algorithm cluster that still uses the training-domain
+// GaussianCloud internally. New format or CLI code must use the canonical overload above. This is
+// deleted with the last legacy caller during A1; spelling out "Legacy" prevents new accidental use.
+[[nodiscard]] CloudInspection inspectLegacyCloud(const GaussianCloud& cloud);
 
 // Source-format adapters use this to append metadata warnings/errors while
 // preserving the same deterministic summary accounting.

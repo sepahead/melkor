@@ -491,7 +491,7 @@ int main(int argc, char* argv[]) try {
     }
 
     const auto validateCloud = [&](const char* phase) {
-        const melkor::CloudInspection inspection = melkor::inspectCloud(cloud);
+        const melkor::CloudInspection inspection = melkor::inspectLegacyCloud(cloud);
         if (inspection.valid) return true;
         std::cerr << "Error: " << phase << " cloud failed numeric validation\n";
         for (const auto& issue : inspection.issues) {
