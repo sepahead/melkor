@@ -378,32 +378,43 @@ Result<SceneRead> read_gaussian_scene(const Document& doc, const std::vector<Buf
         }
         if (pr.value().color_space_assumed) any_assumed = true;
 
-        // Decide how the node's rotation acts on the spherical harmonics. A proper rotation is
-        // applied exactly; a pure scale or identity leaves SH untouched (correct); a rotation
-        // combined with scale/shear is the only case Melkor cannot yet apply, and it is reported.
+        // Decide how the node's transform rotates the spherical harmonics. A pure rotation is used
+        // directly; a rotation combined with scale/shear has its rotation component extracted by
+        // polar decomposition; an identity or pure scale leaves SH untouched (correct). Only a
+        // reflection or singular map -- where no proper rotation is defined -- reports a loss.
         std::optional<math::ShRotation> sh_rot;
         const math::ShRotation* sh_rot_ptr = nullptr;
-        if (pr.value().source_sh_degree >= 1 && !is_identity_linear(inst.transform.linear)) {
-            if (math::is_proper_rotation(inst.transform.linear)) {
-                auto r = math::ShRotation::create(inst.transform.linear,
-                                                  pr.value().source_sh_degree);
+        if (pr.value().source_sh_degree >= 1 && !is_identity_linear(inst.transform.linear) &&
+            !is_pure_positive_scale(inst.transform.linear)) {
+            const math::Mat3& linear = inst.transform.linear;
+            // Use the linear part directly when it is already a proper rotation; otherwise recover
+            // the rotation component from a scaled/sheared transform.
+            Result<math::Mat3> rot_matrix =
+                math::is_proper_rotation(linear)
+                    ? Result<math::Mat3>::success(linear)
+                    : math::rotation_from_linear(linear);
+            bool applied = false;
+            if (rot_matrix.has_value()) {
+                auto r = math::ShRotation::create(rot_matrix.value(), pr.value().source_sh_degree);
                 if (r.has_value()) {
                     sh_rot = std::move(r.value());
                     sh_rot_ptr = &sh_rot.value();
+                    applied = true;
                 }
-            } else if (!is_pure_positive_scale(inst.transform.linear)) {
+            }
+            if (!applied) {
                 LossItem item;
                 item.code = loss_code::kShRotationNotApplied;
                 item.severity = LossSeverity::severe;
                 item.source_feature =
-                    "degree>=1 spherical harmonics under a node transform that combines rotation "
-                    "with scale or shear";
+                    "degree>=1 spherical harmonics under a node transform with no proper-rotation "
+                    "component (a reflection or a degenerate/singular transform)";
                 item.target_constraint =
-                    "SH rotation is applied only for a pure rotation; the rotation component of a "
-                    "scaled or sheared transform is not yet extracted";
+                    "SH rotation is defined only for a proper rotation; a reflecting or collapsing "
+                    "transform has none";
                 item.affected_splats = pr.value().data.size();
                 item.remediation =
-                    "bake the node transform into the splats before conversion, or approve "
+                    "remove the reflection or degenerate scale from the node transform, or approve "
                     "LOSS_SH_ROTATION_NOT_APPLIED to accept colour in the source frame";
                 losses.add(std::move(item));
             }

@@ -261,14 +261,31 @@ void test_sh_rotation_applied_under_pure_rotation() {
     CHECK(c1_changed && c3_changed);
 }
 
-void test_sh_loss_under_rotation_and_scale() {
-    // A node that combines rotation with a non-uniform scale is the case Melkor cannot yet apply to
-    // the SH (it does not extract the rotation from a scaled transform), so it must still report
-    // LOSS_SH_ROTATION_NOT_APPLIED as a blocking, approvable loss.
+void test_sh_rotation_applied_under_rotation_and_scale() {
+    // A node combining a rotation (90 deg about Z) with a non-uniform scale: the rotation component
+    // is now extracted by polar decomposition and applied to the SH, so there is NO loss, and the
+    // m=0 (z-aligned) degree-1 coefficient stays invariant because the extracted rotation is about Z.
     const double s = std::sqrt(0.5);
     auto buf = pack_degree1_splat();
     std::string nodes = "\"nodes\":[{\"mesh\":0,\"rotation\":[0,0," + std::to_string(s) + "," +
                         std::to_string(s) + "],\"scale\":[2,1,1]}],";
+    bool ok = false;
+    auto r = run(degree1_json(nodes, "\"scenes\":[{\"nodes\":[0]}],\"scene\":0"), buf, ok);
+    CHECK(ok);
+    if (!ok) return;
+    CHECK(!has_loss(r.losses, "LOSS_SH_ROTATION_NOT_APPLIED"));
+    CHECK(!r.losses.has_blocking());
+    const auto& raw = r.data.sh().raw();
+    CHECK(approx(raw[6], 2.0f) && approx(raw[7], 2.0f) && approx(raw[8], 2.0f));  // m=0 invariant
+    const bool c1_changed = !(approx(raw[3], 1.0f) && approx(raw[4], 1.0f) && approx(raw[5], 1.0f));
+    CHECK(c1_changed);
+}
+
+void test_sh_loss_under_reflection() {
+    // A node with a negative scale (a reflection) has no proper-rotation component, so SH rotation
+    // is undefined and the reader reports the approvable, blocking LOSS_SH_ROTATION_NOT_APPLIED.
+    auto buf = pack_degree1_splat();
+    std::string nodes = "\"nodes\":[{\"mesh\":0,\"scale\":[-1,1,1]}],";
     bool ok = false;
     auto r = run(degree1_json(nodes, "\"scenes\":[{\"nodes\":[0]}],\"scene\":0"), buf, ok);
     CHECK(ok);
@@ -327,7 +344,8 @@ int main() {
     test_no_splats_is_error();
     test_unreferenced_mesh_not_read();
     test_sh_rotation_applied_under_pure_rotation();
-    test_sh_loss_under_rotation_and_scale();
+    test_sh_rotation_applied_under_rotation_and_scale();
+    test_sh_loss_under_reflection();
     test_no_sh_loss_under_pure_scale();
     test_read_glb_end_to_end();
 

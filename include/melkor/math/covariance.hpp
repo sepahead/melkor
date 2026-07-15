@@ -66,6 +66,14 @@ struct Eigen3 {
 };
 Result<Eigen3> symmetric_eigen(const Mat3& m);
 
+// Extracts the rotation component of a general linear map via the polar decomposition M = R P,
+// where R is a proper rotation and P is symmetric positive-definite. This is the rotation the glTF
+// spec says spherical harmonics follow under a node transform, and it recovers R correctly whether
+// the source factors the transform as R·S or S·R. Computed as R = M (MᵀM)^(-1/2) from the
+// eigendecomposition of MᵀM. Fails when M is singular or has a negative determinant (a reflection),
+// for which no proper rotation is defined.
+Result<Mat3> rotation_from_linear(const Mat3& m);
+
 }  // namespace melkor::math
 
 #endif  // MELKOR_MATH_COVARIANCE_HPP

@@ -362,6 +362,48 @@ void test_coordinate_frames() {
 
 }  // namespace
 
+void test_rotation_from_linear() {
+    // A pure rotation is returned unchanged.
+    const Quat q = normalize(Quat{0.2, -0.5, 0.3, 0.8}).value();
+    const Mat3 R = to_matrix(q);
+    auto r1 = rotation_from_linear(R);
+    CHECK(r1.has_value());
+    if (r1.has_value())
+        for (std::size_t i = 0; i < 9; ++i) CHECK(approx(r1.value()[i], R[i], 1e-9));
+
+    // Rotation composed with a non-uniform positive scale recovers the rotation. Build M = R diag(s)
+    // (scale each column of R), the same factorization the covariance transform uses.
+    const Vec3 s{2.0, 0.5, 1.3};
+    Mat3 RS{};
+    for (int row = 0; row < 3; ++row)
+        for (int col = 0; col < 3; ++col)
+            RS[row * 3 + col] = R[row * 3 + col] * s[static_cast<std::size_t>(col)];
+    auto r2 = rotation_from_linear(RS);
+    CHECK(r2.has_value());
+    if (r2.has_value())
+        for (std::size_t i = 0; i < 9; ++i) CHECK(approx(r2.value()[i], R[i], 1e-8));
+
+    // A pure positive scale has rotation component identity.
+    auto r3 = rotation_from_linear(Mat3{3, 0, 0, 0, 1.5, 0, 0, 0, 0.7});
+    CHECK(r3.has_value());
+    if (r3.has_value()) {
+        const Mat3 I{1, 0, 0, 0, 1, 0, 0, 0, 1};
+        for (std::size_t i = 0; i < 9; ++i) CHECK(approx(r3.value()[i], I[i], 1e-9));
+    }
+
+    // The result is always a proper rotation: RᵀR = I and det = +1.
+    if (r2.has_value()) {
+        const Mat3& m = r2.value();
+        const double d = m[0] * (m[4] * m[8] - m[5] * m[7]) - m[1] * (m[3] * m[8] - m[5] * m[6]) +
+                         m[2] * (m[3] * m[7] - m[4] * m[6]);
+        CHECK(approx(d, 1.0, 1e-8));
+    }
+
+    // A reflection (negative determinant) and a singular map are rejected, not fudged.
+    CHECK(!rotation_from_linear(Mat3{-1, 0, 0, 0, 1, 0, 0, 0, 1}).has_value());  // det -1
+    CHECK(!rotation_from_linear(Mat3{1, 0, 0, 0, 1, 0, 0, 0, 0}).has_value());   // singular
+}
+
 int main() {
     test_activation_roundtrips();
     test_color_conversions();
@@ -378,6 +420,7 @@ int main() {
     test_affine_transform_reflection();
     test_singular_transform_is_rejected();
     test_non_covariance_is_rejected();
+    test_rotation_from_linear();
 
     if (g_failures == 0) {
         std::printf("math oracle: %d checks passed\n", g_checks);

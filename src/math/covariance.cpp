@@ -218,4 +218,52 @@ Result<RotationScale> affine_transform_gaussian(const Mat3& linear, const Quat& 
     return rotation_scale_from_covariance(transformed);
 }
 
+Result<Mat3> rotation_from_linear(const Mat3& m) {
+    const double det = determinant(m);
+    // A reflection (negative determinant) has no proper-rotation component; a near-singular map
+    // collapses a dimension so the polar factor is undefined. Both are refused rather than fudged.
+    if (det <= 1e-9) {
+        Diagnostic d("MK1310_NO_ROTATION_COMPONENT", Severity::error,
+                     "linear map is singular or a reflection; it has no proper-rotation component");
+        return Result<Mat3>::failure(ErrorCode::invalid_data, std::move(d));
+    }
+
+    // Eigendecompose MᵀM = V diag(λ) Vᵀ (symmetric positive-definite for a non-singular M), then
+    // (MᵀM)^(-1/2) = V diag(1/√λ) Vᵀ and R = M (MᵀM)^(-1/2).
+    const Mat3 mtm = matmul(transpose(m), m);
+    auto eig = symmetric_eigen(mtm);
+    if (!eig.has_value()) {
+        return Result<Mat3>::failure(eig.error_code(), eig.diagnostics());
+    }
+    if (eig.value().values[2] <= 1e-12) {  // smallest eigenvalue (values are descending)
+        Diagnostic d("MK1310_NO_ROTATION_COMPONENT", Severity::error,
+                     "linear map is numerically singular; no stable rotation component");
+        return Result<Mat3>::failure(ErrorCode::invalid_data, std::move(d));
+    }
+
+    const Mat3& v = eig.value().vectors;
+    // vs = V diag(1/√λ): scale column j of V by 1/√λ_j.
+    Mat3 vs{};
+    for (int row = 0; row < 3; ++row) {
+        for (int col = 0; col < 3; ++col) {
+            vs[static_cast<std::size_t>(row) * 3 + col] =
+                v[static_cast<std::size_t>(row) * 3 + col] / std::sqrt(eig.value().values[col]);
+        }
+    }
+    const Mat3 pinv = matmul(vs, transpose(v));  // (MᵀM)^(-1/2), symmetric
+    const Mat3 r = matmul(m, pinv);
+
+    // Guard: the result must be a proper rotation (orthonormal, det +1). If numerical trouble left
+    // it otherwise, refuse rather than return a subtly-wrong "rotation".
+    const Mat3 rtr = matmul(transpose(r), r);
+    const double orth = std::fabs(rtr[0] - 1.0) + std::fabs(rtr[4] - 1.0) + std::fabs(rtr[8] - 1.0) +
+                        std::fabs(rtr[1]) + std::fabs(rtr[2]) + std::fabs(rtr[5]);
+    if (orth > 1e-6 || std::fabs(determinant(r) - 1.0) > 1e-6) {
+        Diagnostic d("MK1310_NO_ROTATION_COMPONENT", Severity::error,
+                     "polar decomposition did not yield a proper rotation");
+        return Result<Mat3>::failure(ErrorCode::invalid_data, std::move(d));
+    }
+    return Result<Mat3>::success(r);
+}
+
 }  // namespace melkor::math

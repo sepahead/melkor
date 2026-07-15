@@ -9,6 +9,12 @@ register is in `docs/audit/production-blockers.md`.
 
 ### Added
 
+- Rotation-component extraction for a general linear map via polar decomposition
+  (`math::rotation_from_linear`, `M = R P` from the eigendecomposition of MᵀM). The glTF reader now
+  uses it so a node that combines a rotation with scale or shear also rotates its spherical
+  harmonics (by the extracted rotation), leaving LOSS_SH_ROTATION_NOT_APPLIED only for a reflection
+  or a degenerate/singular transform, where no proper rotation exists. Tested in `test_math_oracle`
+  (recovers R from R·S, identity for a pure scale, rejects reflection and singular maps).
 - Real spherical-harmonic rotation for degrees 0-3 (`include/melkor/math/sh_rotation.hpp`), wired
   into the glTF reader. When a node applies a pure rotation, a splat's degree>=1 view-dependent
   colour is now rotated with it instead of reporting an approvable severe loss; a pure scale or
