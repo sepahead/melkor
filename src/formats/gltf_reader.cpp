@@ -1,6 +1,8 @@
 #include "melkor/format/gltf_reader.hpp"
 
+#include "melkor/format/glb_container.hpp"
 #include "melkor/format/gltf_accessor.hpp"
+#include "melkor/format/gltf_document.hpp"
 #include "melkor/format/gltf_extensions.hpp"
 #include "melkor/format/gltf_transform.hpp"
 #include "melkor/math/covariance.hpp"
@@ -459,6 +461,37 @@ Result<SceneRead> read_gaussian_scene(const Document& doc, const std::vector<Buf
 
     SceneRead out{std::move(merged.value()), std::move(losses), first_cs, max_degree};
     return Result<SceneRead>::success(std::move(out));
+}
+
+Result<SceneRead> read_glb(const std::uint8_t* data, std::size_t size) {
+    auto framing = glb::parse_glb(data, size);
+    if (!framing.has_value()) {
+        return scene_fail(framing.error_code(),
+                          framing.diagnostics().empty() ? "MK2165_GLB_INVALID"
+                                                        : framing.diagnostics()[0].code.c_str(),
+                          framing.diagnostics().empty() ? "invalid GLB container"
+                                                        : framing.diagnostics()[0].message);
+    }
+    const ByteRange& json = framing.value().json;
+    auto doc = parse_gltf_json(data + json.offset, static_cast<std::size_t>(json.length));
+    if (!doc.has_value()) {
+        return scene_fail(doc.error_code(),
+                          doc.diagnostics().empty() ? "MK2166_GLB_JSON"
+                                                    : doc.diagnostics()[0].code.c_str(),
+                          doc.diagnostics().empty() ? "invalid glTF JSON in GLB"
+                                                    : doc.diagnostics()[0].message);
+    }
+
+    // The single embedded binary buffer is glTF buffer 0. If there is no BIN chunk, buffer 0 has no
+    // bytes; a bufferView referencing it then resolves to a clean "buffer unavailable" error.
+    std::vector<BufferSpan> buffers;
+    if (framing.value().bin.has_value()) {
+        const ByteRange& bin = framing.value().bin.value();
+        buffers.push_back(BufferSpan{data + bin.offset, static_cast<std::size_t>(bin.length)});
+    } else {
+        buffers.push_back(BufferSpan{nullptr, 0});
+    }
+    return read_gaussian_scene(doc.value(), buffers);
 }
 
 }  // namespace melkor::format::gltf

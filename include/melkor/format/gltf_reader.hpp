@@ -76,6 +76,15 @@ struct SceneRead {
 // a clean conversion.
 Result<SceneRead> read_gaussian_scene(const Document& doc, const std::vector<BufferSpan>& buffers);
 
+// Reads a complete GLB file: validates the container framing, parses the JSON chunk into a
+// document, feeds the binary chunk to the scene reader as glTF buffer 0, and returns the merged
+// splats and loss report. This is the top-level entry point for a `.glb` on disk or in memory.
+//
+// Only the embedded binary buffer (buffer 0) is available; a bufferView that references any other
+// buffer -- an external or data-URI buffer -- resolves to a clean error, since this reader does not
+// fetch external resources.
+Result<SceneRead> read_glb(const std::uint8_t* data, std::size_t size);
+
 }  // namespace melkor::format::gltf
 
 #endif  // MELKOR_FORMAT_GLTF_READER_HPP

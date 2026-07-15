@@ -10,6 +10,7 @@
 
 #include "melkor/format/gltf_reader.hpp"
 
+#include "melkor/format/glb_container.hpp"
 #include "melkor/format/gltf_document.hpp"
 
 #include <cmath>
@@ -264,6 +265,31 @@ void test_no_sh_loss_under_pure_scale() {
     CHECK(!r.losses.has_blocking());
 }
 
+void test_read_glb_end_to_end() {
+    // Wrap the JSON + BIN in a real GLB container with build_glb, then read it back with read_glb.
+    // This exercises the whole path: container framing -> document -> scene -> SplatData.
+    auto bin = pack_one_splat(7.f, 8.f, 9.f).bytes;
+    std::string json = single_splat_json("\"nodes\":[{\"mesh\":0,\"translation\":[1,1,1]}],",
+                                          "\"scenes\":[{\"nodes\":[0]}],\"scene\":0");
+    auto glb = melkor::format::glb::build_glb(json, bin.data(), bin.size());
+    CHECK(glb.has_value());
+    if (!glb.has_value()) return;
+    auto r = gltf::read_glb(glb.value().data(), glb.value().size());
+    CHECK(r.has_value());
+    if (r.has_value()) {
+        CHECK(r.value().data.size() == 1);
+        // splat at local (7,8,9), node translates by (1,1,1) -> (8,9,10).
+        CHECK(approx(r.value().data.positions()[0].x, 8.f) &&
+              approx(r.value().data.positions()[0].y, 9.f) &&
+              approx(r.value().data.positions()[0].z, 10.f));
+    }
+    // A truncated GLB is a clean failure, not a crash.
+    CHECK(!gltf::read_glb(glb.value().data(), 8).has_value());
+    // Garbage bytes are a clean failure.
+    std::vector<std::uint8_t> junk(64, 0xAB);
+    CHECK(!gltf::read_glb(junk.data(), junk.size()).has_value());
+}
+
 }  // namespace
 
 int main() {
@@ -275,6 +301,7 @@ int main() {
     test_unreferenced_mesh_not_read();
     test_sh_rotation_loss_under_rotating_node();
     test_no_sh_loss_under_pure_scale();
+    test_read_glb_end_to_end();
 
     if (g_failures == 0) {
         std::printf("gltf scene: %d checks passed\n", g_checks);

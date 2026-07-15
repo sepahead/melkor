@@ -9,6 +9,13 @@ register is in `docs/audit/production-blockers.md`.
 
 ### Added
 
+- Top-level GLB reader (`read_glb` in `format/gltf_reader.hpp`): validates the container framing,
+  parses the JSON chunk into a document, feeds the binary chunk to the scene reader as glTF buffer
+  0, and returns the merged splats and loss report -- the entry point for a `.glb` on disk or in
+  memory. A bufferView referencing any buffer other than the embedded one resolves to a clean
+  error (no external fetch). Verified end-to-end against a GLB assembled by build_glb, with
+  truncated and garbage inputs failing cleanly (`test_gltf_scene`). The GLB read path is now
+  complete (P0-10).
 - glTF scene-graph walk (`read_gaussian_scene` in `format/gltf_reader.hpp`), completing the read
   path for GLB KHR_gaussian_splatting assets. It gates unsupported *required* extensions as a hard
   error, walks the default scene cycle-safely (visited-set, so a cyclic or shared-node graph
