@@ -43,6 +43,16 @@ void put_f32(std::vector<std::uint8_t>& v, float f) {
     v.push_back(static_cast<std::uint8_t>((bits >> 24) & 0xFF));
 }
 
+void put_i16(std::vector<std::uint8_t>& v, std::int16_t x) {
+    const std::uint16_t u = static_cast<std::uint16_t>(x);
+    v.push_back(static_cast<std::uint8_t>(u & 0xFF));
+    v.push_back(static_cast<std::uint8_t>((u >> 8) & 0xFF));
+}
+
+void put_u32(std::vector<std::uint8_t>& v, std::uint32_t x) {
+    for (int i = 0; i < 4; ++i) v.push_back(static_cast<std::uint8_t>((x >> (8 * i)) & 0xFF));
+}
+
 void put_u16(std::vector<std::uint8_t>& v, std::uint16_t x) {
     v.push_back(static_cast<std::uint8_t>(x & 0xFF));
     v.push_back(static_cast<std::uint8_t>((x >> 8) & 0xFF));
@@ -215,6 +225,53 @@ void test_bounds_failures() {
     CHECK(!gltf::decode_accessor(v4, buf.data(), buf.size()).has_value());
 }
 
+void test_normalized_signed_short() {
+    // KHR permits ROTATION as normalized signed short. -32768 and -32767 both clamp to -1 (the
+    // max(c/32767, -1) rule); 32767 -> 1; 0 -> 0.
+    std::vector<std::uint8_t> buf;
+    put_i16(buf, -32768);
+    put_i16(buf, -32767);
+    put_i16(buf, 32767);
+    put_i16(buf, 0);
+    gltf::AccessorView v;
+    v.component = gltf::ComponentType::i16;
+    v.element = gltf::ElementType::scalar;
+    v.normalized = true;
+    v.count = 4;
+    auto r = gltf::decode_accessor(v, buf.data(), buf.size());
+    CHECK(r.has_value());
+    if (r.has_value()) {
+        CHECK(approx(r.value()[0], -1.0f) && approx(r.value()[1], -1.0f));
+        CHECK(approx(r.value()[2], 1.0f) && approx(r.value()[3], 0.0f));
+    }
+}
+
+void test_unsigned_int_decode() {
+    // u32 (5125): normalized maps 0/2^32-1 to 0/1; unnormalized returns the exact value.
+    std::vector<std::uint8_t> buf;
+    put_u32(buf, 0);
+    put_u32(buf, 0xFFFFFFFFu);
+    gltf::AccessorView v;
+    v.component = gltf::ComponentType::u32;
+    v.element = gltf::ElementType::scalar;
+    v.normalized = true;
+    v.count = 2;
+    auto r = gltf::decode_accessor(v, buf.data(), buf.size());
+    CHECK(r.has_value());
+    if (r.has_value()) CHECK(approx(r.value()[0], 0.0f) && approx(r.value()[1], 1.0f));
+
+    std::vector<std::uint8_t> buf2;
+    put_u32(buf2, 1000);
+    gltf::AccessorView v2;
+    v2.component = gltf::ComponentType::u32;
+    v2.element = gltf::ElementType::scalar;
+    v2.normalized = false;
+    v2.count = 1;
+    auto r2 = gltf::decode_accessor(v2, buf2.data(), buf2.size());
+    CHECK(r2.has_value());
+    if (r2.has_value()) CHECK(approx(r2.value()[0], 1000.0f));
+}
+
 void test_zero_count_is_empty() {
     std::vector<std::uint8_t> buf(4, 0);
     gltf::AccessorView v;
@@ -237,6 +294,8 @@ int main() {
     test_interleaved_stride();
     test_byte_offset();
     test_bounds_failures();
+    test_normalized_signed_short();
+    test_unsigned_int_decode();
     test_zero_count_is_empty();
 
     if (g_failures == 0) {

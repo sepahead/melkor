@@ -376,40 +376,60 @@ Result<Document> parse_gltf_json(const std::uint8_t* data, std::size_t size) {
         const std::uint64_t n_meshes = out.meshes.size();
         const std::uint64_t n_nodes = out.nodes.size();
 
-        for (const auto& a : out.accessors) {
+        // Each message names the offending element index and the observed vs available count, so a
+        // caller can locate the fault in a large asset (per the diagnostic contract in error.hpp).
+        for (std::size_t i = 0; i < out.accessors.size(); ++i) {
+            const auto& a = out.accessors[i];
             if (a.has_buffer_view && a.buffer_view >= n_buffer_views) {
-                return fail("MK2136_GLTF_BAD_INDEX", "accessor.bufferView is out of range");
+                return fail("MK2136_GLTF_BAD_INDEX",
+                            "accessor " + std::to_string(i) + " references bufferView " +
+                                std::to_string(a.buffer_view) + " but there are only " +
+                                std::to_string(n_buffer_views));
             }
         }
-        for (const auto& b : out.buffer_views) {
-            if (b.buffer >= n_buffers) {
-                return fail("MK2136_GLTF_BAD_INDEX", "bufferView.buffer is out of range");
+        for (std::size_t i = 0; i < out.buffer_views.size(); ++i) {
+            if (out.buffer_views[i].buffer >= n_buffers) {
+                return fail("MK2136_GLTF_BAD_INDEX",
+                            "bufferView " + std::to_string(i) + " references buffer " +
+                                std::to_string(out.buffer_views[i].buffer) + " but there are only " +
+                                std::to_string(n_buffers));
             }
         }
-        for (const auto& m : out.meshes) {
-            for (const auto& p : m.primitives) {
-                for (const auto& [semantic, acc] : p.attributes) {
+        for (std::size_t mi = 0; mi < out.meshes.size(); ++mi) {
+            const auto& m = out.meshes[mi];
+            for (std::size_t pi = 0; pi < m.primitives.size(); ++pi) {
+                for (const auto& [semantic, acc] : m.primitives[pi].attributes) {
                     if (acc >= n_accessors) {
                         return fail("MK2136_GLTF_BAD_INDEX",
-                                    "primitive attribute '" + semantic + "' references an out-of-range "
-                                    "accessor");
+                                    "mesh " + std::to_string(mi) + " primitive " +
+                                        std::to_string(pi) + " attribute '" + semantic +
+                                        "' references accessor " + std::to_string(acc) +
+                                        " but there are only " + std::to_string(n_accessors));
                     }
                 }
             }
         }
-        for (const auto& n : out.nodes) {
-            if (n.mesh.has_value() && n.mesh.value() >= n_meshes) {
-                return fail("MK2136_GLTF_BAD_INDEX", "node.mesh is out of range");
+        for (std::size_t i = 0; i < out.nodes.size(); ++i) {
+            const auto& node = out.nodes[i];
+            if (node.mesh.has_value() && node.mesh.value() >= n_meshes) {
+                return fail("MK2136_GLTF_BAD_INDEX",
+                            "node " + std::to_string(i) + " references mesh " +
+                                std::to_string(node.mesh.value()) + " but there are only " +
+                                std::to_string(n_meshes));
             }
-            for (std::uint64_t c : n.children) {
+            for (std::uint64_t c : node.children) {
                 if (c >= n_nodes) {
-                    return fail("MK2136_GLTF_BAD_INDEX", "node.children references an out-of-range node");
+                    return fail("MK2136_GLTF_BAD_INDEX",
+                                "node " + std::to_string(i) + " lists child " + std::to_string(c) +
+                                    " but there are only " + std::to_string(n_nodes) + " nodes");
                 }
             }
         }
         for (std::uint64_t r : out.scene_roots) {
             if (r >= n_nodes) {
-                return fail("MK2136_GLTF_BAD_INDEX", "scene root references an out-of-range node");
+                return fail("MK2136_GLTF_BAD_INDEX",
+                            "scene root references node " + std::to_string(r) +
+                                " but there are only " + std::to_string(n_nodes) + " nodes");
             }
         }
 

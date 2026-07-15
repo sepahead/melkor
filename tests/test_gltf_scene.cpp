@@ -309,6 +309,18 @@ void test_no_sh_loss_under_pure_scale() {
     CHECK(!r.losses.has_blocking());
 }
 
+void test_singular_node_transform_fails_cleanly() {
+    // A node with a zero scale collapses the Gaussian. A single-primitive scene under it has every
+    // splat dropped, so the read fails cleanly (no splats survive) rather than crashing or emitting
+    // a degenerate splat.
+    auto buf = pack_one_splat(1.f, 2.f, 3.f).bytes;
+    std::string json = single_splat_json("\"nodes\":[{\"mesh\":0,\"scale\":[0,1,1]}],",
+                                          "\"scenes\":[{\"nodes\":[0]}],\"scene\":0");
+    bool ok = true;
+    run(json, buf, ok);
+    CHECK(!ok);
+}
+
 void test_budget_bounds_allocation() {
     // The resource budget must refuse an allocation before it is made. A memory limit too small for
     // even one splat's SH block (a degree-0 splat needs 1*3*4 = 12 bytes) fails the read; the
@@ -364,6 +376,7 @@ int main() {
     test_sh_rotation_applied_under_rotation_and_scale();
     test_sh_loss_under_reflection();
     test_no_sh_loss_under_pure_scale();
+    test_singular_node_transform_fails_cleanly();
     test_budget_bounds_allocation();
     test_read_glb_end_to_end();
 

@@ -29,13 +29,16 @@ namespace melkor {
 // How consequential a loss is. The policy acts on this.
 enum class LossSeverity : std::uint8_t {
     // A representational change with no expected rendered difference -- a quaternion renormalised
-    // within tolerance, say. Recorded, never blocks.
+    // within tolerance, or a node hierarchy flattened into the canonical flat splat cloud (which
+    // cannot represent a hierarchy, so no rendered detail is lost once the transforms are baked).
+    // Recorded, never blocks.
     info = 0,
     // A measurable but usually acceptable loss, such as quantisation within a published bound.
     // Recorded, does not block by default.
     warning = 1,
-    // Semantic data removed or guessed -- SH degree 4 reduced to 3, a scene graph flattened.
-    // Blocks the commit unless the caller approves this exact loss code.
+    // Semantic data removed or guessed -- SH degree 4 reduced to 3, or a colour space assumed
+    // because the source named an unrecognised one. Blocks the commit unless the caller approves
+    // this exact loss code.
     severe = 2,
     // The target cannot represent the asset without violating an invariant. Always blocks;
     // cannot be approved.

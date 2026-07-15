@@ -236,10 +236,40 @@ void test_rotate_block_rgb_channels() {
     CHECK(block[0] == 0.0f && block[1 * 3 + 0] != 0.0f);
 }
 
+void test_rotate_block_matches_band_matrices_all_degrees() {
+    // rotate_block does the per-band gather/scatter (with a fixed-size `double in[7]`) for degrees
+    // up to 3. Cross-check its output on a non-zero degree-3 block against a manual application of
+    // each band matrix, so a band>=2 indexing bug is caught at the value level (not just degree 1).
+    auto q = math::normalize(Quat{0.2, -0.3, 0.5, 0.7}).value();
+    auto rot = math::ShRotation::create(math::to_matrix(q), 3);
+    CHECK(rot.has_value());
+    if (!rot.has_value()) return;
+
+    std::vector<float> block(16), expected(16);
+    for (int i = 0; i < 16; ++i) block[i] = expected[i] = static_cast<float>(i + 1) * 0.37f;
+    // Expected: DC unchanged; each higher band rotated by its own matrix.
+    for (std::uint32_t l = 1; l <= 3; ++l) {
+        const std::size_t k = 2 * l + 1, base = l * l;
+        const auto& m = rot.value().band(l);
+        std::vector<double> in(k);
+        for (std::size_t j = 0; j < k; ++j) in[j] = expected[base + j];
+        for (std::size_t r = 0; r < k; ++r) {
+            double acc = 0.0;
+            for (std::size_t c = 0; c < k; ++c) acc += m[r * k + c] * in[c];
+            expected[base + r] = static_cast<float>(acc);
+        }
+    }
+    rot.value().rotate_block(block.data(), 1);
+    for (int i = 0; i < 16; ++i) CHECK(approx(block[i], expected[i], 1e-5));
+    // The DC term is untouched.
+    CHECK(approx(block[0], 0.37f, 1e-6));
+}
+
 }  // namespace
 
 int main() {
     test_is_proper_rotation();
+    test_rotate_block_matches_band_matrices_all_degrees();
     test_band_matrices_orthogonal();
     test_identity_is_identity();
     test_defining_identity();
