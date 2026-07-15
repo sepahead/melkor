@@ -215,6 +215,18 @@ bool is_pure_positive_scale(const math::Mat3& l) {
     return off_zero && diag_pos;
 }
 
+// Whether a linear map is the identity within tolerance. When a node contributes no linear part
+// (only translation, or nothing), the covariance is unchanged, so the splat's rotation and scale
+// are kept exactly rather than round-tripped through an eigendecomposition -- which would preserve
+// the covariance but re-express it with permuted axes or a sign-flipped quaternion, needlessly
+// perturbing the common case of splats already authored in world space.
+bool is_identity_linear(const math::Mat3& l) {
+    const double eps = 1e-9;
+    return std::fabs(l[0] - 1.0) < eps && std::fabs(l[4] - 1.0) < eps && std::fabs(l[8] - 1.0) < eps &&
+           std::fabs(l[1]) < eps && std::fabs(l[2]) < eps && std::fabs(l[3]) < eps &&
+           std::fabs(l[5]) < eps && std::fabs(l[6]) < eps && std::fabs(l[7]) < eps;
+}
+
 // A primitive's splats after its node transform has been applied: geometry in world space, SH still
 // in the source frame, tagged with the source degree so the merge can pad to a common degree.
 struct TransformedBatch {
@@ -234,26 +246,34 @@ TransformedBatch transform_primitive(const PrimitiveRead& pr, const NodeTransfor
     const std::size_t coeffs = khr::sh_total_coefficients(pr.source_sh_degree);
     const std::size_t block = coeffs * 3;
     const auto& raw = pr.data.sh().raw();
+    const bool identity = is_identity_linear(xform.linear);
     for (std::size_t s = 0; s < pr.data.size(); ++s) {
         const Vec3f& p = pr.data.positions()[s];
         const Vec3f& sc = pr.data.scales()[s];
         const Quatf& q = pr.data.rotations()[s];
-        auto rs = math::affine_transform_gaussian(
-            xform.linear, math::Quat{q.x, q.y, q.z, q.w}, math::Vec3{sc.x, sc.y, sc.z});
-        if (!rs.has_value()) {
-            ++batch.dropped;  // a singular transform collapses this Gaussian; drop it honestly
-            continue;
+
+        Vec3f out_scale = sc;
+        Quatf out_rot = q;
+        if (!identity) {
+            auto rs = math::affine_transform_gaussian(
+                xform.linear, math::Quat{q.x, q.y, q.z, q.w}, math::Vec3{sc.x, sc.y, sc.z});
+            if (!rs.has_value()) {
+                ++batch.dropped;  // a singular transform collapses this Gaussian; drop it honestly
+                continue;
+            }
+            out_scale = Vec3f{static_cast<float>(rs.value().scale[0]),
+                              static_cast<float>(rs.value().scale[1]),
+                              static_cast<float>(rs.value().scale[2])};
+            out_rot = Quatf{static_cast<float>(rs.value().rotation.x),
+                            static_cast<float>(rs.value().rotation.y),
+                            static_cast<float>(rs.value().rotation.z),
+                            static_cast<float>(rs.value().rotation.w)};
         }
         const math::Vec3 mean = apply_point(xform, math::Vec3{p.x, p.y, p.z});
         batch.positions.push_back(Vec3f{static_cast<float>(mean[0]), static_cast<float>(mean[1]),
                                         static_cast<float>(mean[2])});
-        batch.scales.push_back(Vec3f{static_cast<float>(rs.value().scale[0]),
-                                     static_cast<float>(rs.value().scale[1]),
-                                     static_cast<float>(rs.value().scale[2])});
-        batch.rotations.push_back(Quatf{static_cast<float>(rs.value().rotation.x),
-                                        static_cast<float>(rs.value().rotation.y),
-                                        static_cast<float>(rs.value().rotation.z),
-                                        static_cast<float>(rs.value().rotation.w)});
+        batch.scales.push_back(out_scale);
+        batch.rotations.push_back(out_rot);
         batch.opacities.push_back(pr.data.opacities()[s]);
         batch.sh.insert(batch.sh.end(), raw.begin() + static_cast<std::ptrdiff_t>(s * block),
                         raw.begin() + static_cast<std::ptrdiff_t>((s + 1) * block));

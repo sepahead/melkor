@@ -9,6 +9,16 @@ register is in `docs/audit/production-blockers.md`.
 
 ### Added
 
+- glTF KHR_gaussian_splatting writer (`format/gltf_writer.hpp`, `src/formats/gltf_writer.cpp`):
+  serialises a canonical SplatData into a GLB with one POINTS primitive -- the inverse of the
+  reader, including the SH transpose from the scene model's splat-major blocks back to one float
+  accessor per coefficient, and POSITION min/max as base glTF requires. A degree-4 source is
+  written at the degree-3 profile ceiling with a severe, approvable LOSS_SH_DEGREE_TRUNCATED. Both
+  directions of the codec are now verified by a full round-trip: write then read returns every
+  field -- positions, scales, rotations, opacities, and the spherical harmonics -- to float
+  precision (`test_gltf_writer`, 47 checks, clean under ASan+UBSan). To keep that round-trip exact,
+  the reader now keeps a splat's rotation/scale unchanged under an identity node transform instead
+  of round-tripping it through an eigendecomposition. Advances P0-10 (WP09).
 - Top-level GLB reader (`read_glb` in `format/gltf_reader.hpp`): validates the container framing,
   parses the JSON chunk into a document, feeds the binary chunk to the scene reader as glTF buffer
   0, and returns the merged splats and loss report -- the entry point for a `.glb` on disk or in

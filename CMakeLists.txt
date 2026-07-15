@@ -156,6 +156,7 @@ add_library(melkor_core STATIC
     src/formats/gltf_reader.cpp
     src/formats/gltf_resolve.cpp
     src/formats/gltf_transform.cpp
+    src/formats/gltf_writer.cpp
     src/formats/loss.cpp
     src/formats/probe.cpp
 
@@ -618,6 +619,13 @@ add_executable(test_gltf_scene tests/test_gltf_scene.cpp)
 target_link_libraries(test_gltf_scene PRIVATE melkor_core)
 target_compile_options(test_gltf_scene PRIVATE ${MELKOR_WARNING_FLAGS})
 add_test(NAME gltf_scene_tests COMMAND test_gltf_scene)
+
+# glTF writer: round-trips a SplatData through a GLB (write then read must return the input,
+# including the SH transpose), and pins the degree-3 truncation loss for a degree-4 source (WP09).
+add_executable(test_gltf_writer tests/test_gltf_writer.cpp)
+target_link_libraries(test_gltf_writer PRIVATE melkor_core)
+target_compile_options(test_gltf_writer PRIVATE ${MELKOR_WARNING_FLAGS})
+add_test(NAME gltf_writer_tests COMMAND test_gltf_writer)
 
 # ---------------------------------------------------------------------------
 # Fuzzing.
