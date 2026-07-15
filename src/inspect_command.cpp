@@ -216,10 +216,17 @@ InspectDocument inspectPath(const std::string& path) {
                 g.f_dc_0 = sd.sh().dc(s, 0);
                 g.f_dc_1 = sd.sh().dc(s, 1);
                 g.f_dc_2 = sd.sh().dc(s, 2);
-                g.opacity = sd.opacities()[s];
-                g.scale_0 = sd.scales()[s].x;
-                g.scale_1 = sd.scales()[s].y;
-                g.scale_2 = sd.scales()[s].z;
+                // SplatData is canonical (linear scale, linear opacity in [0,1]); GaussianCloud and
+                // inspectCloud use the 3DGS training domains (log scale, logit opacity) -- e.g.
+                // inspectCloud applies std::exp to the scale to recover the linear value. Convert,
+                // or the linear scale would be double-exponentiated and the covariance range
+                // mis-reported. Opacity is clamped off the {0,1} endpoints so a fully-opaque splat
+                // does not map to a +/-inf logit that inspectCloud would flag as non-finite.
+                const float op = std::min(std::max(sd.opacities()[s], 1e-6f), 1.0f - 1e-6f);
+                g.opacity = std::log(op / (1.0f - op));
+                g.scale_0 = std::log(sd.scales()[s].x);
+                g.scale_1 = std::log(sd.scales()[s].y);
+                g.scale_2 = std::log(sd.scales()[s].z);
                 const auto& q = sd.rotations()[s];  // canonical x,y,z,w -> GaussianCloud w,x,y,z
                 g.rot_0 = q.w;
                 g.rot_1 = q.x;

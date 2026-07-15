@@ -132,6 +132,18 @@ Result<Quat> from_frame(const Vec3& ax, const Vec3& ay, const Vec3& az) {
         return Result<Quat>::failure(ErrorCode::invalid_data, std::move(d));
     }
 
+    // Orthonormal is not enough: a left-handed (reflection) frame is orthonormal but has
+    // determinant -1 and is not a proper rotation. from_matrix would silently misconvert it, so
+    // reject it. For an orthonormal frame the scalar triple product (ax x ay) . az is exactly the
+    // determinant, +1 for right-handed and -1 for left-handed.
+    const Vec3 axay{ax[1] * ay[2] - ax[2] * ay[1], ax[2] * ay[0] - ax[0] * ay[2],
+                    ax[0] * ay[1] - ax[1] * ay[0]};
+    if (dot3(axay, az) < 0.0) {
+        Diagnostic d("MK1205_LEFT_HANDED_FRAME", Severity::error,
+                     "frame is left-handed (a reflection), not a proper rotation");
+        return Result<Quat>::failure(ErrorCode::invalid_data, std::move(d));
+    }
+
     // Columns of the rotation matrix are the frame axes.
     Mat3 m{
         ax[0], ay[0], az[0],

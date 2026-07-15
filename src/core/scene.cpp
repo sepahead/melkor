@@ -190,6 +190,25 @@ Result<void> SplatData::validate() const {
                 splat_error("MK1508_INVALID_SPLAT", "splat violates a canonical invariant", i,
                             "splat"));
         }
+        // The same unit-quaternion invariant create() enforces: a value that crossed an ABI or was
+        // deserialised could carry a non-unit rotation, which must not report as valid.
+        const Quatf& q = rotations_[i];
+        if (!math::is_unit(math::Quat{q.x, q.y, q.z, q.w})) {
+            return Result<void>::failure(
+                ErrorCode::invalid_data,
+                splat_error("MK1507_NON_UNIT_ROTATION",
+                            "rotation must be a unit quaternion within tolerance", i, "rotation"));
+        }
+    }
+    // Spherical harmonics must be finite (create() enforces this; a deserialised buffer might not).
+    const std::vector<float>& sh = sh_.raw();
+    for (std::size_t k = 0; k < sh.size(); ++k) {
+        if (!std::isfinite(sh[k])) {
+            Diagnostic d("MK1502_SH_NONFINITE", Severity::error,
+                         "spherical-harmonic coefficient is not finite");
+            d.with_context("coefficient_index", static_cast<std::uint64_t>(k));
+            return Result<void>::failure(ErrorCode::invalid_data, std::move(d));
+        }
     }
     return Result<void>::success();
 }

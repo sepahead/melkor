@@ -164,6 +164,15 @@ void test_from_frame() {
     // A skewed (non-orthonormal) frame is rejected rather than forced into a non-rotation.
     auto bad = from_frame({1, 0, 0}, {0.5, 0.5, 0}, {0, 0, 1});
     CHECK(!bad.has_value());
+
+    // A left-handed (reflection) frame is orthonormal but has determinant -1; it is not a proper
+    // rotation and must be rejected, not silently misconverted to a quaternion.
+    auto reflected = from_frame({1, 0, 0}, {0, 1, 0}, {0, 0, -1});
+    CHECK(!reflected.has_value());
+    if (!reflected.has_value())
+        CHECK(reflected.diagnostics()[0].code == "MK1205_LEFT_HANDED_FRAME");
+    // The right-handed version of the same axes is accepted.
+    CHECK(from_frame({1, 0, 0}, {0, 1, 0}, {0, 0, 1}).has_value());
 }
 
 // ---------------------------------------------------------------------------
