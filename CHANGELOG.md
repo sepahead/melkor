@@ -94,6 +94,15 @@ register is in `docs/audit/production-blockers.md`.
   and a standalone corpus-replay executable registered as a ctest that runs the seed corpus and
   built-in adversarial inputs on every platform (clean under ASan+UBSan). Every fixed crash
   becomes a permanent corpus entry.
+- The conversion loss-report system (`melkor/format/loss.hpp`, `melkor/format/format_id.hpp`,
+  `schemas/loss-report-v1.schema.json`), which keeps a format conversion honest (WP06). Every
+  conversion produces a report — including a zero-loss one, so automation never infers whether
+  reporting was omitted — with stable machine codes (`LOSS_SH_DEGREE_TRUNCATED`,
+  `LOSS_SCENE_GRAPH_FLATTENED`, ...). The policy is enforced structurally: `info`/`warning` pass,
+  a `severe` loss blocks the commit unless the caller approved that exact code (the API takes
+  exact codes, so a program cannot wave through a loss it did not name), and a `fatal` loss can
+  never be approved. Losses are distinct from validation errors: a malformed file or a
+  resource-limit failure is an error, not an approvable loss. `loss_report_tests`: 20 checks.
 - Benchmark infrastructure under `benchmarks/`: versioned manifest and result JSON schemas, an
   example format-fidelity manifest, and a dataset registry that records dataset identity, licence,
   and digest without committing the data. A public quantitative claim is valid only when it links

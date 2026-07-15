@@ -144,6 +144,12 @@ add_library(melkor_core STATIC
     src/core/backend_registry.cpp
     src/core/scene.cpp
 
+    # Format registry and the conversion loss-report system (WP06). Losses are distinct from
+    # validation errors: a lossy conversion must say what it lost, and a severe loss blocks the
+    # commit unless the exact code is approved.
+    src/formats/format_id.cpp
+    src/formats/loss.cpp
+
     # Canonical math oracle: the single semantic authority for activation domains, quaternion
     # handling, and covariance transform/decomposition. The place transforms are done correctly
     # so no format adapter or backend reinvents them wrongly (P0-17).
@@ -526,6 +532,13 @@ add_executable(test_scene tests/test_scene.cpp)
 target_link_libraries(test_scene PRIVATE melkor_core)
 target_compile_options(test_scene PRIVATE ${MELKOR_WARNING_FLAGS})
 add_test(NAME scene_tests COMMAND test_scene)
+
+# Conversion loss policy: info/warning pass, severe blocks unless the exact code is approved,
+# fatal can never be approved (WP06).
+add_executable(test_loss_report tests/test_loss_report.cpp)
+target_link_libraries(test_loss_report PRIVATE melkor_core)
+target_compile_options(test_loss_report PRIVATE ${MELKOR_WARNING_FLAGS})
+add_test(NAME loss_report_tests COMMAND test_loss_report)
 
 # ---------------------------------------------------------------------------
 # Fuzzing.

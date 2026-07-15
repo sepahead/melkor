@@ -1,0 +1,58 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://melkor.dev/schemas/loss-report-v1.json",
+  "title": "Melkor conversion loss report v1",
+  "description": "The complete, machine-readable account of what a format conversion lost. Every committed conversion emits one, including a zero-loss report, so automation never has to infer whether reporting was omitted. Losses are distinct from validation diagnostics: a malformed input or a resource-limit failure is an error, not a loss.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "items"],
+  "properties": {
+    "schema_version": { "const": 1 },
+    "input": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "format": { "type": "string" },
+        "profile": { "type": "string" }
+      }
+    },
+    "output": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "format": { "type": "string" },
+        "profile": { "type": "string" }
+      }
+    },
+    "items": {
+      "type": "array",
+      "description": "Every loss the conversion incurred. Empty for a lossless conversion.",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["code", "severity", "affected_splats"],
+        "properties": {
+          "code": {
+            "type": "string",
+            "pattern": "^LOSS_[A-Z_]+$",
+            "description": "A stable loss code. Its meaning never changes across the 2.x line."
+          },
+          "severity": {
+            "type": "string",
+            "enum": ["info", "warning", "severe", "fatal"],
+            "description": "info/warning are recorded and pass; severe blocks unless the exact code is approved; fatal always blocks and cannot be approved."
+          },
+          "source_feature": { "type": "string" },
+          "target_constraint": { "type": "string" },
+          "affected_splats": { "type": "integer", "minimum": 0 },
+          "remediation": { "type": "string" }
+        }
+      }
+    },
+    "approved_codes": {
+      "type": "array",
+      "description": "The exact loss codes the caller approved (e.g. via --allow-loss). Recorded in the committed report so a downstream reviewer can see which losses were deliberately accepted.",
+      "items": { "type": "string", "pattern": "^LOSS_[A-Z_]+$" }
+    }
+  }
+}
