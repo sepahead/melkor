@@ -72,6 +72,12 @@ register is in `docs/audit/production-blockers.md`.
 
 ### Changed
 
+- Benchmark infrastructure under `benchmarks/`: versioned manifest and result JSON schemas, an
+  example format-fidelity manifest, and a dataset registry that records dataset identity, licence,
+  and digest without committing the data. A public quantitative claim is valid only when it links
+  to a result produced from a manifest here, for the exact scope of the claim; a comparator that
+  is cited but not reproduced is marked `attribution_only` and never combined into a
+  Melkor-measured table. Pairs with the prose claim lint (WP21).
 - `tools/check_claims.py` lints the production-landing surfaces for unqualified superlative and
   speed claims ("SOTA", "10-100x", "fastest", "lossless", "production-grade", "universal"),
   permitting a phrase only when it is attributed to its upstream source on the same line or

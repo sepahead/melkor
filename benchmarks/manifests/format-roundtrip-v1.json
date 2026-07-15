@@ -1,0 +1,27 @@
+{
+  "schema": "melkor.benchmark-manifest/v1",
+  "id": "format-roundtrip-v1",
+  "title": "PLY <-> SPZ <-> glTF round-trip fidelity",
+  "description": "Measures the semantic error introduced by converting a Gaussian-splat asset between supported format profiles and back. Fidelity, not speed: a quantized round trip is not lossless just because the file opens.",
+  "category": "format-fidelity",
+  "operation": {
+    "kind": "cli",
+    "argv": ["melkor", "convert", "--input", "{input}", "--output", "{output}", "--verify-output", "--output-mode", "json"]
+  },
+  "datasets": ["synthetic-gaussians-small-v1"],
+  "metrics": [
+    { "name": "position_rmse_meters", "unit": "m", "direction": "lower-is-better" },
+    { "name": "scale_log_rmse", "unit": "log", "direction": "lower-is-better" },
+    { "name": "quaternion_angular_error_max", "unit": "rad", "direction": "lower-is-better" },
+    { "name": "opacity_abs_error_max", "unit": "unit", "direction": "lower-is-better" },
+    { "name": "sh_coefficient_rmse", "unit": "unit", "direction": "lower-is-better" }
+  ],
+  "repetitions": 1,
+  "seed": 0,
+  "limits_profile": "desktop",
+  "expiry": {
+    "review_after_days": 180,
+    "invalidated_by": ["spz-upstream-revision", "khr-gaussian-splatting-revision"]
+  },
+  "owner": "sepahead"
+}

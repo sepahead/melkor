@@ -1,0 +1,92 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://melkor.dev/schemas/benchmark-result-v1.json",
+  "title": "Melkor benchmark result v1",
+  "description": "The output of running a benchmark manifest: the environment it ran in and the raw per-run measurements. Raw runs are required, not just aggregates, so variance and outliers are visible.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema", "manifest_id", "melkor", "environment", "runs"],
+  "properties": {
+    "schema": { "const": "melkor.benchmark-result/v1" },
+    "manifest_id": { "type": "string", "description": "The id of the manifest that produced this." },
+    "timestamp": { "type": "string", "format": "date-time" },
+    "melkor": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["version", "commit"],
+      "properties": {
+        "version": { "type": "string" },
+        "commit": { "type": "string", "pattern": "^[0-9a-f]{40}$" },
+        "build_flags": { "type": "string" },
+        "dependency_lock_sha256": { "type": "string" }
+      }
+    },
+    "environment": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "Everything about the machine that affects a number. A benchmark without this is not reproducible.",
+      "required": ["os", "cpu"],
+      "properties": {
+        "os": { "type": "string" },
+        "kernel": { "type": "string" },
+        "cpu": { "type": "string" },
+        "ram_bytes": { "type": "integer" },
+        "storage": { "type": "string" },
+        "compiler": { "type": "string" },
+        "gpu": { "type": "string" },
+        "gpu_driver": { "type": "string" },
+        "gpu_runtime": { "type": "string" },
+        "browser": { "type": "string" },
+        "renderer": { "type": "string" },
+        "threads": { "type": "integer" },
+        "power_mode": { "type": "string" }
+      }
+    },
+    "datasets": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["id", "sha256"],
+        "properties": {
+          "id": { "type": "string" },
+          "sha256": { "type": "string" },
+          "license": { "type": "string" }
+        }
+      }
+    },
+    "runs": {
+      "type": "array",
+      "minItems": 1,
+      "description": "Raw per-repetition measurements. The mean is derived from these, never a substitute for them.",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["repetition", "measurements"],
+        "properties": {
+          "repetition": { "type": "integer", "minimum": 0 },
+          "measurements": {
+            "type": "object",
+            "additionalProperties": { "type": "number" },
+            "description": "Metric name to measured value for this single run."
+          },
+          "status": { "type": "string", "enum": ["ok", "failed", "excluded"] },
+          "exclusion_reason": { "type": "string" }
+        }
+      }
+    },
+    "failures": {
+      "type": "array",
+      "description": "Runs or scenes that failed. A benchmark must not average away its failures.",
+      "items": { "type": "string" }
+    },
+    "attestation": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "runner_identity": { "type": "string" },
+        "signature": { "type": "string" }
+      }
+    }
+  }
+}

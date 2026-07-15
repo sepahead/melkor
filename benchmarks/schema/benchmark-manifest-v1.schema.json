@@ -1,0 +1,115 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://melkor.dev/schemas/benchmark-manifest-v1.json",
+  "title": "Melkor benchmark manifest v1",
+  "description": "Declares a reproducible benchmark: what is measured, on what data, against what comparator, and how. A manifest is the input; a benchmark-result is the output. No number appears in a public Melkor surface without a result produced from a manifest like this.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema", "id", "category", "operation", "datasets", "metrics", "repetitions"],
+  "properties": {
+    "schema": { "const": "melkor.benchmark-manifest/v1" },
+    "id": {
+      "type": "string",
+      "pattern": "^[a-z0-9][a-z0-9-]*-v[0-9]+$",
+      "description": "Stable, versioned identifier, e.g. 'format-roundtrip-v1'. A claim links to this."
+    },
+    "title": { "type": "string" },
+    "description": { "type": "string" },
+    "category": {
+      "type": "string",
+      "enum": [
+        "format-fidelity",
+        "parser-throughput",
+        "backend-parity",
+        "backend-performance",
+        "viewer-render",
+        "mesh-init",
+        "completion",
+        "pipeline"
+      ],
+      "description": "Which kind of thing this measures. Kept separate on purpose: a format-fidelity number is not a pipeline-quality number, and mixing them is how misleading comparisons happen."
+    },
+    "operation": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["kind"],
+      "properties": {
+        "kind": { "type": "string", "enum": ["cli", "api", "external"] },
+        "argv": { "type": "array", "items": { "type": "string" } },
+        "config": { "type": "object" }
+      }
+    },
+    "datasets": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "string",
+        "description": "A dataset ID resolved through datasets/manifest.json. The data itself is never in git."
+      }
+    },
+    "comparators": {
+      "type": "array",
+      "description": "Independent tools compared against, each pinned by version. A comparison to an unpinned tool is not reproducible.",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["name", "version"],
+        "properties": {
+          "name": { "type": "string" },
+          "version": { "type": "string" },
+          "commit": { "type": "string" },
+          "config": { "type": "object" },
+          "attribution_only": {
+            "type": "boolean",
+            "description": "True when the comparator's own reported numbers are cited but NOT reproduced by Melkor. Such numbers must never be combined into a Melkor-measured table.",
+            "default": false
+          }
+        }
+      }
+    },
+    "metrics": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["name", "unit"],
+        "properties": {
+          "name": { "type": "string" },
+          "unit": { "type": "string" },
+          "implementation": {
+            "type": "string",
+            "description": "The exact metric implementation and version. PSNR/SSIM/LPIPS differ between libraries; the implementation is part of the number."
+          },
+          "direction": { "type": "string", "enum": ["higher-is-better", "lower-is-better"] }
+        }
+      }
+    },
+    "repetitions": {
+      "type": "integer",
+      "minimum": 1,
+      "description": "How many times each measurement is repeated. A single run has no reportable variance."
+    },
+    "warmups": { "type": "integer", "minimum": 0, "default": 0 },
+    "seed": { "type": "integer", "description": "Fixed RNG seed; a wall-clock seed is not reproducible." },
+    "limits_profile": {
+      "type": "string",
+      "enum": ["web", "desktop", "server", "custom"],
+      "description": "The resource-limit profile the operation runs under, because limits affect which inputs are even accepted."
+    },
+    "expiry": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "When this manifest's results should be considered stale and re-measured.",
+      "properties": {
+        "review_after_days": { "type": "integer", "minimum": 1 },
+        "invalidated_by": {
+          "type": "array",
+          "items": { "type": "string" },
+          "description": "Changes that expire the claim immediately, e.g. 'spz-upstream-revision', 'khr-gaussian-splatting-revision'."
+        }
+      }
+    },
+    "owner": { "type": "string" }
+  }
+}
