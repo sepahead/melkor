@@ -68,7 +68,11 @@ Limits Limits::for_profile(LimitsProfile profile) {
             limits.max_resource_bytes = 512 * MiB;
             limits.max_decoded_bytes = 2 * GiB;
             limits.max_memory_bytes = 1 * GiB;
-            limits.max_temp_bytes = 0;  // A browser has no temp directory to write to.
+            // Bounded, not 0: Budget treats a 0 limit as *unlimited*, so a 0 here would give the
+            // tightest profile an UNBOUNDED temp-disk budget -- the opposite of the intent. Native
+            // use of the web profile (`--limits-profile web`) still writes output through the atomic
+            // temp file, so it is bounded to the same order as the input/decoded caps.
+            limits.max_temp_bytes = 2 * GiB;
             limits.max_decompression_ratio = 100;
             limits.max_splats = 8'000'000;
             limits.max_mesh_vertices = 8'000'000;
@@ -186,8 +190,10 @@ Result<void> Limits::validate() const {
     // custom profile that populated the obvious ones and forgot, say, max_mesh_triangles passed
     // validation and then accepted an unbounded triangle count feeding an allocation.
     //
-    // max_temp_bytes is the one deliberate exception: the web profile sets it to 0 because a
-    // browser has no temp directory, and that profile must validate. It is not required here.
+    // Every budget-backed limit -- including max_temp_bytes -- must be positive: a 0 there is read
+    // by Budget as "unlimited", so leaving it 0 silently disables the bound (this is exactly how
+    // the web profile once granted an unbounded temp-disk budget).
+    require_positive(max_temp_bytes, "max_temp_bytes");
     require_positive(max_input_bytes, "max_input_bytes");
     require_positive(max_resource_bytes, "max_resource_bytes");
     require_positive(max_decoded_bytes, "max_decoded_bytes");

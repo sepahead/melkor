@@ -210,11 +210,19 @@ void test_custom_profile_missing_any_budget_limit_fails_validation() {
     limits.max_metadata_total_bytes = 0;
     CHECK(!limits.validate().has_value());
 
-    // But zeroing max_temp_bytes must STILL validate: the web profile legitimately sets it to 0
-    // (a browser has no temp directory), so requiring it positive would reject a real profile.
+    // Zeroing max_temp_bytes must FAIL validation like every other budget-backed limit: Budget
+    // reads a 0 limit as "unlimited", so a 0 here silently grants an unbounded temp-disk budget
+    // (this is how the web profile once did). No profile sets it to 0 any longer.
     limits = Limits::for_profile(LimitsProfile::desktop);
     limits.max_temp_bytes = 0;
-    CHECK(limits.validate().has_value());
+    CHECK(!limits.validate().has_value());
+
+    // Every named profile, including the tightest (web), must validate -- and thus must have a
+    // positive, bounded temp budget.
+    CHECK(Limits::for_profile(LimitsProfile::web).validate().has_value());
+    CHECK(Limits::for_profile(LimitsProfile::web).max_temp_bytes > 0);
+    CHECK(Limits::for_profile(LimitsProfile::desktop).validate().has_value());
+    CHECK(Limits::for_profile(LimitsProfile::server).validate().has_value());
 }
 
 // ---------------------------------------------------------------------------

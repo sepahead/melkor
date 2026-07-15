@@ -11,6 +11,7 @@
 #include "melkor/ply_writer.hpp"
 
 #include <cstdio>
+#include <string>
 #include <vector>
 
 namespace {
@@ -81,6 +82,17 @@ int main() {
     tiny_mem.max_memory_bytes = 16;  // less than 3 * sizeof(GaussianSplat)
     auto rejected_mem = reader.readFromBuffer(buffer.data(), buffer.size(), tiny_mem);
     CHECK(!rejected_mem.success);
+
+    // A header that never reaches end_header (a header bomb) is refused once it exceeds the
+    // configured header-size limit, instead of scanning the whole buffer with an O(n^2) property
+    // check.
+    std::string header_bomb = "ply\n";
+    for (int i = 0; i < 200; ++i) header_bomb += "comment padding to grow the header without end\n";
+    Limits tiny_header = Limits::for_profile(LimitsProfile::desktop);
+    tiny_header.max_ply_header_bytes = 64;
+    auto rejected_header = reader.readFromBuffer(
+        reinterpret_cast<const std::uint8_t*>(header_bomb.data()), header_bomb.size(), tiny_header);
+    CHECK(!rejected_header.success);
 
     if (g_failures == 0) {
         std::printf("ply budget: %d checks passed\n", g_checks);

@@ -402,6 +402,12 @@ PlyReader::ReadResult PlyReader::readFromBuffer(const uint8_t* data, size_t size
         size_t line_start = 0;
         size_t line_number = 0;
         while (line_start < size) {
+            // Bound the header scan: without this, a buffer that never reaches `end_header` (or a
+            // header padded with millions of lines) drives an O(n^2) property scan over the whole
+            // input. readFromFile has an equivalent prefix guard; this makes readFromBuffer match.
+            if (limits.max_ply_header_bytes != 0 && line_start > limits.max_ply_header_bytes) {
+                return {false, "Invalid PLY: header exceeds the configured size limit", {}, {}};
+            }
             size_t nl = view.find('\n', line_start);
             if (nl == std::string_view::npos) break;  // header lines must end in '\n'
             std::string line(view.substr(line_start, nl - line_start));

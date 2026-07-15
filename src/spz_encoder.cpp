@@ -208,6 +208,22 @@ static std::string validateSpzCloudLayout(const spz::GaussianCloud& cloud) {
         shorterThan(cloud.sh.size(), shRestCountForDegree(cloud.shDegree))) {
         return "SPZ decoded arrays are shorter than the declared point count";
     }
+    // Reject a non-finite decoded value. Crafted input can drive the decoder to a NaN/inf -- e.g. a
+    // v3 "smallest-three" quaternion whose stored components sum to more than 1 makes the recovered
+    // component sqrt of a negative -- and the layout check above would otherwise pass it as a valid
+    // decode. Guarding at the boundary catches every such source, not one function.
+    const auto any_non_finite = [](const std::vector<float>& v) {
+        for (float x : v) {
+            if (!std::isfinite(x)) return true;
+        }
+        return false;
+    };
+    if (any_non_finite(cloud.positions) || any_non_finite(cloud.scales) ||
+        any_non_finite(cloud.rotations) || any_non_finite(cloud.alphas) ||
+        any_non_finite(cloud.colors) || any_non_finite(cloud.sh)) {
+        return "SPZ decoded a non-finite value (NaN or infinity), likely from corrupt or crafted "
+               "input";
+    }
     return {};
 }
 

@@ -9,6 +9,19 @@ register is in `docs/audit/production-blockers.md`.
 
 ### Fixed
 
+- Resource-safety fixes from the shipping-surface review:
+  - The `web` limits profile set `max_temp_bytes = 0` to mean "no temp", but the Budget reads a 0
+    limit as *unlimited* -- so the tightest, user-selectable profile actually granted an UNBOUNDED
+    temp-disk budget. web now sets a real 2 GiB temp bound, and `Limits::validate()` requires
+    max_temp_bytes positive like every other budget-backed limit, closing the 0-means-unlimited
+    footgun.
+  - The SPZ decoder accepted a non-finite decoded cloud: a crafted v3 "smallest-three" quaternion
+    whose components sum to more than 1 makes the recovered component sqrt(negative) = NaN, which
+    the size-only layout check passed as a successful decode. `validateSpzCloudLayout` now scans
+    all decoded arrays for NaN/inf and rejects a non-finite cloud at the boundary.
+  - The PLY reader's `readFromBuffer` placed no bound on the header scan, so an input that never
+    reaches `end_header` drove an O(n^2) property scan over the whole buffer. It now enforces
+    `max_ply_header_bytes`, matching `readFromFile`'s prefix guard (`test_ply_budget`).
 - Math oracle correctness, from an adversarial review of the shipping surface:
   - The symmetric-eigensolver Jacobi sweep exited on an *absolute* off-diagonal threshold, so a
     small-magnitude covariance (linear scale below ~4e-8, still far above kMinScale) skipped every
