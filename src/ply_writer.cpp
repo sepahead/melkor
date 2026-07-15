@@ -290,8 +290,15 @@ PlyReader::ReadResult PlyReader::readFromFile(const std::string& filepath, const
     const size_t size = static_cast<size_t>(end);
     file.seekg(0, std::ios::beg);
 
-    constexpr size_t kMaxHeaderBytes = 1024 * 1024;
-    const size_t prefix_size = std::min(size, kMaxHeaderBytes);
+    // Screen the header against the same limit readFromBuffer enforces, not a hardcoded 1 MiB, so
+    // a file with a valid within-policy header (e.g. up to the desktop profile's 4 MiB) is not
+    // false-rejected here.
+    const size_t header_cap =
+        limits.max_ply_header_bytes != 0
+            ? static_cast<size_t>(std::min<std::uint64_t>(limits.max_ply_header_bytes,
+                                                          std::numeric_limits<size_t>::max()))
+            : (1024u * 1024u);
+    const size_t prefix_size = std::min(size, header_cap);
     std::vector<uint8_t> prefix(prefix_size);
     if (!file.read(reinterpret_cast<char*>(prefix.data()),
                    static_cast<std::streamsize>(prefix_size))) {
@@ -304,7 +311,7 @@ PlyReader::ReadResult PlyReader::readFromFile(const std::string& filepath, const
     const bool has_header_end = prefix_view.find("\nend_header\n") != std::string_view::npos ||
                                 prefix_view.find("\nend_header\r\n") != std::string_view::npos;
     if (!has_header_end && size > prefix_size) {
-        return {false, "Invalid PLY: header exceeds 1 MiB limit", {}, {}};
+        return {false, "Invalid PLY: header exceeds the configured size limit", {}, {}};
     }
 
     // Charge the whole-file allocation against the budget before making it, so a well-formed but

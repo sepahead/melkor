@@ -132,7 +132,18 @@ Result<std::unique_ptr<AtomicWriter>> AtomicWriter::create(const fs::path& desti
     writer->options_ = options;
     writer->budget_ = context.budget;
 
-    const std::string base = destination.filename().string();
+    std::string base = destination.filename().string();
+#if !defined(_WIN32)
+    // The candidate temp name adds ~29 characters around `base` ("." prefix + ".melkor-" + a
+    // 16-char random suffix + ".tmp"). A destination filename near NAME_MAX would push the temp
+    // name past it, so open() would reject a perfectly legal output path with ENAMETOOLONG. Clamp
+    // the embedded base (the real destination is unaffected -- only the temporary's name is).
+    constexpr std::size_t kNameMax = 255;      // POSIX minimum guaranteed NAME_MAX
+    constexpr std::size_t kTempOverhead = 29;  // "." + ".melkor-" + 16-char suffix + ".tmp"
+    if (base.size() + kTempOverhead > kNameMax) {
+        base.resize(kNameMax - kTempOverhead);
+    }
+#endif
 
     // A handful of attempts, in case an unlikely name collision occurs. Not a loop forever:
     // if O_EXCL keeps failing on random 16-character names, something is wrong that retrying

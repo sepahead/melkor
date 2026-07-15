@@ -9,6 +9,14 @@ register is in `docs/audit/production-blockers.md`.
 
 ### Fixed
 
+- Lower-severity polish from the shipping-surface review: `Budget::remaining()` now returns
+  UINT64_MAX for an unlimited (0) limit, matching `consume()`'s 0-means-unlimited convention
+  (it previously reported 0 headroom); the PLY reader's `readFromFile` screens the header against
+  the configured `max_ply_header_bytes` instead of a hardcoded 1 MiB (no longer false-rejecting a
+  valid within-policy header); the atomic writer clamps the embedded temp-filename base to NAME_MAX
+  so a long-but-legal destination name no longer fails with ENAMETOOLONG; and the C ABI's
+  `melkor_get_version` rejects a struct_size smaller than the struct_size field itself (a value of
+  1..sizeof(size_t)-1 could otherwise drive an out-of-bounds write-back).
 - Resource-safety fixes from the shipping-surface review:
   - The `web` limits profile set `max_temp_bytes = 0` to mean "no temp", but the Budget reads a 0
     limit as *unlimited* -- so the tightest, user-selectable profile actually granted an UNBOUNDED

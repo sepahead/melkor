@@ -147,6 +147,9 @@ std::uint64_t Budget::used(BudgetKind kind) const noexcept {
 
 std::uint64_t Budget::remaining(BudgetKind kind) const noexcept {
     const std::uint64_t limit = limit_for(kind);
+    // A 0 limit means "unlimited" in consume(); remaining() must agree, or it would report 0
+    // headroom for an unbounded budget.
+    if (limit == 0) return std::numeric_limits<std::uint64_t>::max();
     std::lock_guard<std::mutex> lock(mutex_);
     const std::uint64_t consumed = used_[static_cast<std::size_t>(kind)];
     return consumed >= limit ? 0 : limit - consumed;

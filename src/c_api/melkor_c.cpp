@@ -45,7 +45,10 @@ const char* melkor_status_string(melkor_status status) {
 }
 
 melkor_status melkor_get_version(melkor_version_info* info) {
-    if (info == nullptr || info->struct_size == 0) {
+    // struct_size must be at least large enough to hold the struct_size field itself: the
+    // write-back below stores it as a full size_t, so a smaller value (1..sizeof(size_t)-1) would
+    // write past a caller buffer that only allocated that many bytes.
+    if (info == nullptr || info->struct_size < sizeof(info->struct_size)) {
         return MELKOR_INVALID_ARGUMENT;
     }
 
