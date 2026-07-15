@@ -36,6 +36,48 @@ if find "$prefix/include" -name 'load-spz.h' -o -name 'splat-types.h' | grep -q 
     exit 1
 fi
 
+# The source tree still contains deferred backend/algorithm implementations that use the
+# superseded mutable scene representation. They are private implementation details: neither
+# their headers nor a transitive spelling of their old model may re-enter the installed SDK.
+legacy_headers=(
+    backend_registry.hpp
+    compute_provider.hpp
+    cuda_compute.hpp
+    densifier.hpp
+    enhanced_converter.hpp
+    gaussian_data.hpp
+    metal_compute.hpp
+    spatial_grid.hpp
+)
+for header in "${legacy_headers[@]}"; do
+    if [[ -e "$prefix/include/melkor/$header" ]]; then
+        echo "FAIL: legacy implementation header leaked into the installed SDK: $header" >&2
+        exit 1
+    fi
+done
+
+if grep -R -n -E 'GaussianCloud|GaussianSplat|gaussian_data' "$prefix/include/melkor"; then
+    echo "FAIL: the superseded mutable scene model leaked into an installed header" >&2
+    exit 1
+fi
+
+canonical_headers=(
+    scene.hpp
+    provenance.hpp
+    cloud_inspector.hpp
+    glb_reader.hpp
+    ply_writer.hpp
+    spz_encoder.hpp
+    format/gltf_reader.hpp
+    format/gltf_writer.hpp
+)
+for header in "${canonical_headers[@]}"; do
+    if [[ ! -f "$prefix/include/melkor/$header" ]]; then
+        echo "FAIL: canonical public header was not installed: $header" >&2
+        exit 1
+    fi
+done
+
 consume() {
     local lang="$1" src="$2" pfx="$3"
     local cbuild="$work/consumer-$lang"

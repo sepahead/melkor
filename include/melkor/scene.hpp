@@ -1,9 +1,9 @@
 // The canonical scene model.
 //
-// The pre-v2 model was a `std::vector<GaussianSplat>` of plain structs. Its default constructor
-// left scalar fields uninitialised, its SH degree could be set outside the valid range, and its
-// mutable `data()` let any caller violate the length invariants behind the type's back. That is
-// release blocker P0-06: a data model that cannot defend its own invariants.
+// The pre-v2 model was an array of mutable plain structs. Its default constructor left scalar
+// fields uninitialised, its SH degree could be set outside the valid range, and its mutable bulk
+// access let any caller violate the length invariants behind the type's back. That is release
+// blocker P0-06: a data model that cannot defend its own invariants.
 //
 // This replaces it with a structure-of-arrays buffer whose only construction path validates
 // every domain and every array length up front, and which exposes no mutable reference that
@@ -15,8 +15,9 @@
 // use the float64 math oracle (melkor/math/*) and convert back, so the numerically sensitive
 // work is done in double even though the result is stored in single.
 //
-// This model is additive: it coexists with the legacy `GaussianCloud` while adapters migrate
-// onto it. New code should target this.
+// This is the canonical public scene model. Deferred backend, densifier, and mesh-initialisation
+// implementations temporarily retain a private compatibility representation, but it is not
+// installed with the SDK and must not cross into new model, format, inspection, or CLI code.
 
 #ifndef MELKOR_SCENE_HPP
 #define MELKOR_SCENE_HPP
@@ -118,9 +119,8 @@ struct SplatRecord {
 //
 // The ONLY way to make one is `create`, which validates every field of every splat. After that,
 // there is no mutable accessor that can violate an invariant: bulk read is by const reference,
-// and a modified scene is produced by building a new SplatData through `create` again, which
-// re-validates atomically. (A future in-place edit transaction would follow the same rule: it
-// would validate the whole change before committing, leaving the original untouched on failure.)
+// and a modified scene is produced by an isolated edit transaction that rebuilds through
+// `create`, re-validating atomically and leaving the original untouched on failure.
 class SplatData {
   public:
     class EditTransaction;

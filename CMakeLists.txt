@@ -442,10 +442,30 @@ if(MELKOR_INSTALL)
         ARCHIVE DESTINATION ${CMAKE_INSTALL_LIBDIR}
         INCLUDES DESTINATION ${CMAKE_INSTALL_INCLUDEDIR})
 
-    # Public headers: the committed tree plus the generated version.h.
-    install(DIRECTORY ${CMAKE_SOURCE_DIR}/include/melkor
-        DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}
-        FILES_MATCHING PATTERN "*.h" PATTERN "*.hpp")
+    # Public headers: install an explicit canonical surface, not every in-tree header. The
+    # backend, densifier, and superseded mesh-initialisation paths still use the pre-v2 mutable
+    # cloud internally while their owning work packages replace them; those implementation
+    # headers must not make that invariant-bypassing model part of the SDK contract.
+    install(FILES
+        ${CMAKE_SOURCE_DIR}/include/melkor/budget.hpp
+        ${CMAKE_SOURCE_DIR}/include/melkor/checked.hpp
+        ${CMAKE_SOURCE_DIR}/include/melkor/cloud_inspector.hpp
+        ${CMAKE_SOURCE_DIR}/include/melkor/error.hpp
+        ${CMAKE_SOURCE_DIR}/include/melkor/glb_reader.hpp
+        ${CMAKE_SOURCE_DIR}/include/melkor/limits.hpp
+        ${CMAKE_SOURCE_DIR}/include/melkor/ply_writer.hpp
+        ${CMAKE_SOURCE_DIR}/include/melkor/provenance.hpp
+        ${CMAKE_SOURCE_DIR}/include/melkor/scene.hpp
+        ${CMAKE_SOURCE_DIR}/include/melkor/spz_encoder.hpp
+        DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}/melkor)
+    install(DIRECTORY
+        ${CMAKE_SOURCE_DIR}/include/melkor/format
+        ${CMAKE_SOURCE_DIR}/include/melkor/io
+        ${CMAKE_SOURCE_DIR}/include/melkor/math
+        DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}/melkor
+        FILES_MATCHING PATTERN "*.hpp")
+    install(FILES ${CMAKE_SOURCE_DIR}/include/melkor/c/melkor.h
+        DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}/melkor/c)
     install(FILES ${MELKOR_GENERATED_INCLUDE_DIR}/melkor/version.h
         DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}/melkor)
 
