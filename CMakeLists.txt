@@ -517,6 +517,44 @@ target_link_libraries(test_math_oracle PRIVATE melkor_core)
 target_compile_options(test_math_oracle PRIVATE ${MELKOR_WARNING_FLAGS})
 add_test(NAME math_oracle_tests COMMAND test_math_oracle)
 
+# ---------------------------------------------------------------------------
+# Fuzzing.
+#
+# Real coverage-guided fuzz targets, not the randomized-loop-over-valid-data the pre-v2 tests
+# called fuzzing (P1-12). Each target builds two ways from one source: a libFuzzer binary that
+# runs continuously in CI, and a standalone corpus-replay executable that runs the seed corpus
+# plus built-in adversarial inputs as an ordinary regression test on every platform. Every fixed
+# crash becomes a permanent corpus entry the replay then guards.
+# ---------------------------------------------------------------------------
+option(MELKOR_BUILD_FUZZERS "Build libFuzzer targets (requires a fuzzer-capable Clang)" OFF)
+
+set(MELKOR_FUZZ_TARGETS fuzz_ply)
+
+# The replay executables always build, so the harnesses cannot rot and the corpus is exercised
+# even where no libFuzzer runtime exists.
+foreach(fuzzer ${MELKOR_FUZZ_TARGETS})
+    add_executable(${fuzzer}_replay fuzz/${fuzzer}.cpp)
+    target_link_libraries(${fuzzer}_replay PRIVATE melkor_core)
+    target_compile_options(${fuzzer}_replay PRIVATE ${MELKOR_WARNING_FLAGS})
+    add_test(NAME ${fuzzer}_replay
+             COMMAND ${fuzzer}_replay ${CMAKE_SOURCE_DIR}/fuzz/corpus)
+endforeach()
+
+if(MELKOR_BUILD_FUZZERS)
+    if(NOT CMAKE_CXX_COMPILER_ID MATCHES "Clang")
+        message(FATAL_ERROR "MELKOR_BUILD_FUZZERS requires Clang (libFuzzer).")
+    endif()
+    foreach(fuzzer ${MELKOR_FUZZ_TARGETS})
+        add_executable(${fuzzer} fuzz/${fuzzer}.cpp)
+        target_link_libraries(${fuzzer} PRIVATE melkor_core)
+        # MELKOR_FUZZER_RUNTIME switches the source to the libFuzzer entry point (no main()).
+        target_compile_definitions(${fuzzer} PRIVATE MELKOR_FUZZER_RUNTIME)
+        target_compile_options(${fuzzer} PRIVATE -fsanitize=fuzzer,address,undefined
+                                                 ${MELKOR_WARNING_FLAGS})
+        target_link_options(${fuzzer} PRIVATE -fsanitize=fuzzer,address,undefined)
+    endforeach()
+endif()
+
 add_executable(test_cloud_inspector tests/test_cloud_inspector.cpp)
 target_link_libraries(test_cloud_inspector PRIVATE melkor_runtime)
 set_target_properties(test_cloud_inspector PROPERTIES

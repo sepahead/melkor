@@ -72,6 +72,12 @@ register is in `docs/audit/production-blockers.md`.
 
 ### Changed
 
+- A real coverage-guided fuzz target for the PLY reader (`fuzz/fuzz_ply.cpp`), replacing the
+  randomized-loop-over-valid-data the pre-v2 tests called fuzzing (P1-12). It builds two ways
+  from one source: a libFuzzer binary that runs a bounded session in the new `fuzz-smoke` CI job,
+  and a standalone corpus-replay executable registered as a ctest that runs the seed corpus and
+  built-in adversarial inputs on every platform (clean under ASan+UBSan). Every fixed crash
+  becomes a permanent corpus entry.
 - Benchmark infrastructure under `benchmarks/`: versioned manifest and result JSON schemas, an
   example format-fidelity manifest, and a dataset registry that records dataset identity, licence,
   and digest without committing the data. A public quantitative claim is valid only when it links

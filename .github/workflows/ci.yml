@@ -317,6 +317,46 @@ jobs:
           cargo install tauri-cli --version 2.9.6 --locked
           rustup run 1.88.0 cargo tauri build --no-bundle
 
+  fuzz-smoke:
+    name: Fuzz smoke (libFuzzer)
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+        with:
+          persist-credentials: false
+      - name: Install Clang and Ninja
+        run: |
+          sudo rm -f /etc/apt/sources.list.d/microsoft-prod.list \
+                     /etc/apt/sources.list.d/azure-cli.list \
+                     /etc/apt/sources.list.d/azure-cli.sources || true
+          sudo apt-get update
+          sudo apt-get install -y clang cmake ninja-build
+      - name: Build the coverage-guided fuzz targets
+        env:
+          CC: clang
+          CXX: clang++
+        run: |
+          cmake -S . -B build/fuzz -G Ninja \
+            -DCMAKE_BUILD_TYPE=Debug \
+            -DMELKOR_USE_METAL=OFF \
+            -DMELKOR_BUILD_FUZZERS=ON
+          cmake --build build/fuzz --parallel
+      - name: Run a bounded fuzz session on each target
+        run: |
+          # A short PR-smoke run: seed from the committed corpus and stop after a bounded time.
+          # The nightly/weekly workflows run these far longer and merge the corpus. A crash,
+          # sanitizer finding, OOM, or timeout is a failure.
+          for target in fuzz_ply; do
+            ./build/fuzz/$target fuzz/corpus/ply \
+              -max_total_time=120 -rss_limit_mb=2048 -timeout=25 -print_final_stats=1
+          done
+      - name: Replay the seed corpus as a regression (deterministic)
+        run: |
+          cmake -S . -B build/replay -G Ninja -DMELKOR_USE_METAL=OFF
+          cmake --build build/replay --target fuzz_ply_replay
+          ctest --test-dir build/replay -R fuzz_ply_replay --output-on-failure
+
   # The single stable status check for branch protection.
   #
   # Branch protection requires this ONE job, not the individual matrix jobs. Requiring the matrix
@@ -337,6 +377,7 @@ jobs:
       - lint-python
       - viewer-tests
       - tauri-check
+      - fuzz-smoke
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
