@@ -149,6 +149,7 @@ add_library(melkor_core STATIC
     # commit unless the exact code is approved.
     src/formats/format_id.cpp
     src/formats/loss.cpp
+    src/formats/probe.cpp
 
     # Canonical math oracle: the single semantic authority for activation domains, quaternion
     # handling, and covariance transform/decomposition. The place transforms are done correctly
@@ -539,6 +540,13 @@ add_executable(test_loss_report tests/test_loss_report.cpp)
 target_link_libraries(test_loss_report PRIVATE melkor_core)
 target_compile_options(test_loss_report PRIVATE ${MELKOR_WARNING_FLAGS})
 add_test(NAME loss_report_tests COMMAND test_loss_report)
+
+# Container probe: magic-byte identification separate from semantic profile, honest about the
+# gzip/SPZ ambiguity (WP06).
+add_executable(test_probe tests/test_probe.cpp)
+target_link_libraries(test_probe PRIVATE melkor_core)
+target_compile_options(test_probe PRIVATE ${MELKOR_WARNING_FLAGS})
+add_test(NAME probe_tests COMMAND test_probe)
 
 # ---------------------------------------------------------------------------
 # Fuzzing.

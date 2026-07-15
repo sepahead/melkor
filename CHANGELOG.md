@@ -105,6 +105,12 @@ register is in `docs/audit/production-blockers.md`.
   data in `profiles/gltf/khr-gaussian-splatting-rc-63770cc.json`. `docs/maintainers/` documents the
   update procedure (a new profile ID per revision, never a silent mutation). This pins the
   convention the coupled SH rotation (P0-17) will be verified against (P0-10).
+- The container probe (`melkor/format/probe.hpp`): identifies a format from magic bytes,
+  separately from the semantic profile, with an explicit confidence. It is honest about
+  ambiguity — an SPZ file is a gzip stream whose own magic lives inside the compressed data, so it
+  is reported as `spz` with *low* confidence, never certainty, because claiming certainty would
+  let any gzip file be treated as SPZ. It never reads past the provided bytes. `probe_tests`: 21
+  checks (WP06).
 - The conversion loss-report system (`melkor/format/loss.hpp`, `melkor/format/format_id.hpp`,
   `schemas/loss-report-v1.schema.json`), which keeps a format conversion honest (WP06). Every
   conversion produces a report — including a zero-loss one, so automation never infers whether
