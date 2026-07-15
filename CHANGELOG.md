@@ -35,6 +35,11 @@ register is in `docs/audit/production-blockers.md`.
 
 ### Added
 
+- `melkor inspect` now reads GLB `KHR_gaussian_splatting` assets as real Gaussian data through the
+  new codec (`kind: gaussian_cloud`, `encoding: khr_gaussian_splatting`), reporting the true splat
+  count, source SH degree, world-space bounds, and the conversion loss report. A GLB with no splat
+  primitive falls back to the legacy vertices-as-splats reading, so plain mesh GLBs still inspect.
+  The read is resource-bounded by the desktop limits profile (`test_inspect_cli.py`).
 - Rotation-component extraction for a general linear map via polar decomposition
   (`math::rotation_from_linear`, `M = R P` from the eigendecomposition of MᵀM). The glTF reader now
   uses it so a node that combines a rotation with scale or shear also rotates its spherical
