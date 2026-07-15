@@ -87,9 +87,14 @@ Result<Eigen3> symmetric_eigen(const Mat3& m) {
     double v[3][3] = {{1, 0, 0}, {0, 1, 0}, {0, 0, 1}};
 
     for (int sweep = 0; sweep < 50; ++sweep) {
-        double off = a[0][1] * a[0][1] + a[0][2] * a[0][2] + a[1][2] * a[1][2];
-        if (off < 1e-30) {
-            break;  // off-diagonal is numerically zero
+        const double off = a[0][1] * a[0][1] + a[0][2] * a[0][2] + a[1][2] * a[1][2];
+        const double diag = a[0][0] * a[0][0] + a[1][1] * a[1][1] + a[2][2] * a[2][2];
+        // Converged when the off-diagonal energy is negligible *relative to* the matrix magnitude.
+        // The Frobenius norm (diag + 2*off) is invariant under the Givens rotations, so this is
+        // scale-invariant; an absolute threshold would wrongly declare a small-magnitude covariance
+        // already diagonal and skip every rotation, returning the raw diagonal as eigenvalues.
+        if (off <= 1e-30 * (diag + 2.0 * off)) {
+            break;  // off-diagonal is at machine precision relative to the matrix
         }
         // Zero each off-diagonal (p,q) in turn with a Givens rotation.
         for (int p = 0; p < 2; ++p) {
@@ -156,7 +161,7 @@ Result<RotationScale> rotation_scale_from_covariance(const Mat3& sigma) {
     // scale; a substantial negative means the input was not a valid (positive-semidefinite)
     // covariance, which is an error rather than something to sweep under the rug.
     Vec3 scale{};
-    const double tolerance = -1e-9 * std::max({std::fabs(e.values[0]), std::fabs(e.values[2]), 1.0});
+    const double tolerance = -1e-12 * std::max({std::fabs(e.values[0]), std::fabs(e.values[2]), 1.0});
     for (int i = 0; i < 3; ++i) {
         double lambda = e.values[i];
         if (lambda < tolerance) {
@@ -198,8 +203,15 @@ Result<RotationScale> affine_transform_gaussian(const Mat3& linear, const Quat& 
         return Result<RotationScale>::failure(ErrorCode::invalid_data, std::move(d));
     }
     // A (near-)singular transform collapses the Gaussian to a lower dimension, which has no valid
-    // positive-scale decomposition. Reject it rather than emitting a degenerate scale.
-    if (std::fabs(determinant(linear)) < 1e-18) {
+    // positive-scale decomposition. Singularity is judged *relative to* the map's magnitude: the
+    // determinant scales as the cube of the map's overall scale, so an absolute floor would both
+    // wrongly reject a valid small-scale transform and wrongly accept a singular large-scale one.
+    // |det| is compared against ((‖A‖_F/√3)³), i.e. the determinant a well-conditioned map of the
+    // same magnitude would have; reflection (negative det) is allowed, as Σ' = AΣAᵀ handles it.
+    double linear_fro_sq = 0.0;
+    for (double element : linear) linear_fro_sq += element * element;
+    const double conditioned_det = std::pow(std::max(linear_fro_sq / 3.0, 1e-300), 1.5);
+    if (std::fabs(determinant(linear)) < 1e-12 * conditioned_det) {
         Diagnostic d("MK1306_SINGULAR_TRANSFORM", Severity::error,
                      "affine transform is singular; the Gaussian would collapse");
         return Result<RotationScale>::failure(ErrorCode::invalid_data, std::move(d));

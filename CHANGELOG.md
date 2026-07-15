@@ -9,6 +9,18 @@ register is in `docs/audit/production-blockers.md`.
 
 ### Fixed
 
+- Math oracle correctness, from an adversarial review of the shipping surface:
+  - The symmetric-eigensolver Jacobi sweep exited on an *absolute* off-diagonal threshold, so a
+    small-magnitude covariance (linear scale below ~4e-8, still far above kMinScale) skipped every
+    rotation and returned the raw diagonal plus identity -- a decomposition whose round-trip error
+    exceeded the matrix norm. The exit is now relative to the (invariant) Frobenius norm, so it is
+    scale-invariant (`test_math_oracle`: a tiny anisotropic rotated Gaussian round-trips).
+  - `affine_transform_gaussian` gated singularity on an absolute `|det| < 1e-18`, which scales as
+    the cube of the map's magnitude; it is now relative to the map's Frobenius norm, so a valid
+    small-scale transform is no longer wrongly rejected nor a singular large-scale one accepted.
+  - The not-positive-semidefinite rejection tolerance was ~1e6x looser than the eigensolver's
+    round-off floor (1e-9 vs ~1e-15), letting a genuinely-negative eigenvalue be clamped to a
+    valid covariance; tightened to 1e-12.
 - SPZ decoder input bound (P0-12). `SpzDecoder::decodeFromFile`/`decodeFromBuffer` now take a
   `Limits` (default desktop profile) and charge the compressed input against a `Budget` before the
   decode, so an over-large SPZ stream is refused by policy (`test_spz_budget`). The decoded

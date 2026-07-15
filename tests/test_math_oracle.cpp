@@ -18,6 +18,8 @@
 #include "melkor/math/covariance.hpp"
 #include "melkor/math/quaternion.hpp"
 
+#include <algorithm>
+#include <array>
 #include <cmath>
 #include <cstdio>
 
@@ -413,8 +415,40 @@ void test_rotation_from_linear() {
         for (std::size_t i = 0; i < 9; ++i) CHECK(approx(r_small.value()[i], R[i], 1e-7));
 }
 
+void test_small_scale_covariance_decomposition() {
+    // Regression for the Jacobi eigensolver's absolute early-exit: a small-magnitude covariance
+    // used to skip every rotation and return the raw diagonal + identity, a decomposition whose
+    // round-trip error was LARGER than the matrix itself. A tiny anisotropic, rotated Gaussian
+    // (scales far above kMinScale) must round-trip to a small *relative* error.
+    const Quat q = normalize(Quat{0.2, -0.3, 0.5, 0.7}).value();
+    const Vec3 s{4e-8, 2e-8, 1e-8};
+    auto sigma = covariance_from_rotation_scale(q, s);
+    CHECK(sigma.has_value());
+    if (!sigma.has_value()) return;
+    auto rs = rotation_scale_from_covariance(sigma.value());
+    CHECK(rs.has_value());
+    if (!rs.has_value()) return;
+    auto sigma2 = covariance_from_rotation_scale(rs.value().rotation, rs.value().scale);
+    CHECK(sigma2.has_value());
+    if (!sigma2.has_value()) return;
+    double num = 0.0, den = 0.0;
+    for (int i = 0; i < 9; ++i) {
+        const double diff = sigma.value()[i] - sigma2.value()[i];
+        num += diff * diff;
+        den += sigma.value()[i] * sigma.value()[i];
+    }
+    CHECK(std::sqrt(num / den) < 1e-6);  // was ~0.55 with the absolute-threshold bug
+    // The recovered scales (order-independent) match the input scales.
+    std::array<double, 3> got{rs.value().scale[0], rs.value().scale[1], rs.value().scale[2]};
+    std::array<double, 3> want{4e-8, 2e-8, 1e-8};
+    std::sort(got.begin(), got.end());
+    std::sort(want.begin(), want.end());
+    for (int i = 0; i < 3; ++i) CHECK(approx(got[i], want[i], 1e-10));
+}
+
 int main() {
     test_activation_roundtrips();
+    test_small_scale_covariance_decomposition();
     test_color_conversions();
     test_coordinate_frames();
 
