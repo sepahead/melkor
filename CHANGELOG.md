@@ -9,6 +9,14 @@ register is in `docs/audit/production-blockers.md`.
 
 ### Added
 
+- glTF node transforms (`include/melkor/format/gltf_transform.hpp`,
+  `src/formats/gltf_transform.cpp`): a node's local affine transform from either the column-major
+  `matrix` or the translation/rotation/scale triple, and the parent-chain composition, producing
+  the linear 3x3 `M` and translation `t` the KHR_gaussian_splatting reader feeds into the
+  covariance transform `Sigma' = M Sigma M^T` and the mean update `mu' = M mu + t`. Reuses the math
+  oracle's quaternion handling so the node transform and the covariance transform agree by
+  construction. Tested (`test_gltf_transform`, 14 checks) with the column-major read and the T*R*S
+  order pinned by applying the transform to points. Advances the glTF reader (P0-10).
 - glTF JSON document parsing (`include/melkor/format/gltf_document.hpp`,
   `src/formats/gltf_document.cpp`): exception-free parsing of the reduced glTF document the splat
   reader needs -- accessors, bufferViews, buffers, meshes/primitives (with the

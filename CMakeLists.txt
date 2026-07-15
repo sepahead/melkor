@@ -152,6 +152,7 @@ add_library(melkor_core STATIC
     src/formats/gltf_accessor.cpp
     src/formats/gltf_document.cpp
     src/formats/gltf_khr.cpp
+    src/formats/gltf_transform.cpp
     src/formats/loss.cpp
     src/formats/probe.cpp
 
@@ -579,6 +580,13 @@ add_executable(test_gltf_document tests/test_gltf_document.cpp)
 target_link_libraries(test_gltf_document PRIVATE melkor_core)
 target_compile_options(test_gltf_document PRIVATE ${MELKOR_WARNING_FLAGS})
 add_test(NAME gltf_document_tests COMMAND test_gltf_document)
+
+# glTF node transforms: column-major matrix extraction and the T*R*S / parent-chain composition,
+# cross-checked by applying the transform to points (WP09).
+add_executable(test_gltf_transform tests/test_gltf_transform.cpp)
+target_link_libraries(test_gltf_transform PRIVATE melkor_core)
+target_compile_options(test_gltf_transform PRIVATE ${MELKOR_WARNING_FLAGS})
+add_test(NAME gltf_transform_tests COMMAND test_gltf_transform)
 
 # ---------------------------------------------------------------------------
 # Fuzzing.
