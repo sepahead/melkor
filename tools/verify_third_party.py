@@ -127,6 +127,42 @@ def load_lock() -> dict:
     return lock
 
 
+
+SPEC_LOCK_PATH = REPO_ROOT / "third_party" / "specifications.lock.json"
+
+
+def check_specifications() -> list[str]:
+    """Verify vendored specification files against third_party/specifications.lock.json.
+
+    A pinned spec (like the Khronos KHR_gaussian_splatting release candidate) is pinned by the
+    exact upstream commit and the SHA-256 of each vendored file, so that an editorial or semantic
+    change upstream cannot silently alter Melkor's behaviour. This checks the files still match.
+    """
+    errors: list[str] = []
+    if not SPEC_LOCK_PATH.is_file():
+        return errors  # No pinned specs yet is not an error.
+
+    lock = json.loads(SPEC_LOCK_PATH.read_text(encoding="utf-8"))
+    for spec in lock.get("specifications", []):
+        base = REPO_ROOT / spec["vendored_path"]
+        if len(spec.get("commit", "")) != 40:
+            errors.append(f"{spec['id']}: commit must be a full 40-character SHA")
+        for entry in spec.get("files", []):
+            path = base / entry["path"]
+            if not path.is_file():
+                errors.append(f"{spec['id']}: vendored spec file missing: {entry['path']}")
+                continue
+            actual = file_digest(path)
+            if actual != entry["sha256"]:
+                errors.append(
+                    f"{spec['id']}: {entry['path']} does not match the specifications lock.\n"
+                    f"    expected {entry['sha256']}\n    actual   {actual}\n"
+                    f"  The pinned spec file changed. If intentional, follow the update procedure "
+                    f"(a NEW profile ID) and refresh the lock."
+                )
+    return errors
+
+
 def check(lock: dict) -> list[str]:
     errors: list[str] = []
 
@@ -253,6 +289,7 @@ def main() -> int:
         return 0
 
     errors = check(lock)
+    errors += check_specifications()
     if errors:
         print("Third-party dependency verification failed.\n", file=sys.stderr)
         for error in errors:

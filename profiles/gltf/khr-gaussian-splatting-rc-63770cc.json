@@ -1,0 +1,36 @@
+{
+  "schema_version": 1,
+  "profile_id": "khr-gaussian-splatting-rc-63770cc",
+  "container": "gltf",
+  "status": "release-candidate",
+  "spec": {
+    "id": "KHR_gaussian_splatting",
+    "commit": "63770cc70a3709cf101a42cece0bdf602b37e2e7",
+    "pinned_in": "third_party/specifications.lock.json"
+  },
+  "coordinate_system": "gltf-luf",
+  "length_unit": "meter",
+  "quaternion_order": "xyzw",
+  "quaternion_normalized": true,
+  "scale_domain": "linear",
+  "scale_constraint": "non-negative",
+  "opacity_domain": "linear",
+  "opacity_range": [0.0, 1.0],
+  "sh": {
+    "basis": "real",
+    "max_degree": 3,
+    "coefficients_per_degree": [1, 3, 5, 7],
+    "attribute_pattern": "KHR_gaussian_splatting:SH_DEGREE_{degree}_COEF_{index}",
+    "accessor_type": "VEC3",
+    "component_type": "float",
+    "note": "Melkor's canonical scene stores degree 0-4; a degree-4 source into this profile is LOSS_SH_DEGREE_TRUNCATED and must be approved, never silently dropped."
+  },
+  "color_spaces": ["srgb_rec709_display", "lin_rec709_display"],
+  "required_properties": ["kernel", "colorSpace"],
+  "kernel": "ellipse",
+  "primitive_mode": "POINTS",
+  "material_handling": "ignored-for-splat-rendering",
+  "representable_limits": {
+    "note": "Counts are bounded by the active resource-limit profile, not by the format."
+  }
+}

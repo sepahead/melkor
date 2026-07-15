@@ -94,6 +94,15 @@ register is in `docs/audit/production-blockers.md`.
   and a standalone corpus-replay executable registered as a ctest that runs the seed corpus and
   built-in adversarial inputs on every platform (clean under ASan+UBSan). Every fixed crash
   becomes a permanent corpus entry.
+- Pinned the Khronos `KHR_gaussian_splatting` release-candidate extension (commit `63770cc`,
+  2026-04-15) in `third_party/specifications.lock.json`, with its README and schema vendored under
+  `third_party/specs/` and hash-verified by `tools/verify_third_party.py` in CI. The exact
+  semantic contract — SH degrees 0–3 with the `KHR_gaussian_splatting:SH_DEGREE_N_COEF_M` VEC3
+  attributes, linear non-negative scale, linear opacity, `srgb_rec709_display`/`lin_rec709_display`
+  colour spaces, `POINTS` primitive mode, required `kernel`/`colorSpace` — is captured as versioned
+  data in `profiles/gltf/khr-gaussian-splatting-rc-63770cc.json`. `docs/maintainers/` documents the
+  update procedure (a new profile ID per revision, never a silent mutation). This pins the
+  convention the coupled SH rotation (P0-17) will be verified against (P0-10).
 - The conversion loss-report system (`melkor/format/loss.hpp`, `melkor/format/format_id.hpp`,
   `schemas/loss-report-v1.schema.json`), which keeps a format conversion honest (WP06). Every
   conversion produces a report — including a zero-loss one, so automation never infers whether
