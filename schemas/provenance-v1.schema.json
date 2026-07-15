@@ -1,0 +1,52 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://melkor.dev/schemas/provenance-v1.json",
+  "title": "Melkor primitive provenance v1",
+  "description": "Deterministic provenance for one canonical splat primitive. Source paths are deliberately absent; diagnostics apply their own explicit path-redaction policy.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "model_schema",
+    "source_format",
+    "source_profile",
+    "source_sha256",
+    "operations"
+  ],
+  "properties": {
+    "schema_version": { "const": 1 },
+    "model_schema": { "const": "melkor.scene/v1" },
+    "source_format": { "type": "string", "minLength": 1 },
+    "source_profile": { "type": "string", "minLength": 1 },
+    "source_sha256": {
+      "oneOf": [
+        { "type": "null" },
+        { "type": "string", "pattern": "^[0-9a-f]{64}$" }
+      ]
+    },
+    "operations": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["name", "tool_version", "parameters", "timestamp"],
+        "properties": {
+          "name": { "type": "string", "minLength": 1 },
+          "tool_version": { "type": "string", "minLength": 1 },
+          "parameters": {
+            "type": "object",
+            "additionalProperties": {
+              "type": ["null", "boolean", "integer", "number", "string"]
+            }
+          },
+          "timestamp": {
+            "oneOf": [
+              { "type": "null" },
+              { "type": "string", "format": "date-time" }
+            ]
+          }
+        }
+      }
+    }
+  }
+}

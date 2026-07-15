@@ -143,6 +143,7 @@ add_library(melkor_core STATIC
     src/core/budget.cpp
     src/core/backend_registry.cpp
     src/core/scene.cpp
+    src/core/provenance.cpp
 
     # Format registry and the conversion loss-report system (WP06). Losses are distinct from
     # validation errors: a lossy conversion must say what it lost, and a severe loss blocks the
@@ -561,6 +562,19 @@ add_executable(test_scene tests/test_scene.cpp)
 target_link_libraries(test_scene PRIVATE melkor_core)
 target_compile_options(test_scene PRIVATE ${MELKOR_WARNING_FLAGS})
 add_test(NAME scene_tests COMMAND test_scene)
+
+# Invariant-preserving scene edits: commit is atomic, append/reserve are budgeted before
+# allocation, and a failed transaction cannot mutate its source scene (P0-06).
+add_executable(test_scene_edit tests/test_scene_edit.cpp)
+target_link_libraries(test_scene_edit PRIVATE melkor_core)
+target_compile_options(test_scene_edit PRIVATE ${MELKOR_WARNING_FLAGS})
+add_test(NAME scene_edit_tests COMMAND test_scene_edit)
+
+# Canonical metadata and deterministic, path-safe provenance JSON (P0-06).
+add_executable(test_provenance tests/test_provenance.cpp)
+target_link_libraries(test_provenance PRIVATE melkor_core)
+target_compile_options(test_provenance PRIVATE ${MELKOR_WARNING_FLAGS})
+add_test(NAME provenance_tests COMMAND test_provenance)
 
 # Conversion loss policy: info/warning pass, severe blocks unless the exact code is approved,
 # fatal can never be approved (WP06).

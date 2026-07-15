@@ -28,6 +28,8 @@
 
 namespace melkor {
 
+class Budget;
+
 // float32 storage types. Deliberately small and trivial; all validation lives in the factories.
 struct Vec3f {
     float x = 0.0f;
@@ -102,6 +104,16 @@ struct SplatBufferInput {
     ShBuffer sh;                     // its splat_count must equal positions.size()
 };
 
+// One splat in the canonical domains, used only at the append boundary of an edit transaction.
+// The SH vector is one complete splat-major block for the transaction's current degree.
+struct SplatRecord {
+    Vec3f position;
+    Vec3f scale{1.0f, 1.0f, 1.0f};
+    Quatf rotation;
+    float opacity = 1.0f;
+    std::vector<float> sh;
+};
+
 // A validated structure-of-arrays Gaussian buffer.
 //
 // The ONLY way to make one is `create`, which validates every field of every splat. After that,
@@ -111,6 +123,8 @@ struct SplatBufferInput {
 // would validate the whole change before committing, leaving the original untouched on failure.)
 class SplatData {
   public:
+    class EditTransaction;
+
     // Validates all lengths and domains and takes ownership. On failure, returns a diagnostic
     // identifying the first offending splat index and field; the moved-from input is left in a
     // valid empty state by the caller's move.
@@ -127,6 +141,12 @@ class SplatData {
     const std::vector<float>& opacities() const noexcept { return opacities_; }
     const ShBuffer& sh() const noexcept { return sh_; }
 
+    // Starts an isolated bulk edit. The transaction owns a copy of every array; setters and
+    // append operations therefore cannot mutate this value. commit() validates the complete
+    // replacement atomically and returns a new SplatData. A failed commit leaves this source
+    // byte-for-byte unchanged.
+    EditTransaction edit() const;
+
     // Re-checks every invariant. Cheap defence for a value that has crossed an ABI or been
     // deserialised; a well-formed SplatData created through create() always passes.
     Result<void> validate() const;
@@ -138,6 +158,52 @@ class SplatData {
     std::vector<Quatf> rotations_;
     std::vector<float> opacities_;
     ShBuffer sh_;
+};
+
+// Explicit, one-shot mutable workspace for a SplatData.
+//
+// Mutation is intentionally confined here rather than exposed through non-const vector access.
+// The transaction may temporarily contain mismatched lengths or an invalid scalar while a caller
+// replaces several arrays, but no such state can escape: commit() rebuilds the SH buffer and calls
+// SplatData::create. The source value is never referenced mutably.
+class SplatData::EditTransaction {
+  public:
+    EditTransaction(const EditTransaction&) = delete;
+    EditTransaction& operator=(const EditTransaction&) = delete;
+    EditTransaction(EditTransaction&&) noexcept = default;
+    EditTransaction& operator=(EditTransaction&&) noexcept = default;
+
+    EditTransaction& set_positions(std::vector<Vec3f> positions);
+    EditTransaction& set_scales(std::vector<Vec3f> scales);
+    EditTransaction& set_rotations(std::vector<Quatf> rotations);
+    EditTransaction& set_opacities(std::vector<float> opacities);
+    EditTransaction& set_sh(ShBuffer sh);
+
+    // Reserves all parallel arrays for `count` splats. The complete requested canonical storage
+    // is charged to the memory budget before any reserve call. Repeated calls charge only growth;
+    // changing to a higher SH degree also charges the extra per-splat coefficient storage.
+    Result<void> reserve(std::size_t count, Budget& budget);
+
+    // Validates one record in the current SH degree, reserves safely, charges one splat, and then
+    // appends to every parallel array. A validation or budget failure changes no logical content.
+    Result<void> append(const SplatRecord& splat, Budget& budget);
+
+    // One-shot: a second call fails with an internal-error diagnostic instead of returning a
+    // moved-from scene. Failure never changes the SplatData from which this transaction came.
+    Result<SplatData> commit();
+
+  private:
+    friend class SplatData;
+    explicit EditTransaction(const SplatData& source);
+
+    std::vector<Vec3f> positions_;
+    std::vector<Vec3f> scales_;
+    std::vector<Quatf> rotations_;
+    std::vector<float> opacities_;
+    std::uint32_t sh_degree_ = 0;
+    std::vector<float> sh_data_;
+    std::uint64_t budgeted_memory_bytes_ = 0;
+    bool committed_ = false;
 };
 
 }  // namespace melkor
