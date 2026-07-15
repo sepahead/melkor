@@ -88,8 +88,10 @@ register is in `docs/audit/production-blockers.md`.
 
 ### Changed
 
-- A real coverage-guided fuzz target for the PLY reader (`fuzz/fuzz_ply.cpp`), replacing the
-  randomized-loop-over-valid-data the pre-v2 tests called fuzzing (P1-12). It builds two ways
+- Real coverage-guided fuzz targets for the three untrusted binary parsers — PLY, SPZ, and
+  GLB/glTF (`fuzz/fuzz_{ply,spz,glb}.cpp`) — replacing the randomized-loop-over-valid-data the
+  pre-v2 tests called fuzzing (P1-12). SPZ is the highest-value target (it decodes compressed
+  input) and GLB exercises the accessor-offset arithmetic. It builds two ways
   from one source: a libFuzzer binary that runs a bounded session in the new `fuzz-smoke` CI job,
   and a standalone corpus-replay executable registered as a ctest that runs the seed corpus and
   built-in adversarial inputs on every platform (clean under ASan+UBSan). Every fixed crash

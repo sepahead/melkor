@@ -551,7 +551,7 @@ add_test(NAME loss_report_tests COMMAND test_loss_report)
 # ---------------------------------------------------------------------------
 option(MELKOR_BUILD_FUZZERS "Build libFuzzer targets (requires a fuzzer-capable Clang)" OFF)
 
-set(MELKOR_FUZZ_TARGETS fuzz_ply)
+set(MELKOR_FUZZ_TARGETS fuzz_ply fuzz_spz fuzz_glb)
 
 # The replay executables always build, so the harnesses cannot rot and the corpus is exercised
 # even where no libFuzzer runtime exists.
@@ -559,8 +559,9 @@ foreach(fuzzer ${MELKOR_FUZZ_TARGETS})
     add_executable(${fuzzer}_replay fuzz/${fuzzer}.cpp)
     target_link_libraries(${fuzzer}_replay PRIVATE melkor_core)
     target_compile_options(${fuzzer}_replay PRIVATE ${MELKOR_WARNING_FLAGS})
+    string(REPLACE "fuzz_" "" _corpus_name ${fuzzer})
     add_test(NAME ${fuzzer}_replay
-             COMMAND ${fuzzer}_replay ${CMAKE_SOURCE_DIR}/fuzz/corpus)
+             COMMAND ${fuzzer}_replay ${CMAKE_SOURCE_DIR}/fuzz/corpus/${_corpus_name})
 endforeach()
 
 if(MELKOR_BUILD_FUZZERS)
