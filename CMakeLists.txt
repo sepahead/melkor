@@ -148,6 +148,7 @@ add_library(melkor_core STATIC
     # validation errors: a lossy conversion must say what it lost, and a severe loss blocks the
     # commit unless the exact code is approved.
     src/formats/format_id.cpp
+    src/formats/glb_container.cpp
     src/formats/gltf_khr.cpp
     src/formats/loss.cpp
     src/formats/probe.cpp
@@ -555,6 +556,13 @@ add_executable(test_gltf_khr tests/test_gltf_khr.cpp)
 target_link_libraries(test_gltf_khr PRIVATE melkor_core)
 target_compile_options(test_gltf_khr PRIVATE ${MELKOR_WARNING_FLAGS})
 add_test(NAME gltf_khr_tests COMMAND test_gltf_khr)
+
+# GLB container framing: adversarial tests that a lying header/chunk length produces a clean
+# failure with no out-of-bounds read, plus build/parse round-tripping (WP09).
+add_executable(test_glb_container tests/test_glb_container.cpp)
+target_link_libraries(test_glb_container PRIVATE melkor_core)
+target_compile_options(test_glb_container PRIVATE ${MELKOR_WARNING_FLAGS})
+add_test(NAME glb_container_tests COMMAND test_glb_container)
 
 # ---------------------------------------------------------------------------
 # Fuzzing.

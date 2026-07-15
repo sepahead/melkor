@@ -9,6 +9,15 @@ register is in `docs/audit/production-blockers.md`.
 
 ### Added
 
+- GLB container framing (`include/melkor/format/glb_container.hpp`,
+  `src/formats/glb_container.cpp`): a strict, overflow-safe parser for the GLB header and chunk
+  framing, with checked arithmetic on every attacker-controlled offset so a lying total length or
+  chunk length cannot wrap or over-read, and a `build_glb` that applies the mandated 4-byte
+  padding (spaces for JSON, zeros for BIN) and round-trips with the parser. The parse path
+  allocates nothing -- it returns byte ranges into the caller's buffer -- so it cannot itself be an
+  allocation-bomb vector. Adversarially tested (`test_glb_container`, 32 checks, clean under
+  ASan+UBSan): truncation, an overflowing/misaligned chunk, a straddling header, and
+  JSON-not-first/duplicate/missing all yield a clean failure. Foundation for the glTF reader (P0-10).
 - KHR_gaussian_splatting layout core (`include/melkor/format/gltf_khr.hpp`,
   `src/formats/gltf_khr.cpp`), pinned to the vendored Khronos RC spec (commit 63770cc): SH
   attribute-semantic naming and the m-ordering (COEF_0..2l maps to m=-l..+l), the flat<->address
