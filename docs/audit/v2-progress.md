@@ -6,19 +6,27 @@ narrative overview and the record of what needs a human decision.
 
 Last updated: 2026-07-15. Baseline commit: `21c8fb5`.
 
+The counts in this document classify individual production findings only. They do not claim that
+the blueprint's PR-level acceptance criteria are complete. A strict takeover audit at `090126e`
+classified the 35 planned PRs as **0 acceptance-complete, 21 partial, and 14 open**; details and
+the exact-HEAD CI evidence are in [`takeover-20260715.md`](takeover-20260715.md).
+
 ## Blocker status
 
 40 findings tracked (18 P0, 15 P1, 7 P2). As of this update:
 
 - **8 closed** with attached evidence: P0-04, P0-05, P0-07, P0-08, P0-16, P1-02, P1-03, P1-14.
-- **11 in progress** with substantial verified work landed: P0-01, P0-06, P0-10, P0-11, P0-12, P0-14, P0-17, P1-06, P1-12, P1-15, P2-04.
-- **21 open.**
+- **12 in progress** with partial work landed: P0-01, P0-06, P0-10, P0-11, P0-12, P0-14, P0-17, P1-06, P1-12, P1-15, P2-03, P2-04.
+- **20 open.**
 
-## What is closed, and how it was verified
+## Narrow blocker closures and their evidence
 
-Every change below builds with `MELKOR_WERROR=ON` (zero warnings), passes the full test suite,
-and — where it touches untrusted-input or numeric code — is clean under AddressSanitizer and
-UndefinedBehaviorSanitizer. The suite grew from 13 to 23 targets.
+The rows below record focused evidence for finding-level closure. They do **not** prove that every
+blueprint acceptance criterion or the full CI suite passes. At `090126e`, a pristine local native
+build passed all 33 registered CTest targets, while GitHub Actions run `29412275588` was red in
+CUDA linking, Python lint, Rust-license regeneration, and fuzz-corpus setup; `CI Gate` therefore
+failed. Sanitizer statements below apply only to the named tests and recorded runs, not to all of
+HEAD.
 
 | Blocker | What it was | The fix, and its evidence |
 |---|---|---|
@@ -50,7 +58,8 @@ documented:
 
 ## Infrastructure now in place
 
-- Single `VERSION` source; every surface derived and CI-enforced (`check_version_sync.py`).
+- Single `VERSION` source with synchronization checks (`check_version_sync.py`) and a separately
+  regenerated Rust dependency-license inventory.
 - `third_party/manifest.lock.json` pinning every dependency by commit SHA + content digest, with
   declared patches (`verify_third_party.py`).
 - Generated `NOTICE`/`THIRD_PARTY_LICENSES.md` (`generate_notices.py`).
@@ -67,24 +76,22 @@ documented:
 
 ### Large, implementable without external resources (the bulk of the remaining work)
 
-- **P0-06** canonical scene model with validated invariants (SoA storage, no uninitialised
-  scalars, SH degree 0–4).
+- **P0-06 remainder** migrate adapters from legacy `GaussianCloud` storage, add scene
+  provenance/metadata, and provide an invariant-preserving edit transaction.
 - **P0-17 remainder** SH rotation (Wigner-D, degree 2–4) and migrating the existing transform
   paths onto the oracle.
 - **P0-09** SPZ v4: pin and wrap upstream v3.0.0 (which sets file-format v4), preserve coordinate
   and antialiasing metadata. Full two-way interop testing needs the official SPZ CLI.
-- **P0-10** glTF `KHR_gaussian_splatting`: the reader is now built bottom-up in eight
-  independently-tested, ASan-clean modules — the KHR layout core, GLB container framing, the
-  accessor decoder, the JSON document parser, node transforms, the extension policy, accessor
-  resolution, and a working per-primitive reader that assembles them into a validated local-space
-  `SplatData` (including the coefficient-major→splat-major SH transpose). Remaining: the scene-graph
-  walk that composes node transforms across primitives and applies `Σ' = MΣMᵀ` and SH rotation, the
-  writer, and conformance against the Khronos glTF Validator.
+- **P0-10 remainder** validate a licensed conformance corpus with the Khronos glTF Validator,
+  wire the implemented reader/writer into the registry and CLI, and complete SH rotation rather
+  than relying on an approvable severe-loss report.
 - **P0-11 remainder** the honest `mesh-init --mode surface` area-weighted sampler.
 - **P0-15 / P0-13** the typed pipeline stage runner replacing the shell scripts, with pinned
   adapter manifests.
-- **WP06/WP13** format registry, probe, loss reports; `inspect`/`normalize` as the product centre.
-- **WP20** coverage-guided fuzz targets (libFuzzer) replacing the randomised loops.
+- **WP06/WP13 remainder** complete the format registry/planner and wire the existing probe and
+  loss-report primitives into `inspect`/`normalize`.
+- **WP20 remainder** qualify the newly tracked seed/regression corpus in exact-commit CI, then
+  expand the present libFuzzer harnesses to the manifest/CLI surfaces and scheduled long-run tiers.
 
 ### Gated on resources or decisions only the maintainer can provide
 
