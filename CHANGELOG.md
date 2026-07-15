@@ -161,6 +161,12 @@ register is in `docs/audit/production-blockers.md`.
 
 ### Removed
 
+- The standalone-GLOMAP installer's mutable clone (P0-14, and the mutable-clone half of P0-13).
+  `scripts/setup_glomap.sh` cloned `github.com/colmap/glomap` and tracked its `main` branch --
+  a non-reproducible install of a now-deprecated tool. It is replaced by a deprecation stub
+  pointing at COLMAP's built-in `global_mapper` and the migration guide. Global SfM lives in
+  COLMAP itself now, verified against current COLMAP `main`
+  (`docs/migrations/2.0-glomap-to-colmap-global.md`).
 - Three unimplemented fields from `EnhancedConversionConfig` — `adaptive_density`,
   `target_splats_per_unit`, and `max_subdivision` (P0-11). They exposed density and subdivision
   controls the converter never implemented. The header now states plainly that the path is a
