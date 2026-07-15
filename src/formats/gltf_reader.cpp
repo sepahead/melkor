@@ -6,8 +6,10 @@
 #include "melkor/format/gltf_extensions.hpp"
 #include "melkor/format/gltf_transform.hpp"
 #include "melkor/math/covariance.hpp"
+#include "melkor/math/sh_rotation.hpp"
 
 #include <cmath>
+#include <optional>
 #include <string>
 #include <vector>
 
@@ -239,8 +241,12 @@ struct TransformedBatch {
     std::uint64_t dropped = 0;  // splats a singular node transform collapsed
 };
 
-// Applies a node transform to one primitive's local splats.
-TransformedBatch transform_primitive(const PrimitiveRead& pr, const NodeTransform& xform) {
+// Applies a node transform to one primitive's local splats. When `sh_rot` is non-null, each splat's
+// spherical harmonics are rotated by it (the node's rotation); otherwise the SH are carried through
+// unchanged (correct for an identity or pure-scale node, or reported as an un-applied loss by the
+// caller for a rotation combined with scale/shear).
+TransformedBatch transform_primitive(const PrimitiveRead& pr, const NodeTransform& xform,
+                                     const math::ShRotation* sh_rot) {
     TransformedBatch batch;
     batch.degree = pr.source_sh_degree;
     const std::size_t coeffs = khr::sh_total_coefficients(pr.source_sh_degree);
@@ -275,8 +281,13 @@ TransformedBatch transform_primitive(const PrimitiveRead& pr, const NodeTransfor
         batch.scales.push_back(out_scale);
         batch.rotations.push_back(out_rot);
         batch.opacities.push_back(pr.data.opacities()[s]);
-        batch.sh.insert(batch.sh.end(), raw.begin() + static_cast<std::ptrdiff_t>(s * block),
-                        raw.begin() + static_cast<std::ptrdiff_t>((s + 1) * block));
+        // Carry the SH block through, rotating it by the node rotation when one applies.
+        std::vector<float> sh_block(raw.begin() + static_cast<std::ptrdiff_t>(s * block),
+                                    raw.begin() + static_cast<std::ptrdiff_t>((s + 1) * block));
+        if (sh_rot != nullptr) {
+            sh_rot->rotate_block(sh_block.data(), 3);
+        }
+        batch.sh.insert(batch.sh.end(), sh_block.begin(), sh_block.end());
     }
     return batch;
 }
@@ -367,21 +378,38 @@ Result<SceneRead> read_gaussian_scene(const Document& doc, const std::vector<Buf
         }
         if (pr.value().color_space_assumed) any_assumed = true;
 
-        // Report an un-applied SH rotation before moving the batch.
-        if (pr.value().source_sh_degree >= 1 && !is_pure_positive_scale(inst.transform.linear)) {
-            LossItem item;
-            item.code = loss_code::kShRotationNotApplied;
-            item.severity = LossSeverity::severe;
-            item.source_feature = "degree>=1 spherical harmonics under a rotating node transform";
-            item.target_constraint = "Wigner-D SH rotation is not yet implemented";
-            item.affected_splats = pr.value().data.size();
-            item.remediation =
-                "bake the node rotation into the splats before conversion, or approve "
-                "LOSS_SH_ROTATION_NOT_APPLIED to accept colour in the source frame";
-            losses.add(std::move(item));
+        // Decide how the node's rotation acts on the spherical harmonics. A proper rotation is
+        // applied exactly; a pure scale or identity leaves SH untouched (correct); a rotation
+        // combined with scale/shear is the only case Melkor cannot yet apply, and it is reported.
+        std::optional<math::ShRotation> sh_rot;
+        const math::ShRotation* sh_rot_ptr = nullptr;
+        if (pr.value().source_sh_degree >= 1 && !is_identity_linear(inst.transform.linear)) {
+            if (math::is_proper_rotation(inst.transform.linear)) {
+                auto r = math::ShRotation::create(inst.transform.linear,
+                                                  pr.value().source_sh_degree);
+                if (r.has_value()) {
+                    sh_rot = std::move(r.value());
+                    sh_rot_ptr = &sh_rot.value();
+                }
+            } else if (!is_pure_positive_scale(inst.transform.linear)) {
+                LossItem item;
+                item.code = loss_code::kShRotationNotApplied;
+                item.severity = LossSeverity::severe;
+                item.source_feature =
+                    "degree>=1 spherical harmonics under a node transform that combines rotation "
+                    "with scale or shear";
+                item.target_constraint =
+                    "SH rotation is applied only for a pure rotation; the rotation component of a "
+                    "scaled or sheared transform is not yet extracted";
+                item.affected_splats = pr.value().data.size();
+                item.remediation =
+                    "bake the node transform into the splats before conversion, or approve "
+                    "LOSS_SH_ROTATION_NOT_APPLIED to accept colour in the source frame";
+                losses.add(std::move(item));
+            }
         }
 
-        auto batch = transform_primitive(pr.value(), inst.transform);
+        auto batch = transform_primitive(pr.value(), inst.transform, sh_rot_ptr);
         total_dropped += batch.dropped;
         if (!batch.positions.empty()) batches.push_back(std::move(batch));
     }

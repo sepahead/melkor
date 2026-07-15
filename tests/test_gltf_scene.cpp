@@ -233,11 +233,13 @@ std::string degree1_json(const std::string& nodes, const std::string& scene) {
            nodes + scene + "}";
 }
 
-void test_sh_rotation_loss_under_rotating_node() {
-    // Degree-1 splat under a rotating node: the reader must flag LOSS_SH_ROTATION_NOT_APPLIED as a
-    // blocking (severe) loss rather than silently leaving the view-dependent colour wrong.
+void test_sh_rotation_applied_under_pure_rotation() {
+    // Degree-1 splat under a pure rotation (90 deg about Z): the SH are rotated, so there is NO
+    // LOSS_SH_ROTATION_NOT_APPLIED. A rotation about Z leaves the z-aligned degree-1 coefficient
+    // (m=0, flat coefficient 2) invariant while mixing the m=-1/+1 coefficients, which is a
+    // precise, convention-independent property to check end to end.
     const double s = std::sqrt(0.5);
-    auto buf = pack_degree1_splat();
+    auto buf = pack_degree1_splat();  // DC {0.2,0.3,0.4}; deg-1 coeffs {1,1,1},{2,2,2},{3,3,3}
     std::string nodes = "\"nodes\":[{\"mesh\":0,\"rotation\":[0,0," + std::to_string(s) + "," +
                         std::to_string(s) + "]}],";
     bool ok = false;
@@ -245,9 +247,34 @@ void test_sh_rotation_loss_under_rotating_node() {
     CHECK(ok);
     if (!ok) return;
     CHECK(r.sh_degree == 1);
+    CHECK(!has_loss(r.losses, "LOSS_SH_ROTATION_NOT_APPLIED"));
+    CHECK(!r.losses.has_blocking());
+    const auto& raw = r.data.sh().raw();  // one splat: [DC, c1, c2, c3] x 3 channels
+    // DC (coefficient 0) is rotation-invariant.
+    CHECK(approx(raw[0], 0.2f) && approx(raw[1], 0.3f) && approx(raw[2], 0.4f));
+    // m=0 (flat coefficient 2, the z term) is invariant under a rotation about Z.
+    CHECK(approx(raw[6], 2.0f) && approx(raw[7], 2.0f) && approx(raw[8], 2.0f));
+    // m=-1 and m=+1 (flat coefficients 1 and 3) were mixed by the rotation.
+    const bool c1_changed = !(approx(raw[3], 1.0f) && approx(raw[4], 1.0f) && approx(raw[5], 1.0f));
+    const bool c3_changed =
+        !(approx(raw[9], 3.0f) && approx(raw[10], 3.0f) && approx(raw[11], 3.0f));
+    CHECK(c1_changed && c3_changed);
+}
+
+void test_sh_loss_under_rotation_and_scale() {
+    // A node that combines rotation with a non-uniform scale is the case Melkor cannot yet apply to
+    // the SH (it does not extract the rotation from a scaled transform), so it must still report
+    // LOSS_SH_ROTATION_NOT_APPLIED as a blocking, approvable loss.
+    const double s = std::sqrt(0.5);
+    auto buf = pack_degree1_splat();
+    std::string nodes = "\"nodes\":[{\"mesh\":0,\"rotation\":[0,0," + std::to_string(s) + "," +
+                        std::to_string(s) + "],\"scale\":[2,1,1]}],";
+    bool ok = false;
+    auto r = run(degree1_json(nodes, "\"scenes\":[{\"nodes\":[0]}],\"scene\":0"), buf, ok);
+    CHECK(ok);
+    if (!ok) return;
     CHECK(has_loss(r.losses, "LOSS_SH_ROTATION_NOT_APPLIED"));
-    CHECK(r.losses.has_blocking());  // severe, blocks unless approved
-    // ... and it is approvable by its exact code, but not without.
+    CHECK(r.losses.has_blocking());
     CHECK(!r.losses.check_policy({}).has_value());
     CHECK(r.losses.check_policy({"LOSS_SH_ROTATION_NOT_APPLIED"}).has_value());
 }
@@ -299,7 +326,8 @@ int main() {
     test_unsupported_required_extension_is_error();
     test_no_splats_is_error();
     test_unreferenced_mesh_not_read();
-    test_sh_rotation_loss_under_rotating_node();
+    test_sh_rotation_applied_under_pure_rotation();
+    test_sh_loss_under_rotation_and_scale();
     test_no_sh_loss_under_pure_scale();
     test_read_glb_end_to_end();
 

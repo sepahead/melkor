@@ -9,6 +9,17 @@ register is in `docs/audit/production-blockers.md`.
 
 ### Added
 
+- Real spherical-harmonic rotation for degrees 0-3 (`include/melkor/math/sh_rotation.hpp`), wired
+  into the glTF reader. When a node applies a pure rotation, a splat's degree>=1 view-dependent
+  colour is now rotated with it instead of reporting an approvable severe loss; a pure scale or
+  identity node leaves the harmonics untouched, and only a rotation combined with scale/shear still
+  reports LOSS_SH_ROTATION_NOT_APPLIED. Each band's operator is constructed directly from Melkor's
+  own SH basis (the least-squares operator reproducing Y_l^m(R^-1 d)), so it is exact for the
+  3DGS/KHR convention rather than a ported Wigner-D of a different basis, and it is verified from
+  independent angles (`test_sh_rotation`, 421 checks, clean under ASan+UBSan): orthogonality, the
+  defining identity Y(Rd)=M Y(d) cross-checked against a separate basis re-implementation,
+  round-trip, composition, and a directional-lobe rotation. The writer's identity-node round-trip
+  stays exact because the identity rotation is skipped. Advances P0-17 and P0-10 (WP11, WP09).
 - glTF KHR_gaussian_splatting writer (`format/gltf_writer.hpp`, `src/formats/gltf_writer.cpp`):
   serialises a canonical SplatData into a GLB with one POINTS primitive -- the inverse of the
   reader, including the SH transpose from the scene model's splat-major blocks back to one float
