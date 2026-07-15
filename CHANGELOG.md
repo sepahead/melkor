@@ -9,6 +9,14 @@ register is in `docs/audit/production-blockers.md`.
 
 ### Added
 
+- KHR_gaussian_splatting layout core (`include/melkor/format/gltf_khr.hpp`,
+  `src/formats/gltf_khr.cpp`), pinned to the vendored Khronos RC spec (commit 63770cc): SH
+  attribute-semantic naming and the m-ordering (COEF_0..2l maps to m=-l..+l), the flat<->address
+  SH-pyramid mapping computed with exact integer arithmetic, the spec's `C = R*diag(s)`
+  covariance-building matrix, and the two defined colour spaces with unknown-string rejection.
+  Unit-tested (`test_gltf_khr`, 165 checks): the C matrix is cross-checked element-wise against the
+  vendored formula and shown to satisfy `C*C^T = R diag(s^2) R^T`, so it agrees with the math
+  oracle. This is the shared semantic core the forthcoming glTF reader and writer build on (P0-10).
 - Canonical scene model (`melkor/scene.hpp`), the validated replacement for the plain
   `std::vector<GaussianSplat>` (P0-06). `SplatData` is structure-of-arrays; its only construction
   path (`SplatData::create`) validates every array length and every domain — finite positions,
