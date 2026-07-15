@@ -347,9 +347,9 @@ jobs:
       - name: Run a bounded fuzz session on each target
         run: |
           # A short PR-smoke run: seed from the committed corpus and stop after a bounded time.
-          # The nightly/weekly workflows run these far longer and merge the corpus. A crash,
-          # sanitizer finding, OOM, or timeout is a failure.
-          for target in fuzz_ply:ply fuzz_spz:spz fuzz_glb:glb; do
+          # A crash, sanitizer finding, OOM, or timeout is a failure. Longer scheduled fuzzing
+          # remains a release-hardening task and is not implied by this smoke job.
+          for target in fuzz_ply:ply fuzz_spz:spz fuzz_glb:glb fuzz_gltf_khr:gltf_khr; do
             name=${target%%:*}; corpus=${target##*:}
             ./build/fuzz/$name fuzz/corpus/$corpus \
               -max_total_time=120 -rss_limit_mb=2048 -timeout=25 -print_final_stats=1
@@ -357,7 +357,8 @@ jobs:
       - name: Replay the seed corpus as a regression (deterministic)
         run: |
           cmake -S . -B build/replay -G Ninja -DMELKOR_USE_METAL=OFF
-          cmake --build build/replay --target fuzz_ply_replay fuzz_spz_replay fuzz_glb_replay
+          cmake --build build/replay --target \
+            fuzz_ply_replay fuzz_spz_replay fuzz_glb_replay fuzz_gltf_khr_replay
           ctest --test-dir build/replay -R '_replay' --output-on-failure
 
   # The single stable status check for branch protection.

@@ -80,6 +80,19 @@ __pycache__/
 *.splat
 *.bin
 
+# The fuzz regression corpora are deliberately small, reviewed fixtures. Keep these exceptions
+# explicit so the broad 3D-data rules above cannot silently remove the seed corpus from CI.
+!/fuzz/corpus/
+!/fuzz/corpus/README.md
+!/fuzz/corpus/ply/
+!/fuzz/corpus/ply/*.ply
+!/fuzz/corpus/spz/
+!/fuzz/corpus/spz/*.spz
+!/fuzz/corpus/glb/
+!/fuzz/corpus/glb/*.glb
+!/fuzz/corpus/gltf_khr/
+!/fuzz/corpus/gltf_khr/*.glb
+
 # Compressed files
 *.zip
 *.tar.gz

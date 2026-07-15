@@ -640,7 +640,7 @@ add_test(NAME gltf_writer_tests COMMAND test_gltf_writer)
 # ---------------------------------------------------------------------------
 option(MELKOR_BUILD_FUZZERS "Build libFuzzer targets (requires a fuzzer-capable Clang)" OFF)
 
-set(MELKOR_FUZZ_TARGETS fuzz_ply fuzz_spz fuzz_glb)
+set(MELKOR_FUZZ_TARGETS fuzz_ply fuzz_spz fuzz_glb fuzz_gltf_khr)
 
 # The replay executables always build, so the harnesses cannot rot and the corpus is exercised
 # even where no libFuzzer runtime exists.
@@ -653,10 +653,38 @@ foreach(fuzzer ${MELKOR_FUZZ_TARGETS})
              COMMAND ${fuzzer}_replay ${CMAKE_SOURCE_DIR}/fuzz/corpus/${_corpus_name})
 endforeach()
 
+# A missing corpus must fail closed rather than silently exercising only built-in cases. Keep
+# the sentinel in the source tree, where this configure-time assertion guarantees the path is
+# absent for every subsequent CTest invocation from this build.
+set(MELKOR_MISSING_FUZZ_CORPUS
+    "${CMAKE_SOURCE_DIR}/fuzz/__melkor_intentionally_missing_corpus__")
+if(EXISTS "${MELKOR_MISSING_FUZZ_CORPUS}")
+    message(FATAL_ERROR "Fuzz replay missing-corpus sentinel unexpectedly exists")
+endif()
+add_test(NAME fuzz_replay_rejects_missing_corpus
+         COMMAND fuzz_ply_replay "${MELKOR_MISSING_FUZZ_CORPUS}")
+set_tests_properties(fuzz_replay_rejects_missing_corpus PROPERTIES
+    WILL_FAIL TRUE)
+
 if(MELKOR_BUILD_FUZZERS)
     if(NOT CMAKE_CXX_COMPILER_ID MATCHES "Clang")
         message(FATAL_ERROR "MELKOR_BUILD_FUZZERS requires Clang (libFuzzer).")
     endif()
+
+    # Instrument the parser implementations, not only the thin harness translation units.
+    # fuzzer-no-link provides coverage hooks without injecting libFuzzer's main into static
+    # libraries. The ASan/UBSan runtime requirement is a usage requirement so every executable
+    # that consumes an instrumented archive links the matching runtimes, including replay and
+    # non-fuzzer targets built in this configuration.
+    set(MELKOR_FUZZ_LIBRARY_SANITIZERS -fsanitize=fuzzer-no-link,address,undefined)
+    set(MELKOR_FUZZ_RUNTIME_SANITIZERS -fsanitize=address,undefined)
+    target_compile_options(melkor_core PRIVATE ${MELKOR_FUZZ_LIBRARY_SANITIZERS})
+    target_link_options(melkor_core INTERFACE ${MELKOR_FUZZ_RUNTIME_SANITIZERS})
+    if(SPZ_AVAILABLE)
+        target_compile_options(spz PRIVATE ${MELKOR_FUZZ_LIBRARY_SANITIZERS})
+        target_link_options(spz INTERFACE ${MELKOR_FUZZ_RUNTIME_SANITIZERS})
+    endif()
+
     foreach(fuzzer ${MELKOR_FUZZ_TARGETS})
         add_executable(${fuzzer} fuzz/${fuzzer}.cpp)
         target_link_libraries(${fuzzer} PRIVATE melkor_core)

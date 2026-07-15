@@ -60,36 +60,13 @@ extern "C" int LLVMFuzzerTestOneInput(const uint8_t* data, size_t size) {
 
 // Standalone corpus-replay driver, compiled when NOT building against the libFuzzer runtime.
 #ifndef MELKOR_FUZZER_RUNTIME
+#include "replay.hpp"
+
 #include <cstdio>
-#include <filesystem>
-#include <fstream>
-#include <vector>
 
 int main(int argc, char** argv) {
-    namespace fs = std::filesystem;
-
     int cases = 0;
-    for (int i = 1; i < argc; ++i) {
-        const fs::path root = argv[i];
-        std::vector<fs::path> files;
-        if (fs::is_directory(root)) {
-            for (const auto& entry : fs::recursive_directory_iterator(root)) {
-                if (entry.is_regular_file()) {
-                    files.push_back(entry.path());
-                }
-            }
-        } else if (fs::is_regular_file(root)) {
-            files.push_back(root);
-        }
-
-        for (const auto& file : files) {
-            std::ifstream in(file, std::ios::binary);
-            std::vector<uint8_t> bytes((std::istreambuf_iterator<char>(in)),
-                                       std::istreambuf_iterator<char>());
-            exercise(bytes.data(), bytes.size());
-            ++cases;
-        }
-    }
+    if (!melkor::fuzzing::replay_requested_inputs(argc, argv, exercise, cases)) return 1;
 
     // Also run a handful of built-in adversarial inputs, so the replay is meaningful even with an
     // empty corpus directory. These are shapes that have historically broken PLY parsers.
