@@ -1,0 +1,116 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://melkor.dev/schemas/format-profile-v1.json",
+  "title": "Melkor format profile v1",
+  "description": "A format profile is descriptive data, never executable. It records the exact semantic conventions of one way of storing Gaussian splats -- property names, activation domains, quaternion order, SH basis and order, colour space -- so a reader converts by a stated contract rather than by guessing from property names or value ranges. Container-specific fields beyond the common core are permitted.",
+  "type": "object",
+  "additionalProperties": true,
+  "required": [
+    "schema_version",
+    "profile_id",
+    "container",
+    "status"
+  ],
+  "properties": {
+    "schema_version": {
+      "const": 1
+    },
+    "profile_id": {
+      "type": "string",
+      "pattern": "^[a-z0-9][a-z0-9:-]*$"
+    },
+    "container": {
+      "type": "string",
+      "enum": [
+        "ply",
+        "spz",
+        "gltf",
+        "glb"
+      ]
+    },
+    "status": {
+      "type": "string",
+      "enum": [
+        "stable",
+        "release-candidate",
+        "experimental",
+        "legacy"
+      ]
+    },
+    "description": {
+      "type": "string"
+    },
+    "coordinate_system": {
+      "type": "string"
+    },
+    "length_unit": {
+      "type": "string"
+    },
+    "quaternion_order": {
+      "type": "string",
+      "enum": [
+        "xyzw",
+        "wxyz"
+      ]
+    },
+    "quaternion_normalized": {
+      "type": "boolean"
+    },
+    "scale_domain": {
+      "type": "string",
+      "enum": [
+        "linear",
+        "log"
+      ]
+    },
+    "opacity_domain": {
+      "type": "string",
+      "enum": [
+        "linear",
+        "logit"
+      ]
+    },
+    "color_space": {
+      "type": "string"
+    },
+    "sh": {
+      "type": "object",
+      "additionalProperties": true,
+      "properties": {
+        "basis": {
+          "type": "string"
+        },
+        "max_degree": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 4
+        },
+        "order": {
+          "type": "string"
+        },
+        "phase": {
+          "type": "string"
+        }
+      }
+    },
+    "properties": {
+      "type": "object",
+      "additionalProperties": true
+    },
+    "required_properties": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "upstream": {
+      "type": "string"
+    },
+    "upstream_revision": {
+      "type": "string"
+    },
+    "license": {
+      "type": "string"
+    }
+  }
+}

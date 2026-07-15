@@ -1,0 +1,32 @@
+{
+  "schema_version": 1,
+  "profile_id": "ply:graphdeco-3dgs-v1",
+  "container": "ply",
+  "status": "stable",
+  "description": "The PLY layout produced by the reference Inria/Graphdeco 3D Gaussian Splatting trainer. Recognised only when the identifying property set is present, never guessed from value ranges.",
+  "coordinate_system": "unspecified",
+  "length_unit": "unspecified",
+  "quaternion_order": "wxyz",
+  "quaternion_normalized": false,
+  "scale_domain": "log",
+  "opacity_domain": "logit",
+  "color_space": "linear-srgb",
+  "sh": {
+    "basis": "real",
+    "max_degree": 3,
+    "order": "graphdeco-flattened",
+    "phase": "condon-shortley",
+    "dc_property": "f_dc_[0-2]",
+    "rest_property": "f_rest_[0-N]",
+    "note": "f_dc/f_rest are SH coefficients, NOT byte RGB. Degree derived only from an exact valid f_rest count; a partial set fails in strict mode."
+  },
+  "properties": {
+    "position": ["x", "y", "z"],
+    "normal_optional_ignored": ["nx", "ny", "nz"],
+    "opacity": "opacity",
+    "scale": ["scale_0", "scale_1", "scale_2"],
+    "rotation": ["rot_0", "rot_1", "rot_2", "rot_3"]
+  },
+  "required_properties": ["x", "y", "z", "f_dc_0", "f_dc_1", "f_dc_2", "opacity", "scale_0", "scale_1", "scale_2", "rot_0", "rot_1", "rot_2", "rot_3"],
+  "upstream": "https://github.com/graphdeco-inria/gaussian-splatting"
+}

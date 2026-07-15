@@ -1,0 +1,31 @@
+{
+  "schema_version": 1,
+  "profile_id": "ply:melkor-canonical-v1",
+  "container": "ply",
+  "status": "stable",
+  "description": "An unambiguous PLY interchange profile with distinct property names for canonical LINEAR values, so no double activation is possible. Distinct from Graphdeco names deliberately.",
+  "coordinate_system": "gltf-luf",
+  "length_unit": "meter",
+  "quaternion_order": "xyzw",
+  "quaternion_normalized": true,
+  "scale_domain": "linear",
+  "opacity_domain": "linear",
+  "color_space": "linear-srgb",
+  "sh": { "basis": "real", "max_degree": 4, "order": "khr-gaussian-splatting", "phase": "condon-shortley" },
+  "properties": {
+    "position": ["x", "y", "z"],
+    "scale": ["scale_x", "scale_y", "scale_z"],
+    "rotation": ["rotation_x", "rotation_y", "rotation_z", "rotation_w"],
+    "opacity": "opacity",
+    "sh": "sh_{degree}_{order}_{channel}"
+  },
+  "required_properties": ["x", "y", "z", "scale_x", "scale_y", "scale_z", "rotation_x", "rotation_y", "rotation_z", "rotation_w", "opacity"],
+  "header_markers": {
+    "melkor_profile": "melkor-canonical-v1",
+    "melkor_coordinate_system": "gltf-luf",
+    "melkor_length_unit": "meter",
+    "melkor_quaternion_order": "xyzw",
+    "melkor_scale_domain": "linear",
+    "melkor_opacity_domain": "linear"
+  }
+}

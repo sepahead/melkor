@@ -1,0 +1,20 @@
+{
+  "schema_version": 1,
+  "profile_id": "ply:generic-point-cloud-v1",
+  "container": "ply",
+  "status": "stable",
+  "description": "A plain PLY point cloud with positions and optional RGB/normals. Colour range and scale are NOT guessed: RGB byte vs float must be resolved by the declared property type, and scale must be supplied explicitly or estimated, never taken from a magic constant.",
+  "coordinate_system": "unspecified",
+  "length_unit": "unspecified",
+  "quaternion_order": "xyzw",
+  "scale_domain": "linear",
+  "opacity_domain": "linear",
+  "color_space": "requires-explicit-srgb-or-linear",
+  "sh": { "basis": "real", "max_degree": 0, "note": "degree 0 derived from linear RGB via the canonical DC mapping" },
+  "properties": {
+    "position": ["x", "y", "z"],
+    "color_aliases": [["red", "green", "blue", "alpha"], ["r", "g", "b", "a"]],
+    "normal_optional": ["nx", "ny", "nz"]
+  },
+  "required_properties": ["x", "y", "z"]
+}

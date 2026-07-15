@@ -105,6 +105,14 @@ register is in `docs/audit/production-blockers.md`.
   data in `profiles/gltf/khr-gaussian-splatting-rc-63770cc.json`. `docs/maintainers/` documents the
   update procedure (a new profile ID per revision, never a silent mutation). This pins the
   convention the coupled SH rotation (P0-17) will be verified against (P0-10).
+- Format profiles as versioned data under `profiles/` with `schemas/format-profile.schema.json`
+  and a CI validator (`tools/check_profiles.py`). A profile records one format's exact semantic
+  conventions — property names, activation domains, quaternion order, SH basis/order, colour space
+  — so an adapter converts by a stated contract rather than guessing from property names or value
+  ranges. The three PLY profiles (`graphdeco-3dgs-v1` with log-scale/logit-opacity and
+  SH-not-RGB `f_dc`, `generic-point-cloud-v1` which refuses to guess colour range or scale,
+  `melkor-canonical-v1` with distinct linear property names so double activation is impossible),
+  the pinned glTF RC profile, and the SPZ v4 target profile.
 - The container probe (`melkor/format/probe.hpp`): identifies a format from magic bytes,
   separately from the semantic profile, with an explicit confidence. It is honest about
   ambiguity — an SPZ file is a gzip stream whose own magic lives inside the compressed data, so it

@@ -1,0 +1,17 @@
+{
+  "schema_version": 1,
+  "profile_id": "spz:spz-v4",
+  "container": "spz",
+  "status": "release-candidate",
+  "description": "SPZ file-format version 4 (upstream v3.0.0 codec). TARGET profile for P0-09: the currently vendored codec writes v3, so this profile is defined but not yet the default write path until the codec is upgraded.",
+  "coordinate_system": "spz-declared-or-legacy-default",
+  "length_unit": "meter",
+  "quaternion_order": "xyzw",
+  "quaternion_normalized": true,
+  "scale_domain": "linear",
+  "opacity_domain": "linear",
+  "sh": { "basis": "real", "max_degree": 4 },
+  "upstream": "https://github.com/nianticlabs/spz",
+  "upstream_revision": "5bf2945de1a003cee07133b1e495fe9c6ffdc7e7",
+  "note": "Coordinate-system and antialiasing metadata are preserved; compression is Zstandard in v4. Not the active write path until the P0-09 codec upgrade."
+}
