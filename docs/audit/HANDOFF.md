@@ -1,6 +1,8 @@
 # Melkor v2.0.0 — Engineering Handoff
 
-**As of:** 2026-07-15 · **HEAD:** `f397142` on `main` · **CI:** green (confirm the latest run before you start: `gh run list --branch main --limit 1`).
+**As of:** 2026-07-16 · **A1 implementation through:** `32cd43f` on `main` · **CI:** exact-SHA
+green in run `29452688699` (`CI Gate` job `87481460909`). Confirm the exact current HEAD before
+starting; never substitute the latest branch run for an exact-commit result.
 
 This is the single entry point for the next engineer/agent. Read this, then the three linked
 planning docs, then start on the first to-do. Everything below is grounded in the actual code and
@@ -45,7 +47,7 @@ be called production-grade; the maintainer will mint the tag and a Zenodo DOI at
 # Configure + build (strict, CPU-only, matches the CI 'build' shape)
 cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release -DMELKOR_USE_METAL=OFF -DMELKOR_USE_CUDA=OFF -DMELKOR_WERROR=ON
 cmake --build build --parallel
-ctest --test-dir build --output-on-failure      # ~39 test targets, all must pass
+ctest --test-dir build --output-on-failure      # 41 test targets as of A1, all must pass
 
 # The CI-only checks you cannot skip (run before pushing):
 ruff check .
@@ -58,9 +60,16 @@ python3 tests/test_tools.py
 git ls-files -z -- '*.sh' | xargs -0 -n1 bash -n     # shell syntax
 git diff --check                                      # whitespace
 
-# ASan/UBSan a specific module (pattern used throughout):
-clang++ -std=c++17 -g -O1 -fsanitize=address,undefined -Iinclude -isystem third_party/tinygltf \
-  tests/test_X.cpp src/.../X.cpp ... -o /tmp/x_asan && /tmp/x_asan
+# Full ASan/UBSan matrix (the per-commit A1 gate; leak detection is disabled because Apple
+# system/framework allocations make LeakSanitizer non-actionable here):
+cmake -S . -B build-sanitize -G Ninja -DCMAKE_BUILD_TYPE=RelWithDebInfo \
+  -DMELKOR_USE_METAL=OFF -DMELKOR_USE_CUDA=OFF -DMELKOR_WERROR=ON \
+  -DCMAKE_CXX_FLAGS='-fsanitize=address,undefined -fno-omit-frame-pointer' \
+  -DCMAKE_EXE_LINKER_FLAGS='-fsanitize=address,undefined' \
+  -DCMAKE_SHARED_LINKER_FLAGS='-fsanitize=address,undefined'
+cmake --build build-sanitize --parallel
+ASAN_OPTIONS=detect_leaks=0 UBSAN_OPTIONS=print_stacktrace=1 \
+  ctest --test-dir build-sanitize --output-on-failure
 
 # libFuzzer needs a fuzzer-capable Clang (not Apple clang on this Mac); CI runs it on Linux.
 ```
@@ -82,19 +91,25 @@ CI jobs (in `.github/workflows/ci.yml`): `build-macos`, `build-linux`, `build-li
   assumes near-unit), `covariance` (Σ=R diag(s²)Rᵀ, affine transform, Jacobi eigensolver,
   `rotation_from_linear` polar decomposition), `sh_rotation` (real-SH rotation degrees 0–3),
   `color`, `coordinate_frame`. This is the single semantic authority — never re-derive transforms.
-- **Scene model** (`src/core/scene.cpp`): `SplatData` is the validated canonical representation —
+- **Scene model** (`src/core/scene.cpp`): `SplatData` is the validated canonical public and format
+  representation —
   **linear** scale (strictly positive), **linear** opacity `[0,1]`, unit quaternion `xyzw`, SH as
   splat-major blocks `data[s*(coeffs*3)+k*3+c]`. Built only through `SplatData::create` (validates
-  every domain). **This is the target model; the legacy `GaussianCloud` (`gaussian_data.hpp`) uses
-  the 3DGS training domains (LOG scale, LOGIT opacity, WXYZ rotation, `f_dc` SH) and is being
-  migrated away from — see to-do #1.**
+  every domain). `EditTransaction` is the only bulk-mutation workspace and revalidates atomically.
+  The historical training-domain model (LOG scale, LOGIT opacity, WXYZ rotation) is excluded from
+  the installed SDK and remains only inside explicitly deferred backend/densifier/mesh-init code.
 - **Format layer** (`src/formats/`): loss report + policy (`loss.cpp`, severities info/warning/
   severe/fatal; severe blocks unless the exact code is `--allow-loss`-approved), container probe,
   format profiles (`profiles/*.json`), and the **complete glTF `KHR_gaussian_splatting` codec**
   (`glb_container`, `gltf_accessor/document/resolve/khr/transform/extensions/reader/writer`).
-  Legacy readers still live in `src/{ply_writer,spz_encoder,glb_reader}.cpp`.
+  The PLY, SPZ, and legacy mesh-GLB adapters live in
+  `src/{ply_writer,spz_encoder,glb_reader}.cpp`; despite their source location, all now expose and
+  exchange canonical `SplatData`.
 - **CLI** (`src/main.cpp` + `inspect_command.cpp` + `convert_command.cpp`; command headers live in
   `src/`, included bare). `melkor inspect <file>` and `melkor convert IN.glb OUT.glb` both work.
+  The older positional command supports mesh GLB/glTF→PLY/SPZ and PLY↔SPZ on canonical data, but it
+  is not the WP06 registry/planner and intentionally rejects a KHR splat GLB rather than degrading
+  it through the mesh sampler.
 
 ## 4. What this session delivered (do not redo)
 
@@ -106,6 +121,13 @@ CI jobs (in `.github/workflows/ci.yml`): `build-macos`, `build-linux`, `build-li
 - **Two adversarial reviews** (glTF: 19 findings fixed; shipping surface: 18 findings, 13 fixed) —
   the whole codebase has now been reviewed across ~20 lenses.
 - **CI repaired** (was red on 4 jobs); the fuzz corpus is tracked and fail-closed.
+- **A1 / P0-06 scene migration completed at finding level:** validated edit transactions and
+  reproducible provenance (`86ee365`); canonical inspection (`3026dcb`); PLY/SPZ/legacy mesh-GLB
+  and positional CLI on `SplatData` with one-shot oracle domain conversions and round-trip tests
+  (`025f51b`); curated installed SDK with no legacy mutable model (`32cd43f`). CPU, Metal, and full
+  ASan/UBSan matrices each passed 41/41, the clean SDK consumer/relocation test passed, and each
+  pushed commit's exact `CI Gate` was confirmed green (`29446027102`, `29447287141`,
+  `29451389623`, `29452688699`). Do not recreate bridges back to training-domain storage.
 
 ---
 
@@ -116,19 +138,13 @@ CI jobs (in `.github/workflows/ci.yml`): `build-macos`, `build-linux`, `build-li
 
 ### A. Implementable now (no external resources) — do these first
 
-**A1 — P0-06: migrate the legacy `GaussianCloud` onto `SplatData` (effort XL, impact HIGH).**
-- *Why:* two parallel models is the largest remaining source of the domain-conversion bugs the
-  reviews keep finding (e.g. the inspect bridge that put linear scale into log fields). The blueprint
-  wants one validated model.
-- *Files:* `grep -rl GaussianCloud src include` to map every site; readers (`ply_writer.cpp`,
-  `spz_encoder.cpp`, `glb_reader.cpp`), `cloud_inspector.cpp`, `main.cpp`, `include/melkor/scene.hpp`.
-- *Approach:* start model-side (add an `EditTransaction` on `SplatData` that re-validates on commit —
-  blueprint §11.3 — and scene provenance/metadata), then migrate readers to produce `SplatData`
-  directly (applying the correct linear↔log/logit conversions **once**, via `math/activation.hpp`),
-  keeping `GaussianCloud` as a thin legacy shim until the CLI/inspect are moved over.
-- *Tests:* per-reader domain round-trips; that the migrated inspect stats match canonical values.
-- *Risk:* domain-conversion direction (sigmoid/exp) — a sign error silently corrupts everything.
-  Do it through the oracle, and cross-check with a known PLY↔canonical fixture.
+**A1 — P0-06 scene migration: COMPLETED at finding level (`86ee365`..`32cd43f`).**
+- `SplatData` is now the installed/model/inspection/PLY/SPZ/legacy-mesh-GLB/CLI representation.
+- Remaining `GaussianCloud` references are private implementation debt with named owners:
+  Enhanced→A2/WP10, compute backends→WP12, densifier→WP14. They are not A1 reopeners unless they
+  cross the installed SDK or a canonical format/CLI boundary again.
+- The blueprint's broader PR-level acceptance classification was not recomputed by this focused
+  finding closure; do not convert it into a release claim.
 
 **A2 — P0-11: honest `mesh-init` (effort XL, impact HIGH).**
 - *Why:* the "Enhanced" path is misleading (one splat per vertex dressed up as reconstruction).
@@ -146,9 +162,11 @@ CI jobs (in `.github/workflows/ci.yml`): `build-macos`, `build-linux`, `build-li
 - *Files:* new `src/formats/registry.*` (a `FormatCapabilities` table per `FormatId` + a
   probe→read→plan→write planner); extend `convert_command.cpp`.
 - *Approach:* the registry reads any format to `SplatData` and writes any target, emitting the loss
-  report and honouring `--allow-loss`/`--limits-profile`. **Blocked on A1** (needs readers producing
-  `SplatData` with correct domains). Also wire the existing `gltf::write_glb` behind it.
-- *Risk:* the same domain-conversion risk as A1; that is why GLB→GLB was shipped first.
+  report and honouring `--allow-loss`/`--limits-profile`. **A1 is complete, so this is now
+  unblocked.** Wire the existing native PLY/SPZ readers/writers and `gltf::write_glb` behind one
+  capability/loss planner rather than adding another model bridge.
+- *Risk:* semantic-profile ambiguity and loss-policy mistakes. Do not reimplement the domain/order
+  conversions A1 already pinned inside each adapter.
 
 **A4 — WP20: conformance/property/fuzz/E2E test system (effort L–XL, impact HIGH).**
 - *Implementable now:* property-based tests for the math/format invariants; fuzz the PLY/SPZ decoders
@@ -199,14 +217,19 @@ Exact commands are in `docs/audit/remaining-work-roadmap.md` (the `resource-gate
 
 ## 6. Honesty notes / known limitations (state these; do not hide them)
 
-- **PR-level acceptance:** 0 of the blueprint's 35 PRs are acceptance-complete. The blocker register
-  tracks *finding-level* closures, which is a different, narrower thing.
+- **PR-level acceptance:** the latest full strict audit, at `090126e`, found 0 of 35 blueprint PRs
+  acceptance-complete. A1 closes P0-06 at the finding level; it does not silently reclassify the
+  PR matrix. Re-run the complete acceptance audit before publishing a new PR-level count.
 - **glTF (P0-10):** codec + CLI + budgets + review done, but **not** acceptance-complete — no
   Validator-verified conformance corpus yet, cross-format convert not done, SH rotation is degrees
   0–3 only (degree 4 for SPZ), and a rotation+reflection/singular node still reports an approvable
   `LOSS_SH_ROTATION_NOT_APPLIED`.
-- **SPZ:** decode allocation is bounded only by upstream's 10M-point cap, not melkor's profile (A7).
-- **Convert:** GLB→GLB only.
+- **SPZ:** compressed input and final canonical allocation are budgeted, but vendored v1–v3 still
+  performs a whole-stream inflate internally before Melkor can enforce the profile's decoded-size
+  limit; upstream's 10M-point cap is the residual guard (A7/P0-09).
+- **Convert:** the explicit `melkor convert` subcommand remains GLB→GLB only. The legacy positional
+  command can do mesh GLB/glTF→PLY/SPZ and PLY↔SPZ, but has no registry/capability planner, no
+  cross-format loss policy, and rejects KHR splat GLBs to prevent silent data loss.
 
 ## 7. Fast repo map
 
@@ -215,7 +238,8 @@ Exact commands are in `docs/audit/remaining-work-roadmap.md` (the `resource-gate
 - Math: `src/math/` + `include/melkor/math/`
 - Safety substrate + scene: `src/core/` + `include/melkor/{error,checked,limits,budget,scene}.hpp`
 - CLI: `src/{main,inspect_command,convert_command}.cpp`
-- Legacy readers/writers: `src/{ply_writer,spz_encoder,glb_reader,cloud_inspector,enhanced_converter}.cpp`
+- Canonical root-level adapters: `src/{ply_writer,spz_encoder,glb_reader,cloud_inspector}.cpp`
+- Deferred private algorithm code: `src/{enhanced_converter,densifier,cpu_compute_provider}.cpp`
 - Tests: `tests/` (self-contained C++ with a tiny `CHECK` macro; some Python CLI/tool tests)
 - Fuzz: `fuzz/` (dual-build: libFuzzer + standalone replay; corpus under `fuzz/corpus/`)
 - Third-party (pinned): `third_party/` + `manifest.lock.json` + `specifications.lock.json` + `patches/`

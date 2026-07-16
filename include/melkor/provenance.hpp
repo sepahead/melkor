@@ -1,8 +1,10 @@
 // Canonical scene metadata and reproducible provenance.
 //
-// Format adapters decode their storage conventions into SplatData, then record the conventions
-// they observed here. The canonical domains are explicit in the type so a later conversion does
-// not guess from numeric ranges and accidentally apply exp/sigmoid twice.
+// Format adapters decode their storage conventions into SplatData; callers and the future WP06
+// registry can record the observed conventions here. The canonical domains are explicit in the
+// type so a later conversion does not guess from numeric ranges and accidentally apply
+// exp/sigmoid twice. The current flat adapters return SplatData plus format-specific metadata;
+// automatic SplatPrimitive assembly is registry work, not an implicit claim of this model API.
 
 #ifndef MELKOR_PROVENANCE_HPP
 #define MELKOR_PROVENANCE_HPP

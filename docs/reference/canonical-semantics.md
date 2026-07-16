@@ -1,9 +1,16 @@
 # Canonical semantics
 
-Melkor has one internal representation of a Gaussian splat, and every format adapter converts to
-and from it at its boundary. This page is that contract. It is the single source of truth the
-math oracle (`include/melkor/math/`) and the scene model (`include/melkor/scene.hpp`) implement,
-and it is what makes a conversion a defined operation rather than a guess.
+Melkor has one public and format-interchange representation of a Gaussian splat: `SplatData`.
+Every supported adapter entry point exchanges it; formats with both read and write paths convert at
+their respective boundaries. This page is that contract.
+It is the single source of truth the math oracle (`include/melkor/math/`) and scene model
+(`include/melkor/scene.hpp`) implement, and it is what makes a conversion a defined operation
+rather than a guess.
+
+Deferred compute-provider, densifier, and pre-A2 mesh-initialisation implementations still contain
+a private compatibility representation in the source tree. It is excluded from the installed SDK
+and must not cross into inspection, format, or ordinary CLI data flow. Its removal belongs to
+WP10/WP12/WP14; its existence is not permission to add another bridge.
 
 ## Coordinate frame
 
@@ -26,6 +33,39 @@ Applying a sigmoid to an already-linear opacity, or an `exp` to an already-linea
 activation" — produces a plausible but wrong value that no range check catches, because small
 log-scales and small linear scales overlap numerically. The conversions live in one module
 (`math/activation.hpp`) with explicit names so this cannot happen by accident.
+
+## Validated construction and editing
+
+`SplatData::create` is the only populated construction path. It validates parallel-array lengths,
+finite positions, strictly positive scale, opacity range, unit rotation, SH degree, and exact SH
+storage shape before returning a value. Bulk access is const. `SplatData::edit()` creates an
+isolated transaction; `commit()` rebuilds through the same validator and either returns a complete
+new value or leaves the source unchanged. Budgeted `reserve` and `append` account before allocation
+and never expose a partial logical append.
+
+`SplatMetadata`, `SplatPrimitive`, and `Provenance` (`include/melkor/provenance.hpp`) make frame,
+domain, colour, SH, antialiasing, source profile/hash, and operations explicit. Reproducible JSON
+uses null timestamps and has no source-path field. The full hierarchy-preserving scene graph is
+still WP06 work; the metadata API does not claim that current flat adapters preserve hierarchy.
+
+## Format boundaries
+
+- **Graphdeco-style PLY:** scale is stored as log scale, opacity as logit, quaternion as WXYZ, and
+  higher SH properties are channel-major. The adapter applies `exp`/`sigmoid` once, reorders to
+  XYZW, and transposes to canonical coefficient/RGB interleave on read; write performs the exact
+  inverse. Canonical opacity endpoints cannot be finite logits, so write clamps them with
+  `MK1210_PLY_OPACITY_ENDPOINT_CLAMPED`. Omitting SH or accepting a non-unit stored quaternion is
+  reported, never silent.
+- **SPZ v1–v3:** the vendored codec exposes log scale and logit opacity, XYZW rotation, and
+  coefficient/RGB-interleaved SH. The Melkor adapter converts activation domains once and keeps the
+  other layouts direct. Endpoint clamp, SH truncation, and non-unit rotation use stable `MK132x`
+  diagnostics. The current writer cannot encode degree 4 and fails or explicitly reports a lower
+  requested degree; SPZ v4 remains P0-09.
+- **Legacy mesh GLB/glTF:** this is geometry initialisation, not a Gaussian round-trip. Positions,
+  transformed normals, optional vertex colour, and explicit/default linear scale and opacity are
+  assembled directly into `SplatData`. A KHR Gaussian primitive is rejected by this path so it
+  cannot silently lose rotation, scale, opacity, or SH; use `melkor convert` for GLB→GLB until the
+  WP06 cross-format planner lands.
 
 ## Covariance and transforms
 
@@ -56,5 +96,8 @@ way splats render dark or washed out. Both live in `math/color.hpp`.
 
 ## Antialiasing
 
-Antialiasing is metadata, preserved through conversion, not an ignored boolean. Dropping it when a
-target cannot represent it is `LOSS_ANTIALIASING_METADATA_DROPPED`.
+Antialiasing belongs in `SplatMetadata`, not in the numeric `SplatData` arrays. The current SPZ
+decoder reports it in `SpzDecodeMetadata`, but the legacy positional CLI has no metadata-carrying
+conversion planner and therefore does not yet prove cross-format preservation. WP06/WP08 must carry
+it through `SplatPrimitive`; a target that cannot represent it must report
+`LOSS_ANTIALIASING_METADATA_DROPPED` rather than discard it silently.

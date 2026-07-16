@@ -4,7 +4,7 @@ A living summary of where the `v2.0.0` production-hardening program stands. The 
 per-blocker status is in [`production-blockers.md`](production-blockers.md); this is the
 narrative overview and the record of what needs a human decision.
 
-Last updated: 2026-07-15. Baseline commit: `21c8fb5`.
+Last updated: 2026-07-16. A1 implementation baseline: `32cd43f`.
 
 The counts in this document classify individual production findings only. They do not claim that
 the blueprint's PR-level acceptance criteria are complete. A strict takeover audit at `090126e`
@@ -15,18 +15,18 @@ the exact-HEAD CI evidence are in [`takeover-20260715.md`](takeover-20260715.md)
 
 40 findings tracked (18 P0, 15 P1, 7 P2). As of this update:
 
-- **8 closed** with attached evidence: P0-04, P0-05, P0-07, P0-08, P0-16, P1-02, P1-03, P1-14.
-- **12 in progress** with partial work landed: P0-01, P0-06, P0-10, P0-11, P0-12, P0-14, P0-17, P1-06, P1-12, P1-15, P2-03, P2-04.
+- **9 closed** with attached evidence: P0-04, P0-05, P0-06, P0-07, P0-08, P0-16, P1-02, P1-03, P1-14.
+- **11 in progress** with partial work landed: P0-01, P0-10, P0-11, P0-12, P0-14, P0-17, P1-06, P1-12, P1-15, P2-03, P2-04.
 - **20 open.**
 
 ## Narrow blocker closures and their evidence
 
 The rows below record focused evidence for finding-level closure. They do **not** prove that every
-blueprint acceptance criterion or the full CI suite passes. At `090126e`, a pristine local native
-build passed all 33 registered CTest targets, while GitHub Actions run `29412275588` was red in
-CUDA linking, Python lint, Rust-license regeneration, and fuzz-corpus setup; `CI Gate` therefore
-failed. Sanitizer statements below apply only to the named tests and recorded runs, not to all of
-HEAD.
+blueprint acceptance criterion or the release suite passes. The strict-audit baseline `090126e`
+had a red CI Gate; that historical evidence remains in `takeover-20260715.md`. The A1 implementation
+baseline `32cd43f` is exact-SHA green in run `29452688699`, including CPU/macOS, Linux, CUDA compile,
+sanitizer, fuzz, viewer, and Tauri jobs. Sanitizer statements still apply only to the named tests and
+runs; they are not a substitute for final-release qualification.
 
 | Blocker | What it was | The fix, and its evidence |
 |---|---|---|
@@ -35,6 +35,7 @@ HEAD.
 | **P0-05** | `melkor_core` ↔ backends linked circularly; a *suppressed Apple linker warning* was load-bearing | Registry inversion + a `melkor_runtime` layer. Graph verified acyclic from CMake's own dependency data. |
 | **P0-16** | AGPL OpenSplat and research-only weights shipped inside the MIT core | 68,134 lines of restricted source removed; attribution preserved; history tagged `archive/pre-v2-research-bundle-20260714`. |
 | **P0-04** | No installable SDK — downstream C++ consumption impossible | Shared `libmelkor` + stable C ABI + `MelkorConfig.cmake`. `scripts/test_sdk_install.sh` proves the build→install→consume-from-C-and-C++→relocate cycle. |
+| **P0-06** | The installed public model admitted uninitialised/out-of-domain values and arbitrary mutation; a parallel training-domain model caused double/wrong activation bridges | `SplatData`/`ShBuffer` validate canonical domains and shape; `EditTransaction` commits atomically; metadata/provenance are explicit and reproducible. Inspection, PLY, SPZ, legacy mesh GLB, and the positional CLI now stay canonical end-to-end. PLY/SPZ convert log/logit and storage order exactly once at their boundary with round-trip coverage. The installed SDK excludes the legacy model and deferred backend/algorithm headers. CPU, Metal, and ASan/UBSan each passed 41/41; clean SDK consume/relocate passed; four exact-SHA CI Gates succeeded through run `29452688699`. |
 | **P1-02** | `rawContext()` returned a `void*` callers cast to `metal::MetalContext*` | Removed; the two ops it enabled are on the abstract interface. No platform type outside `src/metal/`, `src/cuda/`. |
 | **P1-03** | Dead `GaussianFitter`/`FeedforwardModel` facades still compiled and public | 2,952 lines deleted, which also removed the last 20 shell-exec sites from the core. |
 | **P1-14** | Only `main` was supported | `SUPPORT.md` + rewritten `SECURITY.md` attach support to the immutable `2.0.x` line. |
@@ -76,22 +77,21 @@ documented:
 
 ### Large, implementable without external resources (the bulk of the remaining work)
 
-- **P0-06 remainder** migrate adapters from legacy `GaussianCloud` storage, add scene
-  provenance/metadata, and provide an invariant-preserving edit transaction.
-- **P0-17 remainder** SH rotation (Wigner-D, degree 2–4) and migrating the existing transform
-  paths onto the oracle.
+- **P0-17 remainder** degree-4 SH rotation for SPZ v4 and migrating the deferred backend transform
+  paths onto the oracle. Degrees 0–3 are already implemented and wired into glTF.
 - **P0-09** SPZ v4: pin and wrap upstream v3.0.0 (which sets file-format v4), preserve coordinate
   and antialiasing metadata. Full two-way interop testing needs the official SPZ CLI.
-- **P0-10 remainder** validate a licensed conformance corpus with the Khronos glTF Validator,
-  wire the implemented reader/writer into the registry and CLI, and complete SH rotation rather
-  than relying on an approvable severe-loss report.
+- **P0-10 remainder** validate a licensed conformance corpus with the Khronos glTF Validator and
+  wire the implemented reader/writer into the cross-format registry. The GLB→GLB subcommand and
+  degrees 0–3 SH rotation are already wired; reflection/singular transforms retain an explicit
+  approvable severe-loss report.
 - **P0-11 remainder** the honest `mesh-init --mode surface` area-weighted sampler.
 - **P0-15 / P0-13** the typed pipeline stage runner replacing the shell scripts, with pinned
   adapter manifests.
 - **WP06/WP13 remainder** complete the format registry/planner and wire the existing probe and
   loss-report primitives into `inspect`/`normalize`.
-- **WP20 remainder** qualify the newly tracked seed/regression corpus in exact-commit CI, then
-  expand the present libFuzzer harnesses to the manifest/CLI surfaces and scheduled long-run tiers.
+- **WP20 remainder** expand the exact-commit-green libFuzzer harnesses and tracked corpora to the
+  manifest/CLI surfaces and scheduled long-run tiers.
 
 ### Gated on resources or decisions only the maintainer can provide
 
