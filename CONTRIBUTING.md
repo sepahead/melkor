@@ -37,11 +37,11 @@ stay **operation-for-operation consistent**:
   identical shell order. Keep the loop structure literally parallel across
   the three implementations so results differ only by float rounding.
 - `tests/test_compute_provider.cpp` and `tests/test_densifier.cpp` enforce
-  parity where hardware allows; extend them when you add operations.
+  parity where hardware allows. Extend them when you add operations.
 
-Because CUDA typically cannot be compiled on the primary development
-machines, backend changes must additionally be verified against the stub
-configuration, which has the same link topology as Linux CPU builds:
+Primary development machines typically cannot compile CUDA. Verify backend
+changes against the stub configuration too. This configuration has the same
+link topology as Linux CPU builds:
 
 ```bash
 cmake -B build-cpu -DMELKOR_USE_METAL=OFF
@@ -51,25 +51,26 @@ cd build-cpu && ctest --output-on-failure
 
 ## Correctness conventions
 
-- Parsers for external formats (GLB, PLY, SPZ) treat all input as untrusted:
-  validate indices, strides, counts, and sizes before reading; return
-  `{success=false, error_message}` rather than crash or throw.
+- Parsers for external formats (GLB, PLY, SPZ) treat all input as untrusted.
+  Validate indices, strides, counts, and sizes before reading. Return
+  `{success=false, error_message}` instead of a crash or exception.
 - GPU entry points return empty/false on failure so callers can fall back to
   the CPU path — never partially-initialized or zero-filled data with a
   success status.
 - Functions whose stdout is captured by shell command substitution must log
   to stderr only (see the `log_*` helpers in `scripts/pipeline.sh`).
-- Objective-C++ builds with `-fobjc-arc`; do not add manual retain/release.
+- Objective-C++ builds with `-fobjc-arc`. Do not add manual retain/release.
 
 ## Code style
 
-- C++17, 4-space indentation; match the surrounding file's conventions.
+- Use C++17 and four-space indentation. Match the surrounding file's
+  conventions.
 - Strict warnings are enabled on first-party code (`-Wall -Wextra
-  -Wpedantic`); new warnings fail review.
+  -Wpedantic`). New warnings fail review.
 - Python passes `ruff check` with the repository defaults.
 - Shell scripts use 2-space indentation and must pass `bash -n`.
-- Tests are self-contained (no framework): build an input in memory, run a
-  core routine, `check()` a geometric or encoding property.
+- Keep tests self-contained without a framework. Build an input in memory.
+  Run a core routine. Use `check()` on a geometric or encoding property.
 
 ## Pull request checklist
 

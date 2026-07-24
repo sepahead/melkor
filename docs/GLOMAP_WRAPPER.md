@@ -19,7 +19,9 @@ GLOMAP is a global Structure-from-Motion (SfM) pipeline that serves as a faster 
 
 ### What is GLOMAP?
 
-GLOMAP (Global Mapper) is a global SfM system developed by the COLMAP team. While COLMAP uses incremental reconstruction (adding images one at a time), GLOMAP performs global optimization of all cameras simultaneously.
+GLOMAP (Global Mapper) is a global SfM system developed by the COLMAP team.
+COLMAP uses incremental reconstruction and adds one image at a time. GLOMAP
+does global optimization of all cameras at the same time.
 
 ### Key Features
 
@@ -156,7 +158,8 @@ GLOMAP depends on COLMAP for feature extraction and matching:
 | **Ninja** | Recommended | Installed by the setup script if missing |
 | **PoseLib** | Auto-fetched | Or install manually |
 
-The setup script installs COLMAP itself if it is not found, and installs the remaining build dependencies (Eigen, Ceres, gflags, glog) via apt (Linux) or Homebrew (macOS).
+The setup script installs COLMAP when it is not available. It uses apt on Linux
+or Homebrew on macOS. It also installs Eigen, Ceres, gflags, and glog.
 
 ### Setup
 
@@ -335,7 +338,10 @@ glomap mapper [options]
 
 Notes:
 
-- Supported input formats: JPG, JPEG, PNG, TIFF, TIF, BMP. HEIC/HEIF files are converted to JPEG automatically (via `sips` on macOS or ImageMagick `convert`). At least 3 images are required; 20+ are recommended.
+- Supported input formats: JPG, JPEG, PNG, TIFF, TIF, and BMP
+- Automatic HEIC/HEIF to JPEG conversion through `sips` or ImageMagick `convert`
+- Minimum image count: 3
+- Recommended image count: 20 or more
 - With `--matcher vocab_tree`, the vocabulary tree is looked up in `~/.colmap/` and `/usr/share/colmap/`, and downloaded to `~/.colmap/vocab_tree_flickr100K_words256K.bin` if not found.
 - The output directory will contain `database.db`, `images/` (symlinked or copied images), and `sparse/0/` (the GLOMAP reconstruction).
 
@@ -344,7 +350,7 @@ Notes:
 ### "glomap: command not found"
 
 ```bash
-# Ensure GLOMAP is installed (creates a ./glomap wrapper in the repo root)
+# Verify that GLOMAP is installed (creates a ./glomap wrapper in the repo root)
 ./scripts/setup_glomap.sh
 
 # Verify

@@ -46,7 +46,7 @@ gsplat is a high-performance CUDA library for 3D Gaussian Splatting with native 
 ### Setup Steps
 
 ```bash
-# 1. Ensure CUDA is installed
+# 1. Verify that CUDA is installed
 nvcc --version
 nvidia-smi
 
@@ -115,9 +115,11 @@ gsplat uses PyTorch's Distributed Data Parallel (DDP) with NCCL backend:
 |---------|-------------|
 | **Faster Training** | ~2-4× speedup with 4 GPUs (scales sub-linearly due to sync overhead) |
 | **Larger Effective Batch** | Process more images per step for potentially better convergence |
-| **Utilize All Hardware** | Make use of multiple GPUs efficiently |
+| **Use All Hardware** | Use multiple GPUs efficiently |
 
-**Note on Memory:** With standard DDP, each GPU holds a full copy of the model. However, gsplat is optimized to use 4× less memory than the original 3DGS implementation, making it more feasible to train on multiple GPUs. If you're running out of memory, use `--data_factor 2` to downscale images.
+**Memory note:** With standard DDP, each GPU holds a complete model copy. The
+gsplat authors report lower memory use than the original 3DGS implementation.
+If GPU memory is insufficient, use `--data_factor 2` to downscale the images.
 
 ### Enabling Multi-GPU
 
@@ -304,11 +306,11 @@ export TORCH_CUDA_ARCH_LIST="8.6"  # For RTX 30xx
 - You have multiple GPUs and want true distributed training
 - You need lower memory usage per GPU
 - You want Python flexibility for custom training
-- You're doing research and need to modify training
+- You do research and need to modify training
 
-❌ **Don't use gsplat when:**
+❌ **Do not use gsplat when:**
 - You have a single powerful GPU (use LichtFeld instead)
-- You need advanced pose optimization (direct/MLP modes; use LichtFeld)
+- You need advanced pose optimization (use LichtFeld for direct or MLP modes)
 - You want the absolute fastest training (use LichtFeld)
 
 ## Troubleshooting
@@ -345,11 +347,11 @@ pip install -e ".[dev]"
 ### "Build failed" during setup
 
 ```bash
-# Ensure CUDA toolkit matches PyTorch CUDA version
+# Verify that the CUDA toolkit matches the PyTorch CUDA version
 nvcc --version
 python -c "import torch; print(torch.version.cuda)"
 
-# They should match (e.g., both CUDA 12.1)
+# Expected: matching versions (for example, CUDA 12.1)
 ```
 
 ### Slow Training
@@ -358,7 +360,7 @@ python -c "import torch; print(torch.version.cuda)"
 # Check GPU utilization
 watch -n 1 nvidia-smi
 
-# Should see high utilization on all GPUs
+# Expected: high use of all GPUs
 # If low, check I/O bottleneck (use SSD)
 ```
 

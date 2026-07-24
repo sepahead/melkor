@@ -6,9 +6,9 @@ bundle is signed, notarized, attested, or ready to publish.
 
 ## 1. Source release preflight
 
-Run from a clean checkout of the intended tag. CI performs the same classes of
-checks across macOS and Linux; CUDA is compiled in hosted CI but needs a real
-NVIDIA runner for runtime parity.
+Run from a clean checkout of the intended tag. CI runs the same classes of
+checks across macOS and Linux. Hosted CI compiles CUDA. Runtime parity needs a
+real NVIDIA runner.
 
 ```bash
 ./scripts/setup_deps.sh
@@ -49,12 +49,12 @@ redistributable assets and must never enter `viewer/dist/`.
 
 - Update `CHANGELOG.md` and replace `Unreleased` with the release version/date.
 - Keep CMake's numeric base plus `MELKOR_PRERELEASE`, npm, Tauri, and Cargo at
-  the same full SemVer; the metadata test fails on drift.
+  the same full SemVer. The metadata test fails on drift.
 - Review every dependency-policy exception and its expiry date.
 - Regenerate and review Rust third-party notices from the locked graph.
 - Verify runtime/model/repository digests and immutable revisions without
   weakening a failed check.
-- Create the tag from a clean, reviewed commit; do not release a dirty tree.
+- Create the tag from a clean, reviewed commit. Do not release a dirty tree.
 
 Build and independently verify the deterministic source evidence:
 
@@ -67,12 +67,18 @@ python3 scripts/build_release_evidence.py verify \
   build-release/evidence-v2.0.0-rc.1
 ```
 
-Pushing an annotated `v*-rc.*` tag runs the full CI matrix and
-`.github/workflows/release-candidate.yml`, which uploads the deterministic
-source archive, per-file checksums, SPDX 2.3 source SBOM, unsigned provenance,
-and aggregate checksums for review. Manual dispatches package the exact selected
-commit; when the input resolves to a tag, they enforce the same annotated
-tag/version contract as tag pushes. These unsigned artifacts support
+Pushing an annotated `v*-rc.*` tag runs the full CI matrix. It also runs
+`.github/workflows/release-candidate.yml`. This workflow uploads:
+
+- The deterministic source archive
+- Per-file checksums
+- An SPDX 2.3 source SBOM
+- Unsigned provenance
+- Aggregate checksums
+
+Manual dispatches package the exact selected commit. When an input resolves to
+a tag, the dispatch enforces the annotated tag and version contract. These
+unsigned artifacts support
 self-consistency checks and byte-for-byte reproduction, but do not prove
 publisher identity or prevent an attacker from replacing both content and
 digests.
@@ -83,12 +89,12 @@ The repository currently builds unsigned developer artifacts and unsigned RC
 source evidence. Before publishing native bundles, add and exercise a
 tag-protected production workflow that:
 
-1. builds each platform from lockfiles on a declared toolchain;
-2. signs binaries and platform bundles using protected release identities;
-3. notarizes macOS artifacts and verifies the notarization ticket;
-4. generates checksums plus SPDX or CycloneDX SBOMs;
-5. emits build provenance/attestations tied to the tag and commit;
-6. uploads immutable artifacts only after all platform and policy jobs pass;
+1. builds each platform from lockfiles on a declared toolchain.
+2. signs binaries and platform bundles using protected release identities.
+3. notarizes macOS artifacts and verifies the notarization ticket.
+4. generates checksums plus SPDX or CycloneDX SBOMs.
+5. emits build provenance and attestations tied to the tag and commit.
+6. uploads immutable artifacts only after all platform and policy jobs pass.
 7. verifies every downloaded artifact from a separate clean environment.
 
 Signing keys, certificates, provisioning profiles, and notarization credentials
@@ -99,12 +105,12 @@ credential formats, while the full-history secret scan remains the backstop.
 
 Before describing a configuration as production-supported, record results for:
 
-- CUDA runtime parity on every advertised compute capability;
-- Metal on the oldest supported macOS/hardware combination;
-- DA3 checkpoint inference on the documented Python/CUDA matrix;
-- representative large and malformed GLB/PLY/SPZ inputs;
-- viewer desktop bundles on each target OS, including offline startup;
+- CUDA runtime parity on every advertised compute capability
+- Metal on the oldest supported macOS/hardware combination
+- DA3 checkpoint inference on the documented Python/CUDA matrix
+- representative large and malformed GLB/PLY/SPZ inputs
+- viewer desktop bundles on each target OS, including offline startup
 - performance and memory benchmarks with reproducible inputs and commands.
 
-No release note should claim algorithmic or benchmark state of the art unless a
+No release note may claim algorithmic or benchmark state of the art unless a
 dated, reproducible evaluation against named baselines is attached.

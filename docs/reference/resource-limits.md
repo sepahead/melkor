@@ -1,19 +1,19 @@
 # Resource limits
 
 Melkor treats every file as untrusted, and "untrusted" includes *well-formed but enormous*. A
-40 GiB PLY that declares two billion splats is not malformed; it is simply larger than the machine
-can survive. Refusing to bound that case lets a single file exhaust memory, fill a disk, or wedge a
-machine, so resource exhaustion is **in scope** (this reverses the pre-v2 policy, release blocker
-P0-12).
+40 GiB PLY that declares two billion splats is not malformed. It is larger than the machine can
+process safely. Without a limit, one file can exhaust memory, fill a disk, or stop a machine.
+Thus, resource exhaustion is **in scope**. This policy reverses the pre-v2 policy under release
+blocker P0-12.
 
 Every limit is enforced through a shared `Budget` (`include/melkor/budget.hpp`), charged before
-the allocation it accounts for, so a new parser cannot opt out by forgetting to check.
+the allocation it accounts for. Thus, a new parser cannot omit the check.
 
 ## Profiles
 
 Choose a named profile with `--limits-profile web|desktop|server`. The numbers below are safety
-defaults, not scientific truths; they will be revisited against benchmark data before the final
-release, and any change is a changelog entry because it affects which inputs are accepted.
+defaults, not scientific facts. The project will compare them with benchmark data before the
+final release. Each change needs a changelog entry because it affects accepted inputs.
 
 | Limit | web | desktop | server |
 |---|---:|---:|---:|
@@ -33,19 +33,18 @@ page. `server` is still bounded — "server" means the operator chose these numb
 ## No "disable all limits" switch
 
 There is deliberately none. A custom profile may raise a limit, but checked arithmetic, structural
-format limits, path containment, and output-integrity safeguards stay on regardless, and a limit
-raised past the point where Melkor's own arithmetic can represent the result is rejected. A zeroed
-limit is not read as "unlimited": it fails validation, because an all-zeros profile is the most
-likely way someone accidentally disables resource accounting.
+format limits, path containment, and output-integrity safeguards always stay on. Melkor rejects a
+limit that its arithmetic cannot represent. A zero limit does not mean "unlimited." It fails
+validation because an all-zero profile can disable resource accounting accidentally.
 
 ## Decompression bombs
 
-An absolute decoded-byte cap alone is not enough: it lets a 1 KiB file expand all the way to the
-cap. Before inflating anything, Melkor also checks the declared expansion against a ratio guard
-(`declared_decoded > max_ratio · compressed`), so the *shape* of a bomb is refused, not only its
-magnitude. A legitimately highly-compressible asset can trip it and needs a deliberate override.
+An absolute decoded-byte cap is not sufficient. It lets a 1 KiB file expand to the complete cap.
+Before inflation, Melkor checks the declared expansion against a ratio guard
+(`declared_decoded > max_ratio · compressed`). Thus, it rejects the *shape* and size of a bomb. A
+valid, highly compressible asset can trigger the guard and needs an explicit override.
 
 ## Diagnostics
 
-A limit failure exits with code **6** and its diagnostic names the limit, the observed value, and
-the flag that raises it — so the message tells you how to proceed, not merely that you may not.
+A limit failure exits with code **6**. Its diagnostic names the limit, observed value, and
+applicable override flag. Thus, the message explains how to continue.

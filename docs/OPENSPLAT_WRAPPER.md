@@ -3,7 +3,7 @@
 The `opensplat_wrapper.sh` script provides advanced features for OpenSplat training, including:
 
 - **Custom image paths** - Use images from a different location than COLMAP expects
-- **Multi-GPU modes** - Run training across multiple GPUs (independent parallel runs or sequential rotation; see [Multi-GPU Modes](#multi-gpu-modes))
+- **Multi-GPU modes** - Run training across multiple GPUs. See [Multi-GPU Modes](#multi-gpu-modes) for independent runs and sequential rotation.
 - **Memory optimization** - Reduce VRAM usage for large scenes
 
 ## Table of Contents
@@ -80,7 +80,11 @@ cd /path/to/melkor
 ./opensplat --help
 ```
 
-The setup script downloads LibTorch 2.2.0, clones and builds [OpenSplat](https://github.com/pierotofy/OpenSplat) under `tools/OpenSplat/`, and creates an `./opensplat` wrapper in the repository root. On macOS it builds with the Metal (MPS) runtime; on Linux it selects CUDA when `nvidia-smi` and `nvcc` are present, otherwise CPU.
+The setup script downloads LibTorch 2.2.0. It clones and builds
+[OpenSplat](https://github.com/pierotofy/OpenSplat) under `tools/OpenSplat/`.
+Then, it creates an `./opensplat` wrapper in the repository root. On macOS, it
+builds with the Metal (MPS) runtime. On Linux, it selects CUDA when
+`nvidia-smi` and `nvcc` are available. Otherwise, it selects CPU.
 
 Environment variables recognized by `setup_opensplat.sh`:
 
@@ -122,7 +126,7 @@ When COLMAP stored relative paths like `./images/IMG_*.JPG` but your actual imag
 
 ### 2. Out of Memory (OOM) Errors
 
-If you're running out of GPU memory:
+If GPU memory is insufficient:
 
 ```bash
 # Option A: Downscale images (reduces memory significantly)
@@ -226,7 +230,7 @@ If you're running out of GPU memory:
 | `--densify-size <val>` | `0.01`* | Size threshold for densification |
 | `--densify-interval <n>` | `100`* | Interval between densification operations |
 | `--stop-densify <n>` | `15000`* | Stop densification after N iterations |
-| `--batch-size <n>` | | Accepted for forward compatibility; currently not forwarded to OpenSplat |
+| `--batch-size <n>` | | Accepted for forward compatibility. Currently not forwarded to OpenSplat. |
 
 \* OpenSplat's built-in default. The wrapper passes the corresponding OpenSplat flag (`--densify-grad-thresh`, `--densify-size-thresh`, `--densify-every`, `--stop-densify-at`) only when the option is set explicitly.
 
@@ -239,11 +243,21 @@ If you're running out of GPU memory:
 | `--dry-run` | Show what would be done without executing (honored in `single` split mode) |
 | `--help, -h` | Show help message |
 
-All wrapper log messages are written to stderr; stdout carries only the output of the OpenSplat process itself, so the wrapper is safe to use in command substitution and pipelines.
+The wrapper writes all log messages to stderr. Standard output contains only
+the OpenSplat process output. Thus, command substitution and pipelines can use
+the wrapper safely.
 
 ## Multi-GPU Modes
 
-In `data-parallel` and `memory-split` modes the wrapper forwards only `--downscale`, `--densify-grad`, and `--stop-densify` to each training run; `--densify-size`, `--densify-interval`, and `--save-every` apply to `single` mode only.
+In `data-parallel` and `memory-split` modes, the wrapper forwards these options
+to each training run:
+
+- `--downscale`
+- `--densify-grad`
+- `--stop-densify`
+
+The `--densify-size`, `--densify-interval`, and `--save-every` options apply
+only to `single` mode.
 
 ### `single` (Default)
 
@@ -263,9 +277,10 @@ Runs independent training on each GPU simultaneously. The result from GPU 0 is u
 **Best for:**
 - Quick experimentation (see results faster)
 - When you want to try different random seeds
-- Utilizing idle GPUs
+- Using idle GPUs
 
-**Note:** This doesn't actually distribute the workload - each GPU runs the full training independently.
+**Note:** This mode does not distribute one workload. Each GPU runs the complete
+training process independently.
 
 ```bash
 ./scripts/opensplat_wrapper.sh ./project \
@@ -281,7 +296,9 @@ Runs training sequentially on different GPUs, splitting iterations across them.
 - When each GPU has limited memory
 - Rotating through GPUs to prevent thermal throttling
 
-**Note:** OpenSplat does not support resuming from checkpoints, so each GPU trains from scratch for `iterations / num_gpus` steps. Only the final GPU's result is written to the output path; intermediate results are discarded.
+**Note:** OpenSplat does not support checkpoint resumption. Each GPU trains
+from the start for `iterations / num_gpus` steps. The wrapper writes only the
+final GPU result to the output path. It discards intermediate results.
 
 ```bash
 ./scripts/opensplat_wrapper.sh ./project \
@@ -356,7 +373,8 @@ export PATH="/path/to/opensplat/dir:$PATH"
 
 ### "Can't open/read file" or "Segmentation fault"
 
-This usually means OpenSplat can't find the images. Use `--images` to specify the correct path:
+This error usually means that OpenSplat cannot find the images. Use `--images`
+to specify the correct path:
 
 ```bash
 ./scripts/opensplat_wrapper.sh ./colmap_project \
@@ -417,7 +435,7 @@ sudo reboot
 
 ### Training Seems Stuck
 
-Use `--verbose` to see what's happening:
+Use `--verbose` to see the current operation:
 
 ```bash
 ./scripts/opensplat_wrapper.sh ./project \

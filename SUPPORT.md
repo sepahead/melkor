@@ -20,7 +20,7 @@ imply that a release candidate carries a support promise it cannot honour.
 
 ## Support policy after v2.0.0
 
-Once `v2.0.0` is published, the following applies.
+Once `v2.0.0` is published, the policy below applies.
 
 **Supported line.** The latest patch release of the current stable minor receives correctness and
 security fixes. Only the latest patch within a minor line receives fixes, except that a critical
@@ -28,18 +28,17 @@ security issue may be backported.
 
 **Support window.** `2.0.x` is supported until the later of:
 
-- twelve months after `v2.0.0`; or
+- twelve months after `v2.0.0`, or
 - ninety days after the next supported minor release.
 
 **Not supported.** `main` and release candidates are accepted for bug reports but carry no
 production support promise. Versions earlier than `2.0` are not supported, though a coordinated
 security fix remains at maintainer discretion. Older unsupported versions stay downloadable with
-a warning; they are not deleted, because deleting them would break provenance for anyone who
-already cited or pinned them.
+a warning. Deleting them would break provenance for users who already cited or pinned them.
 
-**Format profiles.** Support for a format profile or specification revision may be revised in a
-minor release, but only through an explicit new profile ID and a migration note. An existing
-profile ID never silently changes meaning.
+**Format profiles.** A minor release can revise support for a format profile or specification
+revision. Each revision requires a new profile ID and a migration note. An existing profile ID
+never silently changes meaning.
 
 **Platform matrix.** The supported operating system, Python, compiler, and backend matrix is
 versioned per release. The release page and `melkor backends --output-mode json` are
@@ -62,19 +61,19 @@ There is no service-level agreement.
 
 A report we can act on contains:
 
-- the output of `melkor version --output-mode json`;
-- the output of `melkor doctor --output-mode json`, redacted if it contains anything sensitive;
-- how you installed Melkor (released archive, wheel, or source build);
-- your operating system and architecture;
-- the exact command or API call, and its output;
-- what you expected and what happened instead;
+- the output of `melkor version --output-mode json`
+- the output of `melkor doctor --output-mode json`, redacted if it contains anything sensitive
+- how you installed Melkor (released archive, wheel, or source build)
+- your operating system and architecture
+- the exact command or API call, and its output
+- what you expected and what happened instead
 - an inspection report (`melkor inspect --input <asset> --level structure --output-mode json`)
-  where the problem involves an asset;
+  where the problem involves an asset
 - a minimal asset that reproduces it, **only if you have the right to share it**.
 
-If you cannot share the asset, say so. An inspection report is often enough, and it is designed
-to be safe to paste: by default it reports a basename rather than a full path and it does not
-include environment variables, usernames, or home directories.
+If you cannot share the asset, say so. An inspection report is often sufficient. By default, it
+reports a basename instead of a full path. It does not include environment variables, usernames,
+or home directories.
 
 Do not attach an asset you do not have permission to redistribute, and do not attach anything
 containing personal data.
@@ -85,5 +84,5 @@ Never open a public issue for a suspected vulnerability. Follow [SECURITY.md](SE
 use GitHub private vulnerability reporting.
 
 Resource exhaustion from large or maliciously constructed input **is in scope**. If you can make
-Melkor consume unbounded memory, CPU, or disk from a file that passes its declared limits, that
-is a security report, not a performance complaint.
+Melkor consume unbounded memory, CPU, or disk from a file that passes its declared limits, report
+it as a security issue. Do not report it as a performance problem.

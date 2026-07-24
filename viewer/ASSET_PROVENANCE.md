@@ -15,7 +15,7 @@ The renderer modules are covered by `THIRD_PARTY_NOTICES.md`.
 
 ## External developer/test fixtures
 
-`fetch-assets.sh` can download the following publicly hosted example captures.
+`fetch-assets.sh` can download the publicly hosted example captures below.
 They are checksum-pinned for integrity, but their source pages do not publish a
 standalone license granting Melkor redistribution rights. They are therefore
 gitignored and explicitly excluded by `stage-dist.js` from desktop packages.

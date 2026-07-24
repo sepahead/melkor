@@ -31,9 +31,9 @@ Without `--strict`, a warning-only report remains valid and exits zero.
 `--json` emits exactly one deterministic UTF-8 JSON document with schema
 `melkor.inspect.v1`. It includes:
 
-- source path, normalized format, kind, and byte size;
-- decoded count, SH degree, field provenance, and finite bounds;
-- container encoding, declared count, and SPZ antialiasing metadata;
+- source path, normalized format, kind, and byte size
+- decoded count, SH degree, field provenance, and finite bounds
+- container encoding, declared count, and SPZ antialiasing metadata
 - stable issue severity/code/message/count/first-index records.
 
 Malformed UTF-8 from an input parser is escaped, so failure output remains
@@ -41,10 +41,14 @@ parseable JSON. Human output escapes terminal control bytes in paths and parser
 messages.
 
 The command never normalizes, rewrites, or changes the source timestamp. It
-rejects partial glTF decodes, unsupported versions/required extensions,
-external-buffer traversal and symlink escapes, malformed PLY scalar/SH layouts,
-non-finite fields, unusable quaternions, and scale values whose float32
-covariance would overflow or round to zero.
+rejects:
+
+- Partial glTF decodes
+- Unsupported versions and required extensions
+- External-buffer traversal and symlink escapes
+- Malformed PLY scalar and SH layouts
+- Nonfinite fields and unusable quaternions
+- Scales whose float32 covariance overflows or rounds to zero
 
 ## Automation example
 
@@ -57,5 +61,5 @@ printf '%s\n' "$report" | jq -e '.schema == "melkor.inspect.v1" and .valid'
 ```
 
 The issue order and number rendering are stable for an unchanged input and
-Melkor version. Consumers should key on `schema` and issue `code`, not parse the
-human-readable message.
+Melkor version. Consumers should use `schema` and issue `code`. They should not
+parse the human-readable message.

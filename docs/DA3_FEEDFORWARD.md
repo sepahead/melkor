@@ -2,7 +2,7 @@
 
 Melkor's DA3 bridge converts one image or one jointly inferred multi-view scene
 to a standard 3DGS-layout PLY. This document describes the tested integration
-as of **2026-07-10**; the upstream project remains the authority for model
+as of **2026-07-10**. The upstream project remains the authority for model
 architecture and benchmark results.
 
 The supported path is:
@@ -12,10 +12,12 @@ images -> pinned official DA3 checkpoint -> learned Gaussians or camera-aware
 depth unprojection -> PLY -> melkor -> SPZ -> viewer
 ```
 
-The bridge is intentionally fail-closed. It does not silently invent camera
-poses, accept a mutable checkpoint revision, shard the views of one scene
-across unrelated GPU processes, or present an image-intensity preview as a
-reconstruction.
+The bridge intentionally fails closed. It does not:
+
+- Invent camera poses
+- Accept a mutable checkpoint revision
+- Divide one scene between unrelated GPU processes
+- Present an image-intensity preview as a reconstruction
 
 ## Requirements
 
@@ -33,8 +35,9 @@ The native C++ converter and viewer do not require DA3.
 ```
 
 The installer checks out official Depth Anything 3 commit
-`41736238f5bced4debf3f2a12375d2466874866d`, installs its `gs` extra, and
-downloads the chosen Hugging Face snapshot at a reviewed immutable revision.
+`41736238f5bced4debf3f2a12375d2466874866d`. It installs the `gs` extra. Then,
+it downloads the selected Hugging Face snapshot at a reviewed immutable
+revision.
 Downloads are staged, checked for configuration and weight files, marked with
 their revision, and moved into place atomically.
 
@@ -86,7 +89,7 @@ zero-padded names for video frames.
 
 The MONO and METRIC single-view checkpoints output depth without the
 multi-view camera data this bridge needs for a world-space splat scene. Use
-upstream DA3's depth exporters for those checkpoints; the Melkor bridge rejects
+upstream DA3's depth exporters for those checkpoints. The Melkor bridge rejects
 them rather than fabricating geometry.
 
 For SMALL, BASE, and LARGE, the output is a camera-aware colored point-splat
@@ -114,7 +117,7 @@ opacity.
 ```
 
 Numeric arguments are validated for finite values and coherent ranges. `.spz`
-is deliberately not accepted directly; write PLY, then use the canonical native
+is deliberately not accepted directly. Write PLY, then use the canonical native
 encoder:
 
 ```bash
@@ -153,8 +156,8 @@ explanation instead of concatenating invalid geometry.
 
 Safe options are:
 
-- assign each complete scene in a dataset to a separate GPU;
-- reduce image count/resolution for a single joint inference call; or
+- assign each complete scene in a dataset to a separate GPU
+- reduce image count/resolution for a single joint inference call, or
 - use the official DA3-Streaming project for a long sequence.
 
 ## Preview fallback
@@ -170,27 +173,29 @@ intensity-derived pseudo-depth preview:
   --output preview.ply
 ```
 
-This output is not a reconstruction and should not enter training, evaluation,
-or production pipelines.
+This output is not a reconstruction. Do not use it in training, evaluation, or
+production pipelines.
 
 ## CoreML status
 
 The CoreML port was an experimental single-image surface. It was removed from this
-repository on 2026-07-14 (see docs/adapters/index.md); the notes below describe its
-behaviour for historical reference. Its inference and
-benchmark commands remain available for research, but its multi-view fusion,
-streaming, conversion, and Gaussian-export commands are disabled until they
-match official DA3 semantics end to end. It is not the supported replacement
+repository on 2026-07-14. See `docs/adapters/index.md`. The notes below describe
+its behavior for historical reference.
+
+Its inference and benchmark commands
+remain available for research. Its multi-view fusion, streaming, conversion,
+and Gaussian-export commands are disabled until they match official DA3
+semantics end to end. It is not the supported replacement
 for the CUDA bridge.
 
 ## Validation
 
 The repository's synthetic DA3 tests cover:
 
-- learned Gaussian extraction and official border/depth pruning;
-- camera translation and camera-Z unprojection;
-- malformed-camera fail-closed behavior;
-- confidence filtering and consistent 2-D subsampling; and
+- learned Gaussian extraction and official border/depth pruning
+- camera translation and camera-Z unprojection
+- malformed-camera fail-closed behavior
+- confidence filtering and consistent 2-D subsampling
 - PLY field conventions for scale, opacity, rotation, and SH DC color.
 
 Run them without a checkpoint download:

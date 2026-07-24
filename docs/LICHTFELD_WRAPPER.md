@@ -49,7 +49,10 @@ The `lichtfeld_wrapper.sh` script provides a convenient interface to LichtFeld-S
 ./lichtfeld --help
 ```
 
-The setup script clones LichtFeld-Studio into `tools/LichtFeld-Studio`, downloads LibTorch 2.7.0 for CUDA 12.8 (~2 GB) into `tools/LichtFeld-Studio/external/libtorch`, builds with CMake + Ninja, and creates the `./lichtfeld` wrapper in the project root.
+The setup script clones LichtFeld-Studio into `tools/LichtFeld-Studio`. It
+downloads LibTorch 2.7.0 for CUDA 12.8 (approximately 2 GB) into
+`tools/LichtFeld-Studio/external/libtorch`. Then, it builds with CMake and
+Ninja. It creates the `./lichtfeld` wrapper in the project root.
 
 ### Manual Prerequisites (Ubuntu)
 
@@ -102,7 +105,7 @@ LichtFeld-Studio offers several advantages over other training tools:
 2. **MCMC Densification**: Better Gaussian placement strategy
 3. **Fast Training**: ~20 minutes for 60k steps at 4K resolution
 4. **Interactive Viewer**: Real-time preview with editing capabilities
-5. **Self-Contained Setup**: No Python environment required; the setup script downloads LibTorch 2.7.0 (CUDA 12.8) automatically
+5. **Self-Contained Setup**: No Python environment required. The setup script downloads LibTorch 2.7.0 (CUDA 12.8) automatically.
 
 ## Command Reference
 
@@ -118,7 +121,10 @@ LichtFeld-Studio offers several advantages over other training tools:
 |--------|-------------|
 | `--images <path>` | Override image directory path |
 
-With `--images`, the wrapper builds a temporary workspace: the `sparse/` reconstruction (and `database.db`, if present) is copied and `.jpg`/`.jpeg`/`.png` files from the given directory are symlinked into `images/`. The workspace is deleted after training.
+With `--images`, the wrapper builds a temporary workspace. It copies the
+`sparse/` reconstruction and `database.db`, when present. It creates links in
+`images/` for the `.jpg`, `.jpeg`, and `.png` files. It deletes the workspace
+after training.
 
 ### Output Options
 
@@ -244,7 +250,7 @@ MLP-based pose optimization. Highest quality but slower.
 
 ### 3. Custom Image Path
 
-When COLMAP's stored image paths don't match actual locations:
+When COLMAP's stored image paths do not match the actual locations:
 
 ```bash
 ./scripts/lichtfeld_wrapper.sh ~/colmap_project \
@@ -362,7 +368,7 @@ ninja --version
 - You need maximum training speed
 - COLMAP poses may be inaccurate
 - You want interactive preview
-- You're processing many scenes
+- You process many scenes
 
 ### When to Use OpenSplat
 

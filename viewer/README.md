@@ -1,8 +1,13 @@
 # Melkor · SparkJS splat viewer
 
-A self-contained SparkJS + three.js viewer for Melkor PLY/SPZ output, with
-local file opening, camera controls, progressive loading, a bounded-memory 4D
-player, a Tauri v2 desktop shell, and Playwright render tests.
+A self-contained SparkJS and three.js viewer for Melkor PLY and SPZ output. It
+provides:
+
+- Local file opening and camera controls
+- Progressive loading
+- A bounded-memory 4D player
+- A Tauri v2 desktop shell
+- Playwright render tests
 
 ## Open your own splat
 
@@ -15,7 +20,7 @@ so the viewer does not keep an unbounded history in memory.
 
 Local opening works offline after the viewer itself has loaded. Invalid,
 empty, oversized, or damaged files leave the current scene visible and show a
-recoverable error. The file picker is the cross-platform fallback; HTML5 drag
+recoverable error. The file picker is the cross-platform fallback. HTML5 drag
 and drop is also enabled in the Tauri shell.
 
 ## Scene fixtures
@@ -65,10 +70,10 @@ desktop runtime without external scenes:
 ./fetch-assets.sh --runtime-only
 ```
 
-This fetches three.js r180 and Spark 2.1.0, then deterministically generates
-the static SPLAT and 4D PLY fixtures. If a Melkor binary exists at
-`../build/melkor`, the full setup also converts Distant Igloo from SPZ to PLY
-to exercise both native conversion and Spark's PLY loader.
+This fetches three.js r180 and Spark 2.1.0. Then, it deterministically
+generates the static SPLAT and 4D PLY fixtures. If `../build/melkor` exists,
+the full setup converts Distant Igloo from SPZ to PLY. This operation tests
+native conversion and Spark's PLY loader.
 
 ## Run
 
@@ -77,10 +82,10 @@ bun run serve
 # http://127.0.0.1:8771/
 ```
 
-`serve.js` binds to loopback by default, accepts only GET/HEAD, exposes only
-`index.html`, `vendor/`, and `public/`, rejects traversal and malformed URLs,
-and returns correct MIME/length metadata for HEAD requests. `PORT`, `HOST`, and
-`QUIET=1` are supported for development.
+By default, `serve.js` binds to loopback and accepts only GET and HEAD. It
+exposes only `index.html`, `vendor/`, and `public/`. It rejects traversal and
+malformed URLs. HEAD responses contain correct MIME and length metadata.
+Development supports `PORT`, `HOST`, and `QUIET=1`.
 
 ### Controls
 
@@ -91,7 +96,7 @@ and returns correct MIME/length metadata for HEAD requests. `PORT`, `HOST`, and
 | Front / Side / Top / 3/4 | select a named camera view |
 | Orbit | toggle automatic orbit |
 | Reframe | recompute bounds and resume orbit |
-| Drag / scroll | orbit or dolly; enter manual mode |
+| Drag / scroll | orbit or dolly. Enter manual mode. |
 | WASD / arrows | fly in manual mode |
 | Q / E | move down / up |
 | Shift / CapsLock / Ctrl | speed ×5 / ×10 / ×0.2 |
@@ -117,9 +122,14 @@ cargo install tauri-cli --version 2.9.6 --locked
 bun run app:build
 ```
 
-The pre-build step regenerates project-owned demos and stages an exact
-allowlist: `index.html`, four digest-checked runtime modules, the generated
-SPLAT/4D files referenced by its manifest, the project license, and notices.
+The pre-build step regenerates project-owned demos. It stages this exact
+allowlist:
+
+- `index.html`
+- Four digest-checked runtime modules
+- Generated SPLAT and 4D files in the manifest
+- The project license and notices
+
 It never recursively embeds `public/`, external captures, `node_modules/`, or
 `src-tauri/target/`. A strict CSP is enabled in the packaged webview.
 
@@ -128,7 +138,7 @@ tag-driven release artifact workflow are separate release gates.
 
 ## Loading and framing
 
-- Import maps resolve three.js and Spark entirely from `vendor/`; Spark's
+- Import maps resolve three.js and Spark entirely from `vendor/`. Spark's
   worker/WASM payload is embedded in its checked module.
 - The first `SplatMesh` is attached before its download completes, enabling
   progressive rendering. A scene switch keeps the current mesh until the next
@@ -150,10 +160,11 @@ A temporal scene is a directory containing one PLY or SPZ per frame and:
 }
 ```
 
-The player retains a circular window around the playhead, prefetches ahead,
-evicts outside the window, pauses while buffering, and wraps from the final
-frame to frame zero. Seeks are latest-request-wins. Failed frames get three
-bounded exponential-backoff attempts and an explicit retry action.
+The player retains a circular window around the playhead. It prefetches future
+frames and evicts frames outside the window. It pauses during buffering and
+wraps from the final frame to frame zero. The latest request wins during a
+seek. Failed frames get three bounded retries with exponential backoff. The
+viewer also provides an explicit retry action.
 
 Create fixtures or package a real per-frame export with:
 
@@ -178,21 +189,21 @@ npm audit --audit-level=high
 
 The Playwright suite checks:
 
-- asset serving and server fail-closed behavior;
-- offline local file picker, repeat-open, drag/drop, and invalid-file recovery;
-- WebGL2 rendering, plausible counts, and nonblank camera views;
-- camera/orbit/manual interactions and mobile bounds;
-- reduced-motion behavior;
-- progressive first load and safe scene switching;
-- bounded, wrapping 4D playback and on-demand seek;
-- out-of-order seek races and finite retry/recovery; and
-- optional producer-to-player SPZ playback.
+- Asset serving and server fail-closed behavior
+- Offline local file picker, repeat-open, drag/drop, and invalid-file recovery
+- WebGL2 rendering, plausible counts, and nonblank camera views
+- Camera, orbit, and manual interactions with mobile bounds
+- Reduced-motion behavior
+- Progressive first load and safe scene switching
+- Bounded, wrapping 4D playback and on-demand seek
+- Out-of-order seek races and finite retry/recovery
+- Optional producer-to-player SPZ playback
 
 Screenshots are written to the gitignored `screenshots/` directory.
-On GPU-less CI runners, every container format is still decoded and awaited
-through a rendered frame, while the generated 4K Wave fixture carries the
-framebuffer and multi-camera assertions under SwiftShader. Local runs retain
-the full four-view visual matrix for every fixture; set
+On CI runners without a GPU, the tests decode each container format and wait
+for a rendered frame. The generated 4K Wave fixture runs the framebuffer and
+multi-camera assertions under SwiftShader. Local runs retain the complete
+four-view visual matrix for each fixture. Set
 `VIEWER_FULL_RENDER=1` to force that matrix in CI-like environments.
 
 ## Adding an asset

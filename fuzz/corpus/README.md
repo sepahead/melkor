@@ -2,7 +2,7 @@
 
 These small, deterministic files seed the coverage-guided parser fuzzers and are replayed as
 ordinary regression tests. They are intentionally exempted from the repository-wide 3D asset
-ignore rules. Do not add large datasets here; minimize a reproducer before committing it.
+ignore rules. Do not add large datasets here. Minimize a reproducer before committing it.
 
 Provenance and licensing:
 

@@ -231,7 +231,7 @@ tools that are actually installed:
 | gsplat-cuda installed | gsplat-cuda |
 | gsplat-mps installed | gsplat-mps |
 
-> **Note:** LichtFeld-Studio's installer requires CUDA 12.8+; on systems where it
+> **Note:** LichtFeld-Studio's installer requires CUDA 12.8+. On systems where it
 > is not installed, the pipeline falls back to OpenSplat. If no tool is found,
 > run `./scripts/pipeline.sh --setup`.
 
@@ -499,7 +499,7 @@ installed, otherwise routes through the OpenSplat wrapper. See
 
 **Solutions:**
 1. Add more images (minimum 20-30 recommended)
-2. Ensure 60-80% overlap between consecutive images
+2. Use 60–80% overlap between consecutive images.
 3. Avoid blurry or dark images
 4. Try lower COLMAP quality: `--colmap-quality low`
 
@@ -546,7 +546,7 @@ installed, otherwise routes through the OpenSplat wrapper. See
 
 ### "SPZ conversion failed"
 
-**Solution:** Ensure the Melkor CLI is built:
+**Solution:** Verify that the Melkor CLI is built:
 
 ```bash
 ./scripts/setup_deps.sh

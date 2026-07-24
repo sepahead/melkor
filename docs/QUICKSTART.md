@@ -29,7 +29,7 @@ Melkor is a unified toolkit for 3D Gaussian Splatting that provides:
 - **Asset validation**: deterministic PLY/SPZ/GLB/glTF diagnostics via `melkor inspect` — see [INSPECT.md](INSPECT.md)
 - **Scene completion**: densification-based hole filling via `--fill-holes` — see [SCENE_COMPLETION.md](SCENE_COMPLETION.md)
 - **Bundled viewer**: SparkJS web viewer with an optional Tauri desktop shell — see [viewer/README.md](../viewer/README.md)
-- **Cross-platform GPU support**: Metal (macOS), CUDA (Linux), CPU fallback; `melkor --info` prints the active backend
+- **Cross-platform GPU support**: Metal (macOS), CUDA (Linux), and CPU fallback. `melkor --info` prints the active backend.
 
 ### Two Approaches: COLMAP vs COLMAP-Free
 
@@ -70,7 +70,7 @@ Melkor is a unified toolkit for 3D Gaussian Splatting that provides:
 └─────────────────────────────────────────────────────────────────────────────┘
 ```
 
-### Which Approach Should I Use?
+### Which approach to use
 
 | Scenario | Recommended | Why |
 |----------|-------------|-----|
@@ -132,7 +132,7 @@ cmake --build build -j
 | **gsplat-mps** | macOS | `setup_all.sh` / `setup_gsplat_mps.sh` | Research, flexible |
 | **LichtFeld-Studio** | Linux CUDA | `setup_all.sh` / `setup_lichtfeld.sh` | Single-GPU trainer with pose optimization |
 | **gsplat-cuda** (optional) | Linux CUDA | `setup_gsplat_cuda.sh` | Multi-GPU DDP training |
-| **GLOMAP** (optional) | All | `setup_glomap.sh` | Global SfM mapping; the authors report substantial speedups over incremental SfM |
+| **GLOMAP** (optional) | All | `setup_glomap.sh` | Global SfM mapping. The authors report substantial speedups over incremental SfM. |
 | **DA3** (optional) | Linux CUDA | `setup_da3.sh` | COLMAP-free feedforward |
 
 ---
@@ -173,9 +173,9 @@ GPUs.
 |-------|------|-------|----------|
 | `da3-small` | ~1GB | ⚡⚡⚡ | Depth/pose-derived point splats |
 | `da3-base` | ~2GB | ⚡⚡ | Balanced depth/pose path (default) |
-| `da3-large-1.1` | ~4GB | ⚡ | Refreshed depth/pose path; non-commercial weights |
-| `da3-giant-1.1` | ~8GB | 🐢 | Learned Gaussian head; non-commercial weights |
-| `da3nested-giant-large-1.1` | ~12GB | 🐢 | Learned Gaussians + metric alignment; non-commercial weights |
+| `da3-large-1.1` | ~4GB | ⚡ | Refreshed depth/pose path. Non-commercial weights. |
+| `da3-giant-1.1` | ~8GB | 🐢 | Learned Gaussian head. Non-commercial weights. |
+| `da3nested-giant-large-1.1` | ~12GB | 🐢 | Learned Gaussians + metric alignment. Non-commercial weights. |
 
 ### Option 2: COLMAP-Based Pipeline (Best Quality - Minutes)
 
@@ -205,7 +205,7 @@ Requirements for good results:
 - **Minimum**: 20-30 images (more is better)
 - **Overlap**: 60-80% overlap between consecutive images
 - **Coverage**: Capture from multiple angles
-- **Quality**: Avoid blur, ensure good lighting
+- **Quality**: Prevent blur and use good lighting.
 
 ```bash
 # Check your images
@@ -228,7 +228,7 @@ colmap automatic_reconstructor \
 
 # Verify output
 ls ~/output/my_scene/sparse/0/
-# Should see: cameras.bin, images.bin, points3D.bin
+# Expected: cameras.bin, images.bin, points3D.bin
 ```
 
 > **Note:** The pipeline scripts automatically detect NVIDIA GPUs and enable CUDA
@@ -330,7 +330,7 @@ python examples/simple_trainer.py \
 
 | Tool | Speed | Quality | Platform | COLMAP Required | Features |
 |------|-------|---------|----------|-----------------|----------|
-| **DA3 (Feedforward)** | ⚡⚡⚡⚡ | Good | Linux CUDA | ❌ No | One joint scene per GPU; learned GS on GIANT/NESTED |
+| **DA3 (Feedforward)** | ⚡⚡⚡⚡ | Good | Linux CUDA | ❌ No | One joint scene per GPU. Learned GS on GIANT/NESTED. |
 | **LichtFeld-Studio** | ⚡⚡⚡ | High | Linux CUDA 12.8+ | ✅ Yes | Pose optimization, MCMC |
 | **OpenSplat** | ⚡⚡ | High | All | ✅ Yes | Cross-platform, reliable |
 | **gsplat-mps** | ⚡ | Highest | macOS Metal | ✅ Yes | Research, customizable |
@@ -476,7 +476,7 @@ done
 
 **Solutions**:
 1. Add more images (minimum 20-30)
-2. Ensure 60-80% overlap between images
+2. Use 60–80% overlap between images.
 3. Avoid blurry or dark images
 4. Try different COLMAP quality: `--colmap-quality low` or `--colmap-quality medium`
 
@@ -582,7 +582,7 @@ Hole-filling algorithm, parameters, and limits: [SCENE_COMPLETION.md](SCENE_COMP
 
 ### Viewers & Editors
 
-- **Bundled SparkJS viewer** (PLY/SPZ/SOG/SPLAT): `cd viewer && ./fetch-assets.sh && bun run serve`;
+- **Bundled SparkJS viewer** (PLY/SPZ/SOG/SPLAT): `cd viewer && ./fetch-assets.sh && bun run serve`
   `bun run test` runs the Playwright render tests, `bun run app` opens the Tauri
   desktop shell — see [viewer/README.md](../viewer/README.md)
 - **SuperSplat** (web editor): https://playcanvas.com/supersplat — drag & drop PLY for cleaning, filtering, compression

@@ -1,9 +1,10 @@
 # Migrating the C++ scene API from v1 to v2
 
 Melkor v2 replaces the mutable `GaussianCloud` SDK model with `SplatData`. The v1 model stored
-training-domain values (log scale, logit opacity, WXYZ quaternions) and exposed mutable vectors;
-the v2 model stores canonical values (positive linear scale, linear opacity in `[0,1]`, XYZW unit
-quaternions) and validates every construction or committed edit.
+training-domain values and exposed mutable vectors. These values included log scale, logit
+opacity, and WXYZ quaternions. The v2 model stores positive linear scale, linear opacity, and XYZW
+unit quaternions. Linear opacity stays in `[0,1]`. The model validates each construction and
+committed edit.
 
 ## Construct a scene
 
@@ -24,7 +25,7 @@ if (!scene.has_value()) {
 }
 ```
 
-Format adapters must perform log/linear and logit/probability conversion exactly once through
+Format adapters must do log/linear and logit/probability conversion exactly once through
 `melkor/math/activation.hpp`. Do not infer a domain from the numeric range.
 
 ## Read and edit
@@ -45,7 +46,7 @@ if (!changed.has_value()) {
 ```
 
 For incremental construction, use `edit.reserve(count, budget)` and
-`edit.append(record, budget)`. Both account before allocating; a budget or validation failure
+`edit.append(record, budget)`. Both account before allocating. A budget or validation failure
 leaves the transaction's logical contents unchanged. `commit()` is one-shot and revalidates all
 parallel lengths and canonical domains atomically.
 
@@ -64,8 +65,8 @@ Use `ShBuffer::create(degree, splat_count, data)` instead of a mutable SH-degree
 ## Metadata and provenance
 
 Wrap canonical data with `SplatPrimitive::create` to record the exact coordinate frame, SH basis,
-colour space, antialiasing flag, source format/profile/hash, and operations. The default
-`provenance_to_json` output is reproducible: timestamps are `null`, and source paths are not part
+color space, antialiasing flag, source format/profile/hash, and operations. The default
+`provenance_to_json` output is reproducible. Timestamps are `null`, and source paths are not part
 of the schema.
 
 ## Backend types

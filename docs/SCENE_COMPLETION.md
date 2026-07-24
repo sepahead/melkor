@@ -10,14 +10,13 @@ this family of operations goes by several names:
 - **Hole filling / scene completion** — the editing task: reconstructing
   plausible geometry in regions the capture never saw (occlusion shadows,
   scan gaps, removed objects).
-- **3D inpainting** — the same task viewed from the image-editing tradition;
+- **3D inpainting** — the same task viewed from the image-editing tradition.
   diffusion-based methods (InFusion, GScream, Inpaint360GS, …) use that name.
 
 Melkor implements the *geometric* form: deterministic, prior-free
 densification that extends the scene's own local structure into its gaps.
-It runs in milliseconds on Metal and behaves identically on the CPU
-fallback, which makes it suitable for automated pipelines that cannot ship
-a diffusion model.
+It runs in milliseconds on Metal. The CPU fallback has the same behavior.
+Thus, automated pipelines do not need a diffusion model.
 
 ## Usage
 
@@ -29,13 +28,13 @@ melkor scene.ply completed.ply --fill-holes --fill-strength 0.8 --max-hole-size 
 | Flag | Default | Meaning |
 |------|---------|---------|
 | `--fill-holes` | off | Enable scene completion |
-| `--fill-iterations <int>` | 3 | Advancing-front passes; each pass can close roughly one ring of the hole |
+| `--fill-iterations <int>` | 3 | Advancing-front passes. Each pass can close roughly one ring of the hole. |
 | `--fill-strength <float>` | 1.0 | Fill spacing in units of the median splat spacing (lower = denser fill) |
 | `--max-hole-size <float>` | 8.0 | Largest bridgeable hole, in multiples of the median splat spacing |
 | `--knn <int>` | 8 | Neighborhood size used for the density statistics |
 
-Works on any input Melkor can load (PLY, SPZ, GLB-derived clouds); the
-filled cloud is written to whichever output format you request.
+This operation works on each input that Melkor can load (PLY, SPZ, and
+GLB-derived clouds). Melkor writes the filled cloud in the requested format.
 
 ## Algorithm
 
@@ -44,8 +43,8 @@ Each pass:
 1. **Neighborhood statistics.** For every splat, the mean distance to its
    k nearest neighbors and the *gap vector* — the offset from the splat to
    the centroid of those neighbors. The gap vector points toward empty
-   space; its magnitude relative to the local spacing measures how
-   one-sided the neighborhood is (≈0 in the interior, large on a hole rim).
+   space. Its magnitude measures neighborhood asymmetry relative to local
+   spacing. The value is near zero inside a surface and large on a hole rim.
    Computed on a uniform grid, on Metal when available
    (`knn_stats_grid` kernel) with a cell-identical CPU fallback.
 2. **Candidate generation.**
@@ -57,11 +56,11 @@ Each pass:
      densification).
 3. **Candidate filtering** (`filter_candidates_grid` kernel, CPU fallback):
    - reject candidates closer than `0.7 x` median spacing to the existing
-     cloud or to an already-accepted candidate (no clumping);
+     cloud or to an already-accepted candidate (no clumping).
    - **far-support gate**: a rim candidate is accepted only if existing
      geometry lies *ahead of it* (in the forward half-space of its gap
      direction) within `--max-hole-size` median spacings. An interior hole
-     always has a far rim to bridge to; the scene's outer boundary has
+     always has a far rim to bridge to. The scene's outer boundary has
      nothing beyond it. This is what keeps hole filling from growing the
      scene outward indefinitely.
 4. **Synthesis.** Accepted candidates become splats that inherit color/SH,
@@ -79,15 +78,17 @@ across runs and across CPU/Metal backends.
 - Occlusion shadows behind objects in ground-level scans are usually a few
   splat spacings wide: the defaults close them.
 - Larger voids (unscanned courtyards, roof gaps in aerial captures) need a
-  bigger `--max-hole-size` and more `--fill-iterations`; expect the fill to
-  be a flat continuation of the rim geometry. Measured on a sphere with a
-  cap hole of ~6 median spacings radius: the front closes the cap in 6
-  passes and the fill bulges outward from the true surface by at most ~2
-  median spacings at the cap center (about a third of the hole radius) —
-  the rim is extrapolated, not curved. The curved-surface behavior is
-  locked by `test_fills_sphere_cap` in `tests/test_densifier.cpp`.
+  bigger `--max-hole-size` and more `--fill-iterations`. Expect a flat
+  continuation of the rim geometry.
 - `--fill-strength` below 1.0 fills more densely than the surrounding
-  scene; useful when the fill will later be re-optimized by a trainer.
+  scene. This setting is useful when a trainer will reoptimize the fill.
+
+A sphere test uses a cap-hole radius of approximately six median spacings.
+The front closes the cap in six passes. At the cap center, the fill extends at
+most two median spacings beyond the true surface. This distance is
+approximately one third of the hole radius. The algorithm extrapolates the
+rim instead of curving it. `test_fills_sphere_cap` in
+`tests/test_densifier.cpp` locks this behavior.
 
 ## Limitations
 
@@ -100,7 +101,12 @@ across runs and across CPU/Metal backends.
 
 ## Testing
 
-`tests/test_densifier.cpp` covers: grid construction, grid k-NN versus an
-exact brute-force reference, hole closure on a punched plane, outer
-boundary containment, degenerate inputs, and CPU/Metal parity of both
-kernels (the Metal tests self-skip on machines without a GPU).
+`tests/test_densifier.cpp` covers:
+
+- Grid construction
+- Grid k-NN against an exact brute-force reference
+- Hole closure on a punched plane
+- Outer-boundary containment and degenerate inputs
+- CPU and Metal parity for both kernels
+
+The Metal tests skip themselves on machines without a GPU.

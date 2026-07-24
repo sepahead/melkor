@@ -9,9 +9,10 @@ development software.
 
 ## v2.0.0
 
-The first release that meets the production-readiness bar this program defines. Its full blocker register is
-[`docs/audit/production-blockers.md`](docs/audit/production-blockers.md); its release gate is the
-master checklist in the production-hardening blueprint.
+This release is the first one that meets the program's production-readiness requirements. Its full
+blocker register is
+[`docs/audit/production-blockers.md`](docs/audit/production-blockers.md). The
+production-hardening blueprint contains its master release checklist.
 
 The product boundary for this release is deliberately narrow. Melkor v2 is a **dependable asset
 interoperability core**, not an umbrella repository that appears to natively provide every
@@ -23,7 +24,7 @@ reconstruction model.
 - Resolve explicit semantic profiles rather than guessing activation domains or quaternion order.
 - Validate canonical invariants and enforce shared resource limits.
 - Normalize coordinate frame, units, scale domain, opacity domain, quaternion layout, SH basis
-  and order, and colour space.
+  and order, and color space.
 - Convert between supported PLY, SPZ, and glTF representations with a machine-readable loss
   report.
 - Initialize degree-0 Gaussians from mesh vertices or deterministic area-weighted triangle
@@ -33,9 +34,8 @@ reconstruction model.
 - Complete release artifacts: checksums, SBOMs, signatures, attestations, and clean-room install
   evidence.
 
-**Deliberately excluded from v2.0.0.** These are not "later" items that were forgotten; they are
-out of scope by design, because adding them would make the feature list longer without making the
-product more dependable.
+**Deliberately excluded from v2.0.0.** The project did not forget these items. They are out of
+scope by design. Adding them would not make the product more dependable.
 
 - A native learned scene-reconstruction model.
 - Automatic download or execution of unreviewed model code.
@@ -68,21 +68,21 @@ An experimental feature may be promoted, kept experimental, or removed — being
 a commitment to ship it.
 
 - **`melkor complete --method geometric-gap-fill`** — a bounded deterministic geometric
-  interpolation of sparse local neighbourhoods. It is not learned reconstruction and it is not a
+  interpolation of sparse local neighborhoods. It is not learned reconstruction and it is not a
   replacement for gradient-based training densification. It stays experimental unless its
-  false-bridge rate, transmittance behaviour, and useful operating region are demonstrated by
+  false-bridge rate, transmittance behavior, and useful operating region are demonstrated by
   benchmark.
 - **Metal and CUDA backends** — compiled but not production-published until exact-SHA hardware
   parity and performance evidence exists. A compile-only CI job is not hardware qualification.
 - **Feedforward and depth adapters** (for example Depth Anything 3) — external, and blocked on
-  licence review of both code and weights, hash-pinned weights, explicit user acceptance, and
+  license review of both code and weights, hash-pinned weights, explicit user acceptance, and
   reference tests for output semantics.
 - **Trainer adapters** (for example OpenSplat, gsplat) — external, and "supported" only once an
   exact pinned configuration passes an end-to-end test.
 
 ## What "supported" means
 
-A capability is supported only if all of the following are true. Anything else is labelled
+A capability is supported only if all conditions below are true. Anything else is labeled
 experimental, built off by default, and excluded from production claims.
 
 1. It has a documented public contract.
@@ -90,7 +90,7 @@ experimental, built off by default, and excluded from production claims.
 3. It has positive and negative automated tests.
 4. It is included in the compatibility matrix.
 5. It has a named owner.
-6. Its dependencies and licence are recorded.
+6. Its dependencies and license are recorded.
 7. It passes the applicable release platform and hardware matrix.
 8. Its failures produce stable diagnostics.
 9. It is covered by the security policy.

@@ -1,13 +1,13 @@
 # Security policy
 
-Melkor's core is an MIT-licensed C++ toolkit that inspects, converts, and normalises
+Melkor's core is an MIT-licensed C++ toolkit that inspects, converts, and normalizes
 3D Gaussian-splat assets: PLY, SPZ, and glTF/GLB. It parses files that come from other
 people. That is what it is for, and it is why the project treats parser bugs and
 resource exhaustion as security bugs rather than ordinary defects.
 
 This document states what is in scope, how to report a vulnerability, and what the
-project can honestly promise today. The reasoning behind the scope — assets, trust
-boundaries, attackers, abuse cases, and the gaps that remain — is in
+project can honestly promise today. The threat model explains the scope, trust
+boundaries, attackers, abuse cases, and remaining gaps. See
 [`docs/security/threat-model.md`](docs/security/threat-model.md).
 
 ## Supported versions
@@ -15,22 +15,22 @@ boundaries, attackers, abuse cases, and the gaps that remain — is in
 | Version | Status |
 | --- | --- |
 | `2.0.x` | **Not yet released.** It will be the first supported release line. |
-| `2.0.0-rc.*` | Pre-release. Fixes land in the next release candidate; there are no backports to an earlier RC. |
+| `2.0.0-rc.*` | Pre-release. Fixes land in the next release candidate. There are no backports to an earlier RC. |
 | `1.2.x` | End of life. It predates the v2 hardening work and will not receive security fixes. |
 | `main` | Not a support target. |
 
 **No production release of Melkor is currently supported.** The v2.0.0 hardening
-programme is in progress, and the honest position is that the project has nothing it is
-prepared to call a supported, security-maintained release. Please report vulnerabilities
-anyway: fixes land on the 2.0 development line and will ship in the first `2.0.x`
-release.
+program is in progress. The project has no release that it can call supported and
+security-maintained. Report vulnerabilities during this work. Fixes land on the 2.0
+development line and will ship in the first `2.0.x` release.
 
 When `2.0.0` ships, support attaches to the **immutable release line**, not to a branch.
-Security fixes will be published as a new patch tag on the `2.0.x` line — an immutable
-git tag with matching release evidence. The previous version of this policy told users
-to track `main`. That was wrong: a moving branch cannot be audited, cannot be pinned,
-and gives a user no way to state which code they are running. Do not track `main` for
-anything you care about.
+Security fixes will use a new patch tag on the `2.0.x` line. Each immutable Git tag has
+matching release evidence.
+
+The previous policy told users to track `main`. That advice
+was incorrect. A moving branch cannot be audited or pinned. It also does not identify
+the code that a user runs. Do not track `main` for important work.
 
 ## Report a vulnerability privately
 
@@ -38,8 +38,8 @@ Report through **[GitHub Security Advisories](https://github.com/sepahead/melkor
 ("Report a vulnerability") on this repository. This is the only channel the project
 monitors for security reports.
 
-Please do **not** open a public issue, a pull request, or a discussion for anything that
-looks exploitable, and please do not disclose it publicly before a fix is available.
+Do **not** open a public issue, pull request, or discussion for a possible exploit.
+Do not disclose it publicly before a fix is available.
 
 ## What to include
 
@@ -62,69 +62,71 @@ crash is exploitable is the maintainer's job, not the reporter's.
 
 ## Response process
 
-Melkor is maintained by one person. The following are **best-effort targets for an open
-source project, not a service-level agreement**, and no commercial support contract is
-implied by them:
+Melkor has one maintainer. The targets below are **best-effort open-source targets, not
+a service-level agreement**. They do not imply a commercial support contract.
 
-- **Acknowledgement within 3 business days** that the report has been received and read.
+- **Acknowledgment within 3 business days** that the report has been received and read.
 - **A triage update within 7 calendar days**: whether the issue is confirmed, what the
   assessed severity is, and what happens next.
 
-After triage, the project will keep you informed as a fix is developed, agree
-disclosure timing with you, and credit you in the advisory and the changelog unless you
-ask not to be. There is no bug bounty and no monetary reward.
+After triage, the project will give you fix updates. It will agree on disclosure timing
+with you. The advisory and changelog will credit you unless you decline. There is no
+bug bounty or monetary reward.
 
 If you do not hear back within those windows, the report has not been ignored on
 purpose — please follow up on the same advisory thread.
 
 ## Scope and threat model
 
-Melkor parses untrusted input by design. The following are treated as security bugs,
+Melkor parses untrusted input by design. The items below are security bugs,
 not ordinary crashes:
 
-**Memory safety in anything reachable from a file.** Out-of-bounds reads and writes,
-use-after-free, wild pointers, integer overflow that reaches an allocation, and
-undefined behaviour in the PLY, SPZ, GLB, or glTF readers, in the inspection path, in
-image decoding, or in any code a crafted asset can reach.
+**Memory safety in anything reachable from a file.** This category includes:
+
+- Out-of-bounds reads and writes
+- Use-after-free defects and wild pointers
+- Integer overflow that reaches an allocation
+- Undefined behavior in readers, inspection, or image decoding
+- Undefined behavior in any code that a crafted asset can reach
 
 **Resource exhaustion — this is now in scope.** Melkor previously excluded denial of
 service from "absurdly large but otherwise well-formed input". That exclusion has been
-reversed; reversing it is release blocker **P0-12**. A file that is perfectly valid and
-simply enormous will still exhaust a machine's memory, fill its disk, or wedge a CI
-runner, and "it parsed correctly" is no consolation. **Unbounded memory, disk, or time
-consumption driven by input — whether the input is large and well-formed, or small and
-maliciously crafted — is in scope and will be treated as a security bug.** This
-explicitly includes compression bombs, declared counts and dimensions that are
-internally consistent but ruinous, and unbounded recursion.
+reversed. This change is release blocker **P0-12**. A valid, very large file can exhaust
+memory, fill a disk, or stop a CI runner. Successful parsing does not make this result
+safe.
 
-**Escaping the named inputs and outputs.** A crafted asset causing Melkor to read a
-file the user did not name (for example through a glTF external URI), or to write
-anywhere other than the destination the user gave it (for example through a symlink at
-the output path).
+**Input-driven unbounded memory, disk, or time use is in scope as a security
+bug.** This rule applies to large valid input and small malicious input. It includes
+compression bombs, harmful declared sizes, and unbounded recursion.
+
+**Escaping the named inputs and outputs.** This category includes a crafted asset that
+causes Melkor to read an unnamed file. A glTF external URI is one example. It also
+includes a write outside the specified destination. An output-path symlink is one
+example.
 
 **Destroying data.** Any way to make a failed or interrupted operation damage,
 truncate, or delete a file that existed before it started.
 
-**Injection.** Command or path injection through the pipeline and setup scripts'
-handling of user-supplied paths, filenames, and arguments; terminal-escape or log
-injection through metadata taken from an asset and echoed into diagnostics or written
-into an output header.
+**Injection.** This category includes command or path injection through user-supplied
+paths, filenames, and arguments. It also includes terminal or log injection through
+asset metadata in diagnostics or output headers.
 
 **Supply chain.** Tampering with vendored third-party sources, or with the toolchains,
 Python packages, and model weights that the setup scripts fetch. The gap here is real
 and documented: several setup scripts still clone and pull mutable branches with no
 digest pinning (**P0-13**).
 
-**The viewer.** Escaping the static file server's root directory; anything a dropped
-asset can do to the browser session beyond rendering incorrectly.
+**The viewer.** This category includes escape from the static file server's root
+directory. It also includes any effect beyond incorrect rendering that a dropped asset
+has on the browser session.
 
 **Third-party and vendored code** is in scope when Melkor's supported CLI, viewer,
 installer, or runtime exposes it. Please report it upstream as well, but a private
 report here lets the vendored copy be patched or quarantined.
 
-### Known gaps you should know about before relying on this
+### Known gaps to review before use
 
-The threat model is candid about what is not yet done, and you should read
+The threat model explains the incomplete work. Read
 [`docs/security/threat-model.md` §8](docs/security/threat-model.md) before deploying
 Melkor against hostile input. In summary:
 
@@ -132,7 +134,7 @@ Melkor against hostile input. In summary:
   been migrated onto `OperationContext`**, so those limits are not yet enforced on the
   parsing path (P0-12, in progress).
 - **There is no coverage-guided fuzzing.** The two files named `*_fuzz.cpp` are bounded
-  randomised unit loops over valid data, not libFuzzer targets. There is no corpus and
+  randomized unit loops over valid data, not libFuzzer targets. There is no corpus and
   no continuous fuzzing (P1-12). The parsers' robustness against hostile input is
   therefore not empirically validated.
 - Several setup scripts fetch mutable branches without pinning (P0-13).
@@ -158,7 +160,7 @@ Narrowly, and with reasons:
   what we have already written down. A report that demonstrates *exploitation* of one of
   those gaps is very much in scope and welcome.
 - **Crashes in code explicitly marked retired or experimental** that no supported CLI
-  path can reach. Send them anyway if you are unsure; the maintainer will decide.
+  path can reach. Send them if you are not sure. The maintainer will decide.
 
 Denial of service is **not** on this list, and that is deliberate. See above.
 
@@ -168,26 +170,26 @@ The controls below exist in the source tree today. Each is here because of a spe
 failure it prevents.
 
 - **`include/melkor/error.hpp` — `Result<T>` and stable diagnostics.** No exceptions, no
-  bare `bool` plus a prose string. A caller must be able to distinguish malformed input
-  from a resource limit from a cancellation, because those demand different responses;
-  `ErrorCode` maps one-to-one onto documented CLI exit codes, and `Diagnostic::code` is
-  a stable machine contract, so a script never has to grep English.
+  bare `bool` plus a prose string. A caller must distinguish malformed input, resource
+  limits, and cancellation. Each condition needs a different response. `ErrorCode` maps
+  one-to-one to documented CLI exit codes. `Diagnostic::code` is a stable machine
+  contract, so a script never has to search English text.
 - **`include/melkor/checked.hpp` — checked arithmetic.** A count multiplied by a stride,
-  an offset added to a length, a 64-bit file-declared size narrowed to `size_t`: each is
-  an integer overflow, and an overflow in that position is a heap overflow, because the
-  allocation ends up smaller than the loop that fills it. Numbers that come from a file
-  must reach an allocation only through these functions. *Note: the substrate is landed
-  and tested; the readers are not yet migrated onto it (P0-12).*
+  an offset added to a length, or a 64-bit file size narrowed to `size_t` can overflow. This
+  overflow can cause a heap overflow. The allocation becomes smaller than the loop that
+  fills it. File-supplied numbers must reach allocations only through these functions.
+  *Note: The substrate exists and has tests. The readers do not use it yet (P0-12).*
 - **`include/melkor/limits.hpp` and `include/melkor/budget.hpp` — limits and budgets.**
-  Named `web`, `desktop`, and `server` profiles, because the correct limit genuinely
-  differs by context; a thread-safe `Budget` that must be charged *before* an allocation,
-  since accounting for memory you already allocated does not prevent the OOM; hard
-  ceilings no custom profile may exceed; a decompression-ratio guard that refuses a bomb
-  by its *shape* before inflating any of it, because an absolute cap alone still lets a
-  1 KiB file expand to the whole cap; and cooperative cancellation checked inside long
-  loops rather than once per file. **There is deliberately no "disable all limits"
-  switch:** a profile may raise a limit, but checked arithmetic, structural limits, path
-  containment, and output integrity stay on regardless.
+  The named `web`, `desktop`, and `server` profiles give each context suitable limits.
+  A thread-safe `Budget` charges memory *before* allocation. Accounting after allocation
+  cannot prevent an out-of-memory failure. Hard ceilings restrict each custom profile.
+
+  A ratio guard rejects a compression bomb before inflation. Without this guard, a 1 KiB file can
+  expand to the absolute cap. Cooperative cancellation checks run inside long loops.
+
+  **There is deliberately no "disable all limits" switch.** A profile can raise a
+  limit. Checked arithmetic, structural limits, path containment, and output integrity
+  always stay active.
 - **`include/melkor/io/atomic_writer.hpp` — atomic output.** A failed write must never
   damage the file that was already there. Output is written to an unpredictably-named
   `O_EXCL` temporary in the *same directory* (a `/tmp` temporary would make `rename()`
@@ -195,19 +197,19 @@ failure it prevents.
   opened until commit, so any failure leaves it exactly as it was. This fixes release
   blocker **P0-08**, where a failed SPZ encode truncated and then deleted the user's
   existing file.
-- **Path containment.** glTF external URIs are canonicalised and then required to stay
-  within the input asset's directory (`src/safe_gltf_fs.hpp`); the viewer's server
-  resolves before it checks containment, because checking a raw URL prefix first lets an
-  encoded slash walk out.
+- **Path containment.** glTF external URIs are canonicalized and then required to stay
+  within the input asset's directory (`src/safe_gltf_fs.hpp`). The viewer's server
+  resolves a path before it checks containment. Checking a raw URL prefix first lets an
+  encoded slash escape.
 - **Output hygiene.** Metadata taken from an asset is escaped before it reaches a
-  terminal, including C1 control characters encoded as UTF-8 (`src/safe_text.hpp`), and
-  diagnostics print a basename by default so that a report pasted into a public issue
-  does not leak a home directory.
+  terminal. This rule includes C1 control characters encoded as UTF-8
+  (`src/safe_text.hpp`). Diagnostics print a basename by default. Thus, a public report
+  does not expose a home directory.
 - **Dependency pinning.** `third_party/manifest.lock.json` pins every vendored
   dependency by upstream commit SHA and by a content digest over the files that actually
-  get compiled; local patches must be declared under `third_party/patches/` with a
-  rationale and a digest, because an undocumented fork is indistinguishable from a
-  supply-chain compromise. CI enforces this with `tools/verify_third_party.py --check`.
+  get compiled. Declare each local patch under `third_party/patches/` with a rationale
+  and digest. An undocumented fork is indistinguishable from a supply-chain compromise.
+  CI enforces this rule with `tools/verify_third_party.py --check`.
 - **CI.** Every push builds with `-Werror` and runs the test suite under AddressSanitizer
   and UndefinedBehaviorSanitizer. Run a sanitizer build locally before touching parser
   code.
@@ -215,10 +217,10 @@ failure it prevents.
 ### Advice for integrators
 
 Treat every splat or mesh file from an untrusted source as attacker-controlled. Melkor
-reduces the chance that such a file compromises the process; it does not contain one
-that does. Run conversions under the least privilege your platform offers, in a
-directory that contains nothing else you care about, and — until P0-12 closes — with an
-external memory and time limit imposed by the OS.
+reduces the chance that such a file compromises the process. It does not isolate a
+compromised process. Run conversions with the least available privilege. Use a
+directory that contains no important files. Until P0-12 closes, use OS memory and time
+limits.
 
 ## Verify official releases
 
@@ -227,8 +229,8 @@ Releases are published as immutable git tags with release evidence built by
 every file in the source release and an SLSA-style provenance statement.
 
 **The evidence is unsigned, and it is not by itself an authenticity proof.** The script
-says so in its own header. There are currently no signed binaries, no notarised desktop
-bundles, and no cryptographic attestations; producing them is release blocker **P0-18**.
+says so in its own header. There are currently no signed binaries, notarized desktop
+bundles, or cryptographic attestations. Producing them is release blocker **P0-18**.
 Until that closes, verification means:
 
 1. Fetch the release by its **tag**, never by a branch, and record the commit SHA.
@@ -240,18 +242,17 @@ Until that closes, verification means:
 When signing and attestation land, this section will describe how to verify a signature,
 and will say which key.
 
-## Safe harbour
+## Safe harbor
 
 The project's intent is to treat good-faith security research as a contribution and not
-as an attack, and to work with reporters rather than against them. A formal safe-harbour
-statement — one that actually tells you what you are authorised to do and what
-protections you have — carries legal consequences, and it will be **published here only
-after legal review**.
+as an attack. The project also intends to work with reporters. A formal safe-harbor
+statement defines permitted work and protections. Such a statement has legal
+consequences. The project will publish one here **only after legal review**.
 
-Until that review is complete, **this document does not grant a safe harbour**, and no
-paragraph in it should be read as legal authorisation for any particular activity. What
-the project can commit to in the meantime is straightforward: a report made privately
-through the advisory channel above, against your own copy of Melkor and your own data,
-will be received in good faith, and the maintainer will not seek to have you penalised
-for making it. If you need more certainty than that before you begin, please ask first
-through the advisory channel, and wait for an answer.
+Until that review is complete, **this document does not grant a safe harbor**. No
+paragraph grants authorization for an activity. The project makes one commitment in
+the meantime.
+
+The project will receive in good faith a private report about your own Melkor copy and
+data. The maintainer will not seek a penalty for the report. If you need more
+certainty, ask through the advisory channel before you start. Wait for an answer.

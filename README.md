@@ -42,7 +42,7 @@
 
 Melkor combines a deterministic native CLI with reviewed reconstruction
 adapters and an offline-capable web viewer. The CLI converts GLB/glTF meshes
-and 3DGS assets, validates files without initializing a GPU, and performs
+and 3DGS assets, validates files without initializing a GPU, and does
 geometry-based scene completion. Photo training and neural reconstruction are
 handled by explicit external pipelines rather than being presented as native
 CLI features.
@@ -52,17 +52,17 @@ CLI features.
 | Capability | Status | Interface |
 |---|---|---|
 | Mesh → splats | Maintained native path | `melkor INPUT.glb OUTPUT.ply` (`--basic` or `--enhanced`) |
-| 3DGS PLY ↔ SPZ | Maintained native path | Reads SPZ v1–v3; writes SPZ v3 |
+| 3DGS PLY ↔ SPZ | Maintained native path | Reads SPZ v1–v3. Writes SPZ v3. |
 | Asset validation | Maintained native path | `melkor inspect INPUT [--json] [--strict]` |
 | Scene completion | Maintained native path | Deterministic densification with `--fill-holes` |
 | Training from photos | External tool integrations | COLMAP/GLOMAP plus OpenSplat, gsplat, or LichtFeld-Studio |
-| Feedforward reconstruction | Reviewed bridge/catalog | DA3 bridge; other adapters are license- and platform-dependent |
-| Web viewing | Maintained viewer | PLY, SPZ, SPLAT, KSPLAT, and SOG/ZIP; 2 GiB local-file ceiling, with the practical limit set by browser/device memory |
-| Desktop viewing | Developer build | Optional Tauri shell; local bundles are unsigned |
+| Feedforward reconstruction | Reviewed bridge/catalog | DA3 bridge. Other adapters are license- and platform-dependent. |
+| Web viewing | Maintained viewer | PLY, SPZ, SPLAT, KSPLAT, and SOG/ZIP. The local file limit is 2 GiB. Browser and device memory can set a lower practical limit. |
+| Desktop viewing | Developer build | Optional Tauri shell. Local bundles are unsigned. |
 
 ### Highlights
 
-- **Honest conversion modes.** Basic is fast vertex-to-splat conversion;
+- **Honest conversion modes.** Basic is fast vertex-to-splat conversion.
   Enhanced adds k-NN adaptive scale and surface alignment. Both operate on
   mesh geometry. Trained fitting and neural reconstruction use dedicated
   pipelines.
@@ -70,11 +70,11 @@ CLI features.
   bounds, field provenance, and numeric hazards without changing the source or
   initializing a GPU. The JSON schema is versioned as `melkor.inspect.v1`.
 - **Explicit format behavior.** Melkor currently reads SPZ v1–v3 and writes v3. Upstream
-  SPZ has since moved to file-format v4; v4 support is a `v2.0.0` release blocker
-  ([P0-09](docs/audit/production-blockers.md)) and is not claimed until it is tested
-  against the pinned upstream implementation. SPZ is a quantized, compressed
+  SPZ has since moved to file-format v4. SPZ v4 support is a `v2.0.0` release blocker
+  ([P0-09](docs/audit/production-blockers.md)). Melkor will claim support after tests
+  against the pinned upstream implementation pass. SPZ is a quantized, compressed
   representation, so a conversion into it is lossy by construction. Melkor does not
-  currently publish a measured compression ratio; any such figure will be stated only
+  currently publish a measured compression ratio. Any such figure will be stated only
   with the dataset, version, and configuration that produced it.
 - **Geometry-based completion.** The advancing-front densifier bridges
   interior occlusion holes and sparse regions without a learned prior, while
@@ -88,14 +88,14 @@ CLI features.
 
 Training integrations currently cover single-device OpenSplat, true
 distributed data-parallel training with gsplat CUDA, gsplat-mps on Apple
-Silicon, and LichtFeld-Studio on Linux/CUDA. The feedforward catalog is dated
-and license-aware: some systems are evaluation adapters rather than ordinary
-image-folder reconstruction tools, and some checkpoints have non-commercial
-or unspecified terms. See [the feedforward integration catalog](docs/FEEDFORWARD_SOTA.md).
+Silicon, and LichtFeld-Studio on Linux/CUDA. The feedforward catalog includes a
+review date and license information. Some systems are evaluation adapters, not
+image-folder reconstruction tools. Some checkpoints have non-commercial or
+unspecified terms. See [the feedforward integration catalog](docs/FEEDFORWARD_SOTA.md).
 
 Spark exposes `.RAD`/LOD primitives that Melkor can build on, but `.RAD` local
 opening and LOD authoring are not current Melkor features. Likewise,
-`setup_streaming.sh` checks out and scaffolds reviewed upstream SLAM/4D tools;
+`setup_streaming.sh` checks out and scaffolds reviewed upstream SLAM/4D tools.
 each tool still needs its own Linux/CUDA environment and calibrated dataset.
 See [Streaming and 4D](docs/STREAMING.md).
 
@@ -124,9 +124,9 @@ and pinned in `third_party/manifest.lock.json`.
 
 External reconstruction and training systems remain under **their own terms**, which are not
 Melkor's terms. OpenSplat is AGPL-3.0-only, and several model checkpoints are research-only,
-non-commercial, or publish no clear terms at all. Melkor invokes those programs; it does not
+non-commercial, or publish no clear terms at all. Melkor invokes those programs. It does not
 ship them, and it cannot grant you rights to them. Review
-[Third-party licences](THIRD_PARTY_LICENSES.md) and [External adapters](docs/adapters/index.md)
+[Third-party licenses](THIRD_PARTY_LICENSES.md) and [External adapters](docs/adapters/index.md)
 before redistribution or model use.
 
 ## Quick Start
@@ -179,7 +179,7 @@ reconstruction walkthrough.
 ./build/melkor scene.spz scene.ply                 # SPZ v1-v3 → 3DGS PLY
 ```
 
-Basic and Enhanced convert existing mesh geometry; neither trains a scene from
+Basic and Enhanced convert existing mesh geometry. Neither trains a scene from
 photographs. The retired native `--fit` and `--feedforward` facades fail closed
 instead of implying neural behavior they do not implement.
 
@@ -229,7 +229,7 @@ device:
 ```
 
 The wrapper's `data-parallel` mode runs complete replicas and keeps the first
-selected GPU's output; `memory-split` runs shorter independent rotations and
+selected GPU's output. `memory-split` runs shorter independent rotations and
 keeps the last. Neither mode distributes one training job or shards a model.
 For actual multi-GPU distributed training, use gsplat CUDA:
 
@@ -262,7 +262,7 @@ bun run serve
 
 Use **Open local splat** or drop a PLY/SPZ/SPLAT/KSPLAT/SOG/ZIP file onto the
 viewer. Local bytes remain in the browser/webview. Bundled scenes synchronize
-to `?scene=<id>` for shareable links; opening a local file removes that query
+to `?scene=<id>` for shareable links. Opening a local file removes that query
 parameter so a private filename does not enter the URL.
 
 The full render-test setup adds tens of MiB of ignored external developer
@@ -310,11 +310,11 @@ differ only within documented floating-point tolerances.
 | Platform | Backend | Enable | Qualification |
 |---|---|---|---|
 | macOS 13+ (Apple Silicon) | Metal | Default on macOS | Runtime parity-tested in hosted CI |
-| Linux + NVIDIA | CUDA | `-DMELKOR_USE_CUDA=ON` | Supported build path; compile-gated in hosted CI, with representative hardware runtime qualification still pending |
-| Any supported host | CPU | Automatic fallback, or `--no-gpu` | Reference implementation; parity-tested where hardware permits, with normal float-rounding differences |
+| Linux + NVIDIA | CUDA | `-DMELKOR_USE_CUDA=ON` | Supported build path. Hosted CI compiles it. Representative hardware runtime qualification is pending. |
+| Any supported host | CPU | Automatic fallback, or `--no-gpu` | Reference implementation. It has parity tests where hardware permits, with normal float-rounding differences. |
 
 `melkor --info` reports the active backend and device. Linux defaults to CPU
-even when a CUDA Toolkit is installed; CUDA must be enabled explicitly.
+even when a CUDA Toolkit is installed. CUDA must be enabled explicitly.
 
 Useful build topologies:
 
@@ -341,16 +341,27 @@ cmake --build build-cuda --parallel
 
 ## Testing and Release Evidence
 
-The native test suites cover hostile input and format round trips,
-deterministic inspection, scene-graph transforms, compute-provider parity,
-scene completion, differentiable-renderer gradients, strict CLI parsing, and
-the DA3 extraction path.
+The native test suites cover:
 
-Hosted gates include warning-as-error native builds, ASan+UBSan, CPU and Metal
-runtime suites, a CUDA compile check, Swift checks, Python and shell tests,
-Playwright/SwiftShader rendering, Rust/Tauri policy checks, dependency review,
-full-history secret scanning, and deterministic release evidence. Hosted CUDA
-is compile-only; it is not presented as a runtime hardware qualification.
+- Hostile input and format round trips
+- Deterministic inspection and scene-graph transforms
+- Compute-provider parity and scene completion
+- Differentiable-renderer gradients
+- Strict CLI parsing and the DA3 extraction path
+
+Hosted gates include:
+
+- Warning-as-error native builds
+- ASan and UBSan checks
+- CPU and Metal runtime suites
+- A CUDA compile check
+- Swift, Python, and shell tests
+- Playwright and SwiftShader rendering
+- Rust and Tauri policy checks
+- Dependency review and full-history secret scanning
+- Deterministic release evidence
+
+Hosted CUDA is compile-only. It is not a runtime hardware qualification.
 
 The exact release procedure, evidence limitations, signing requirements, and
 remaining production gates are documented in [Release and trust](docs/RELEASE.md).
@@ -358,16 +369,16 @@ remaining production gates are documented in [Release and trust](docs/RELEASE.md
 ## Repository Footprint
 
 The main source tree intentionally tracks no GLB, glTF, PLY, SPZ, SPLAT,
-KSPLAT, SOG, or ZIP scene fixtures. Large scenes, downloaded models, viewer
-developer fixtures, generated builds, and training environments are ignored
-and acquired explicitly when a workflow needs them. The README logo is a
-small, self-contained local SVG extracted from the canonical Melkor mark on
-the [sepahead profile](https://github.com/sepahead/); it is not hotlinked and
-adds no cross-repository asset request.
+KSPLAT, SOG, or ZIP scene fixtures. Workflows get large scenes, downloaded
+models, viewer developer fixtures, builds, and training environments when
+necessary. The README logo is a small, self-contained local SVG. It comes from
+the canonical Melkor mark on the
+[sepahead profile](https://github.com/sepahead/). It is not hotlinked and does
+not make a cross-repository asset request.
 
 This keeps fresh clones and ordinary native builds independent of optional
 large assets. `viewer/fetch-assets.sh --runtime-only` is the lightweight viewer
-path; the full fetch is reserved for render-test fixtures.
+path. The full fetch is reserved for render-test fixtures.
 
 ## Documentation
 
@@ -408,11 +419,17 @@ melkor/
 ```
 
 External reconstruction and training systems are **not** vendored here. They are separate
-programs, reached through pinned adapter manifests, and their licences are not Melkor's
-licence. The AGPL OpenSplat snapshot, the Depth Anything 3 CoreML port, and the Apple
-`ml-sharp` snapshot were removed from the MIT core on 2026-07-14; their attribution and the
-reasoning are in [External adapters](docs/adapters/index.md), and the tree that contained
-them is preserved under the tag `archive/pre-v2-research-bundle-20260714`.
+programs that use pinned adapter manifests. Their licenses are not the Melkor license.
+
+The project removed three snapshots from the MIT core on 2026-07-14:
+
+- The AGPL OpenSplat snapshot
+- The Depth Anything 3 CoreML port
+- The Apple `ml-sharp` snapshot
+
+[External adapters](docs/adapters/index.md) explains their attribution and
+the reason for removal. The tag `archive/pre-v2-research-bundle-20260714`
+preserves the old tree.
 
 ## Contributing
 
@@ -422,7 +439,7 @@ security issues through [SECURITY.md](SECURITY.md).
 
 ## License
 
-The core Melkor code is MIT-licensed; see [LICENSE](LICENSE). Bundled and
+The core Melkor code is MIT-licensed. See [LICENSE](LICENSE). Bundled and
 optional third-party components retain their own licenses and model terms. See
 [NOTICE](NOTICE) and [THIRD_PARTY_LICENSES.md](THIRD_PARTY_LICENSES.md) before
 redistributing the repository or using optional model weights.
