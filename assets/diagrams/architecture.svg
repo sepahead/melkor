@@ -1,0 +1,102 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 960 560" role="img" aria-labelledby="t d">
+  <title id="t">Melkor conversion architecture</title>
+  <desc id="d">Format readers decode PLY, SPZ, and GLB into the canonical SplatData model. Writers encode SplatData back to PLY, SPZ, and GLB. Budget limits, loss policy gates, and an atomic writer guard every conversion.</desc>
+  <style>
+    text { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; fill: #c9d1d9; }
+    .h1 { font-size: 14px; fill: #e6edf3; letter-spacing: 2.5px; }
+    .h2 { font-size: 11px; fill: #8b949e; letter-spacing: 2px; }
+    .lane { font-size: 10px; fill: #8b949e; letter-spacing: 2.5px; }
+    .node { font-size: 12px; fill: #e6edf3; }
+    .sub { font-size: 10px; fill: #8b949e; }
+    .chip { font-size: 10px; }
+    .flow { stroke: #3d444d; stroke-width: 1.5; fill: none; }
+    .box { fill: #161b22; stroke-width: 1.25; rx: 8; }
+  </style>
+  <defs>
+    <marker id="arr" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0 0 L10 5 L0 10 z" fill="#3d444d"/>
+    </marker>
+    <radialGradient id="hub" cx="50%" cy="40%" r="75%">
+      <stop offset="0%" stop-color="#1c2128"/>
+      <stop offset="100%" stop-color="#10151b"/>
+    </radialGradient>
+  </defs>
+
+  <rect x="0.5" y="0.5" width="959" height="559" rx="16" fill="#0d1117" stroke="#2b333d"/>
+
+  <text class="h1" x="40" y="44">MELKOR &#183; CONVERSION ARCHITECTURE</text>
+  <text class="h2" x="40" y="64">EVERY PATH PASSES THROUGH ONE VALIDATED CANONICAL MODEL</text>
+  <circle cx="906" cy="40" r="5" fill="#fb923c"/>
+  <circle cx="888" cy="40" r="5" fill="#34d399"/>
+  <circle cx="870" cy="40" r="5" fill="#a78bfa"/>
+
+  <text class="lane" x="40" y="102">READ</text>
+  <line x1="86" y1="98" x2="264" y2="98" stroke="#21262d"/>
+  <text class="lane" x="392" y="102">CANONICAL CORE</text>
+  <line x1="524" y1="98" x2="568" y2="98" stroke="#21262d"/>
+  <text class="lane" x="696" y="102">WRITE</text>
+  <line x1="748" y1="98" x2="920" y2="98" stroke="#21262d"/>
+
+  <g>
+    <rect class="box" x="40" y="122" width="224" height="64" stroke="#fb923c"/>
+    <text class="node" x="60" y="149">PLY</text>
+    <text class="sub" x="60" y="169">PlyReader &#183; header-driven</text>
+    <rect class="box" x="40" y="202" width="224" height="64" stroke="#34d399"/>
+    <text class="node" x="60" y="229">SPZ</text>
+    <text class="sub" x="60" y="249">SpzDecoder &#183; budget pre-decode</text>
+    <rect class="box" x="40" y="282" width="224" height="64" stroke="#a78bfa"/>
+    <text class="node" x="60" y="309">GLB / glTF</text>
+    <text class="sub" x="60" y="329">gltf::read_glb &#183; KHR splatting</text>
+  </g>
+
+  <path class="flow" d="M264 154 C 316 154, 320 200, 366 220" marker-end="url(#arr)"/>
+  <path class="flow" d="M264 234 L 366 250" marker-end="url(#arr)"/>
+  <path class="flow" d="M264 314 C 316 314, 320 300, 366 280" marker-end="url(#arr)"/>
+
+  <g>
+    <rect x="370" y="140" width="220" height="226" rx="12" fill="url(#hub)" stroke="#fb923c" stroke-width="1.5"/>
+    <text class="node" x="392" y="172" fill="#fdba74">SplatData</text>
+    <text class="sub" x="392" y="190">validated structure of arrays</text>
+    <line x1="392" y1="204" x2="568" y2="204" stroke="#21262d"/>
+    <text class="sub" x="392" y="226">positions &#183; finite, meters</text>
+    <text class="sub" x="392" y="244">scales &#183; linear, positive</text>
+    <text class="sub" x="392" y="262">rotations &#183; unit quat, xyzw</text>
+    <text class="sub" x="392" y="280">opacities &#183; linear [0, 1]</text>
+    <text class="sub" x="392" y="298">SH &#183; degree 0..4, R/G/B</text>
+    <line x1="392" y1="314" x2="568" y2="314" stroke="#21262d"/>
+    <text class="sub" x="392" y="336" fill="#34d399">create() validates every field</text>
+    <text class="sub" x="392" y="354" fill="#34d399">EditTransaction commits atomically</text>
+  </g>
+
+  <path class="flow" d="M590 220 C 636 200, 640 154, 692 154" marker-end="url(#arr)"/>
+  <path class="flow" d="M590 250 L 692 234" marker-end="url(#arr)"/>
+  <path class="flow" d="M590 280 C 636 300, 640 314, 692 314" marker-end="url(#arr)"/>
+
+  <g>
+    <rect class="box" x="696" y="122" width="224" height="64" stroke="#fb923c"/>
+    <text class="node" x="716" y="149">PLY</text>
+    <text class="sub" x="716" y="169">PlyWriter &#183; binary or ascii</text>
+    <rect class="box" x="696" y="202" width="224" height="64" stroke="#34d399"/>
+    <text class="node" x="716" y="229">SPZ</text>
+    <text class="sub" x="716" y="249">SpzEncoder &#183; SH degree preserved</text>
+    <rect class="box" x="696" y="282" width="224" height="64" stroke="#a78bfa"/>
+    <text class="node" x="716" y="309">GLB</text>
+    <text class="sub" x="716" y="329">gltf::write_glb &#183; loss report</text>
+  </g>
+
+  <g>
+    <rect x="40" y="398" width="880" height="118" rx="12" fill="#10151b" stroke="#2b333d"/>
+    <text class="h2" x="64" y="428">GUARDRAILS ON EVERY CONVERSION</text>
+    <rect x="64" y="444" width="256" height="52" rx="8" fill="#161b22" stroke="#fbbf24"/>
+    <text class="chip" x="80" y="466" fill="#fbbf24">BUDGET + LIMITS PROFILE</text>
+    <text class="sub" x="80" y="484">web / desktop / server, charged first</text>
+    <rect x="344" y="444" width="256" height="52" rx="8" fill="#161b22" stroke="#fb7185"/>
+    <text class="chip" x="360" y="466" fill="#fb7185">LOSS POLICY GATE</text>
+    <text class="sub" x="360" y="484">severe loss blocks unless --allow-loss</text>
+    <rect x="624" y="444" width="272" height="52" rx="8" fill="#161b22" stroke="#60a5fa"/>
+    <text class="chip" x="640" y="466" fill="#60a5fa">ATOMIC WRITER</text>
+    <text class="sub" x="640" y="484">destination survives every failure</text>
+  </g>
+
+  <text class="sub" x="40" y="542">source: src/convert_command.cpp &#183; include/melkor/scene.hpp &#183; version 2.0.0-dev</text>
+</svg>

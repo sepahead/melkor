@@ -53,6 +53,8 @@ still WP06 work. The metadata API does not claim that current flat adapters pres
 
 ## Format boundaries
 
+![Format profile matrix. Rows show the five format profiles with their status, maximum SH degree, quaternion convention, and scale and opacity encodings.](../../assets/diagrams/format-matrix.svg)
+
 - **Graphdeco-style PLY:** scale is stored as log scale, opacity as logit, quaternion as WXYZ, and
   higher SH properties are channel-major. The adapter applies `exp`/`sigmoid` once, reorders to
   XYZW, and transposes to canonical coefficient/RGB interleave on read. Write does the exact

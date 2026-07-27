@@ -1,0 +1,67 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 960 500" role="img" aria-labelledby="t d">
+  <title id="t">Melkor compute backend registry</title>
+  <desc id="d">The backend registry selects Metal first, then CUDA, then CPU. The CPU backend is the semantic reference. A requested backend never falls back silently. All providers implement the same operation set.</desc>
+  <style>
+    text { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; fill: #c9d1d9; }
+    .h1 { font-size: 14px; fill: #e6edf3; letter-spacing: 2.5px; }
+    .h2 { font-size: 11px; fill: #8b949e; letter-spacing: 2px; }
+    .node { font-size: 13px; fill: #e6edf3; }
+    .sub { font-size: 10px; fill: #8b949e; }
+    .op { font-size: 11px; fill: #c9d1d9; }
+    .flow { stroke: #3d444d; stroke-width: 1.5; fill: none; }
+  </style>
+  <defs>
+    <marker id="arr2" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0 0 L10 5 L0 10 z" fill="#3d444d"/>
+    </marker>
+  </defs>
+
+  <rect x="0.5" y="0.5" width="959" height="499" rx="16" fill="#0d1117" stroke="#2b333d"/>
+
+  <text class="h1" x="40" y="44">MELKOR &#183; COMPUTE BACKEND REGISTRY</text>
+  <text class="h2" x="40" y="64">EXPLICIT REGISTRATION &#183; DETERMINISTIC SELECTION &#183; NO SILENT FALLBACK</text>
+
+  <g>
+    <rect x="40" y="100" width="260" height="88" rx="10" fill="#161b22" stroke="#fbbf24" stroke-width="1.25"/>
+    <text class="node" x="64" y="132">register_builtin_backends()</text>
+    <text class="sub" x="64" y="152">explicit call at startup, not a</text>
+    <text class="sub" x="64" y="168">static initializer</text>
+  </g>
+
+  <path class="flow" d="M300 144 L 356 144" marker-end="url(#arr2)"/>
+
+  <g>
+    <rect x="360" y="100" width="240" height="88" rx="10" fill="#161b22" stroke="#fb923c" stroke-width="1.25"/>
+    <text class="node" x="384" y="132">BackendRegistry</text>
+    <text class="sub" x="384" y="152">create_best() probes in order</text>
+    <text class="sub" x="384" y="168">create(kind) never falls back</text>
+  </g>
+
+  <path class="flow" d="M600 122 C 648 122, 652 116, 692 116" marker-end="url(#arr2)"/>
+  <path class="flow" d="M600 144 L 692 188" marker-end="url(#arr2)"/>
+  <path class="flow" d="M600 166 C 648 200, 652 258, 692 258" marker-end="url(#arr2)"/>
+
+  <g>
+    <rect x="696" y="92" width="224" height="56" rx="10" fill="#161b22" stroke="#a78bfa" stroke-width="1.25"/>
+    <text class="node" x="716" y="116">1 &#183; METAL</text>
+    <text class="sub" x="716" y="136">MELKOR_HAS_METAL &#183; src/metal/</text>
+
+    <rect x="696" y="162" width="224" height="56" rx="10" fill="#161b22" stroke="#34d399" stroke-width="1.25"/>
+    <text class="node" x="716" y="186">2 &#183; CUDA</text>
+    <text class="sub" x="716" y="206">MELKOR_HAS_CUDA &#183; src/cuda/</text>
+
+    <rect x="696" y="232" width="224" height="56" rx="10" fill="#161b22" stroke="#60a5fa" stroke-width="1.25"/>
+    <text class="node" x="716" y="256">3 &#183; CPU</text>
+    <text class="sub" x="716" y="276">always available &#183; the reference</text>
+  </g>
+
+  <g>
+    <rect x="40" y="316" width="880" height="128" rx="12" fill="#10151b" stroke="#2b333d"/>
+    <text class="h2" x="64" y="346">SHARED OPERATION SET &#183; CPU RESULT IS THE CONTRACT, GPU DISAGREEMENT IS A GPU BUG</text>
+    <text class="op" x="64" y="376">transformCoordinates &#183; normalizeQuaternions &#183; scalePositions &#183; rgbToShDc</text>
+    <text class="op" x="64" y="398">opacityToLogit &#183; sortByDistance &#183; computeCovariances &#183; processCloud</text>
+    <text class="op" x="64" y="420">knnStatsGrid &#183; filterCandidatesGrid</text>
+  </g>
+
+  <text class="sub" x="40" y="476">source: include/melkor/backend_registry.hpp &#183; src/runtime/backend_registration.cpp</text>
+</svg>

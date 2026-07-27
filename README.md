@@ -261,6 +261,12 @@ player, and Tauri developer builds.
 
 ## Architecture
 
+Every conversion reads into one validated canonical model and writes from it:
+
+![Conversion architecture. PLY, SPZ, and GLB readers feed the validated SplatData model. Writers produce PLY, SPZ, and GLB from it. Budget, loss policy, and atomic writes guard every conversion.](assets/diagrams/architecture.svg)
+
+The full reconstruction ecosystem around the CLI:
+
 ```mermaid
 flowchart LR
     subgraph Inputs
@@ -284,6 +290,8 @@ single host-built uniform grid, so each backend walks the same cells and may
 differ only within documented floating-point tolerances.
 
 ## Compute Backends
+
+![Compute backend registry. Startup registers backends explicitly. Selection probes Metal, then CUDA, then CPU. All backends share one operation set, and the CPU result is the contract.](assets/diagrams/backend-registry.svg)
 
 | Platform | Backend | Enable | Qualification |
 |---|---|---|---|
@@ -318,6 +326,8 @@ cmake --build build-cuda --parallel
 ```
 
 ## Testing and Release Evidence
+
+![Verification surface. A bar chart groups the registered tests by area. Panels list the four fuzz targets and the exit-code contract.](assets/diagrams/verification.svg)
 
 The native test suites cover:
 

@@ -15,6 +15,8 @@ Choose a named profile with `--limits-profile web|desktop|server`. The numbers b
 defaults, not scientific facts. The project will compare them with benchmark data before the
 final release. Each change needs a changelog entry because it affects accepted inputs.
 
+![Resource limit profiles. Bars compare the web, desktop, and server values for splats, input bytes, memory, temporary bytes, and decompression ratio. A panel lists the hard ceilings.](../../assets/diagrams/limits-profiles.svg)
+
 | Limit | web | desktop | server |
 |---|---:|---:|---:|
 | Input bytes | 2 GiB | 4 GiB | 32 GiB |

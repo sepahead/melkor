@@ -9,6 +9,8 @@ Every conversion therefore produces a **loss report** (`include/melkor/format/lo
 serialized per `schemas/loss-report-v1.schema.json`), including a zero-loss report, so automation
 never has to infer whether reporting was omitted.
 
+![Conversion loss policy. Four severity cards show info and warning continue, severe gates on approval, and fatal always stops. A panel lists the 20 stable loss codes.](../../assets/diagrams/loss-policy.svg)
+
 ## Severities and the policy
 
 | Severity | Meaning | Behavior |

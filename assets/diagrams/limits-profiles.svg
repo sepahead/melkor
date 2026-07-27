@@ -1,0 +1,90 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 960 620" role="img" aria-labelledby="t d">
+  <title id="t">Melkor resource limit profiles</title>
+  <desc id="d">Bar chart comparing the web, desktop, and server limits profiles across five limits: max splats, max input bytes, max memory bytes, max temp bytes, and max decompression ratio. Bars are scaled within each row; exact values are printed on every bar.</desc>
+  <style>
+    text { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; fill: #c9d1d9; }
+    .h1 { font-size: 14px; fill: #e6edf3; letter-spacing: 2.5px; }
+    .h2 { font-size: 11px; fill: #8b949e; letter-spacing: 2px; }
+    .row { font-size: 12px; fill: #e6edf3; }
+    .sub { font-size: 10px; fill: #8b949e; }
+    .val { font-size: 10px; fill: #c9d1d9; }
+    .leg { font-size: 10px; letter-spacing: 1.5px; }
+  </style>
+
+  <rect x="0.5" y="0.5" width="959" height="619" rx="16" fill="#0d1117" stroke="#2b333d"/>
+
+  <text class="h1" x="40" y="44">MELKOR &#183; RESOURCE LIMIT PROFILES</text>
+  <text class="h2" x="40" y="64">UNTRUSTED INPUT IS REFUSED BY POLICY, NOT BY BAD_ALLOC</text>
+
+  <g class="leg">
+    <rect x="660" y="30" width="10" height="10" rx="2" fill="#60a5fa"/>
+    <text x="676" y="39" fill="#60a5fa">WEB</text>
+    <rect x="730" y="30" width="10" height="10" rx="2" fill="#fb923c"/>
+    <text x="746" y="39" fill="#fb923c">DESKTOP</text>
+    <rect x="838" y="30" width="10" height="10" rx="2" fill="#34d399"/>
+    <text x="854" y="39" fill="#34d399">SERVER</text>
+  </g>
+
+  <g>
+    <text class="row" x="40" y="116">max_splats</text>
+    <rect x="280" y="102" width="32" height="12" rx="3" fill="#60a5fa"/>
+    <text class="val" x="320" y="112">8,000,000</text>
+    <rect x="280" y="118" width="100" height="12" rx="3" fill="#fb923c"/>
+    <text class="val" x="388" y="128">25,000,000</text>
+    <rect x="280" y="134" width="600" height="12" rx="3" fill="#34d399"/>
+    <text class="val" x="772" y="144" fill="#0d1117" font-weight="bold">150,000,000</text>
+  </g>
+  <line x1="40" y1="164" x2="920" y2="164" stroke="#161b22"/>
+
+  <g>
+    <text class="row" x="40" y="196">max_input_bytes</text>
+    <rect x="280" y="182" width="38" height="12" rx="3" fill="#60a5fa"/>
+    <text class="val" x="326" y="192">2 GiB</text>
+    <rect x="280" y="198" width="75" height="12" rx="3" fill="#fb923c"/>
+    <text class="val" x="363" y="208">4 GiB</text>
+    <rect x="280" y="214" width="600" height="12" rx="3" fill="#34d399"/>
+    <text class="val" x="830" y="224" fill="#0d1117" font-weight="bold">32 GiB</text>
+  </g>
+  <line x1="40" y1="244" x2="920" y2="244" stroke="#161b22"/>
+
+  <g>
+    <text class="row" x="40" y="276">max_memory_bytes</text>
+    <rect x="280" y="262" width="38" height="12" rx="3" fill="#60a5fa"/>
+    <text class="val" x="326" y="272">1 GiB</text>
+    <rect x="280" y="278" width="150" height="12" rx="3" fill="#fb923c"/>
+    <text class="val" x="438" y="288">4 GiB</text>
+    <rect x="280" y="294" width="600" height="12" rx="3" fill="#34d399"/>
+    <text class="val" x="830" y="304" fill="#0d1117" font-weight="bold">16 GiB</text>
+  </g>
+  <line x1="40" y1="324" x2="920" y2="324" stroke="#161b22"/>
+
+  <g>
+    <text class="row" x="40" y="356">max_temp_bytes</text>
+    <rect x="280" y="342" width="10" height="12" rx="3" fill="#60a5fa"/>
+    <text class="val" x="298" y="352">2 GiB</text>
+    <rect x="280" y="358" width="75" height="12" rx="3" fill="#fb923c"/>
+    <text class="val" x="363" y="368">16 GiB</text>
+    <rect x="280" y="374" width="600" height="12" rx="3" fill="#34d399"/>
+    <text class="val" x="816" y="384" fill="#0d1117" font-weight="bold">128 GiB</text>
+  </g>
+  <line x1="40" y1="404" x2="920" y2="404" stroke="#161b22"/>
+
+  <g>
+    <text class="row" x="40" y="436">max_decompression_ratio</text>
+    <rect x="280" y="422" width="60" height="12" rx="3" fill="#60a5fa"/>
+    <text class="val" x="348" y="432">100 : 1</text>
+    <rect x="280" y="438" width="600" height="12" rx="3" fill="#fb923c"/>
+    <text class="val" x="808" y="448" fill="#0d1117" font-weight="bold">1000 : 1</text>
+    <rect x="280" y="454" width="600" height="12" rx="3" fill="#34d399"/>
+    <text class="val" x="808" y="464" fill="#0d1117" font-weight="bold">1000 : 1</text>
+  </g>
+  <line x1="40" y1="484" x2="920" y2="484" stroke="#161b22"/>
+
+  <g>
+    <rect x="40" y="504" width="880" height="66" rx="12" fill="#10151b" stroke="#2b333d"/>
+    <text class="sub" x="64" y="530" fill="#fbbf24">HARD CEILINGS NO PROFILE CAN EXCEED</text>
+    <text class="sub" x="64" y="550">splats 4e9 &#183; mesh vertices 4e9 &#183; triangles 8e9 &#183; scene depth 4096 &#183; threads 1024 &#183; zero limit fails validation (MK0202)</text>
+  </g>
+
+  <text class="sub" x="40" y="600">bars scaled within each row &#183; web deadline 60 s, desktop and server none &#183; source: src/core/limits.cpp</text>
+</svg>
