@@ -136,7 +136,7 @@ def check_specifications() -> list[str]:
 
     A pinned spec (like the Khronos KHR_gaussian_splatting release candidate) is pinned by the
     exact upstream commit and the SHA-256 of each vendored file, so that an editorial or semantic
-    change upstream cannot silently alter Melkor's behaviour. This checks the files still match.
+    change upstream cannot silently alter Melkor's behavior. This checks the files still match.
     """
     errors: list[str] = []
     if not SPEC_LOCK_PATH.is_file():
@@ -211,7 +211,7 @@ def check(lock: dict) -> list[str]:
                 f"found {len(files)}"
             )
 
-        # ---- Licence text must actually be present -------------------------------------
+        # ---- License text must actually be present -------------------------------------
         license_file = dep.get("license_file")
         if license_file and not (REPO_ROOT / license_file).is_file():
             errors.append(f"{dep_id}: license_file is missing: {license_file}")

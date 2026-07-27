@@ -1,12 +1,12 @@
 // glTF extension policy.
 //
-// glTF's extension model has a precise contract that a correct reader must honour: an extension in
+// glTF's extension model has a precise contract that a correct reader must honor: an extension in
 // `extensionsRequired` MUST be understood or the asset MUST be rejected, because ignoring a required
 // extension can silently produce wrong geometry (a required compression extension, for instance,
 // means the accessor bytes are not what they appear). An extension in `extensionsUsed` but not
 // required MAY be ignored.
 //
-// The pre-v2 behaviour rejected required extensions too broadly (P0-10): it refused assets it could
+// The pre-v2 behavior rejected required extensions too broadly (P0-10): it refused assets it could
 // in fact have read. This module makes the decision precisely -- reject only the required extensions
 // Melkor does not implement, and report (rather than silently drop) the used-but-ignored ones -- so
 // a conforming `KHR_gaussian_splatting` asset is accepted and an asset that genuinely needs
@@ -21,7 +21,7 @@
 
 namespace melkor::format::gltf {
 
-// Whether Melkor's splat reader can correctly honour a glTF extension. The reader acts on
+// Whether Melkor's splat reader can correctly honor a glTF extension. The reader acts on
 // `KHR_gaussian_splatting`; everything else it neither needs nor understands, so a *required* other
 // extension makes the asset unreadable. This is the allowlist that decision is made against.
 bool is_supported_read_extension(std::string_view name);

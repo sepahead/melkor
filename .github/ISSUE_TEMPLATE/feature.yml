@@ -15,15 +15,15 @@ body:
         Gaussian-splat and mesh assets. It is deliberately **not** a reconstruction or training system,
         and it will not become one. Training, depth estimation, and feedforward reconstruction are
         reached through **external, pinned adapters** — Melkor describes how to obtain, verify, and
-        invoke those tools; it does not vendor them or claim their results as its own.
+        invoke those tools. It does not vendor them or claim their results as its own.
 
         This matters for your proposal in a concrete way. A request to "add reconstruction method X" is
-        out of scope as a core feature, but "add an adapter for X, pinned and licence-reviewed" may be
-        in scope. The distinction is not pedantry: vendoring a trainer would drag its licence and its
+        out of scope as a core feature, but "add an adapter for X, pinned and license-reviewed" may be
+        in scope. The distinction is not pedantry: vendoring a trainer would drag its license and its
         hardware requirements into a permissively licensed core, and would make Melkor appear to support
         something it cannot test, qualify, or maintain.
 
-        The project has one maintainer. A well-argued proposal that is declined is still useful; a
+        The project has one maintainer. A well-argued proposal that is declined is still useful. A
         proposal that is accepted and then unmaintained is not. Please be honest about who will keep the
         feature alive.
 
@@ -32,7 +32,7 @@ body:
     attributes:
       label: Problem
       description: >-
-        What you are trying to accomplish, and where Melkor's current behaviour prevents it. Describe the
+        What you are trying to accomplish, and where Melkor's current behavior prevents it. Describe the
         problem before the solution — a problem statement can be solved several ways, and the first way
         you thought of may not be the one that survives review.
     validations:
@@ -41,7 +41,7 @@ body:
   - type: textarea
     id: proposal
     attributes:
-      label: Proposed behaviour
+      label: Proposed behavior
       description: >-
         What Melkor should do. Be concrete about the **contract**, not only the outcome: the exact flags
         or API, the defaults, the machine-readable output, the failure modes, and the exit codes. A
@@ -88,11 +88,11 @@ body:
     attributes:
       label: Compatibility and migration
       description: >-
-        Does this change existing behaviour for an input or a command that already works today? If it
+        Does this change existing behavior for an input or a command that already works today? If it
         alters the meaning of a format profile, note that a profile ID's meaning never changes silently:
         a new profile ID and a migration note would be required. If it changes a default, say which
         outputs would change bytes.
-      placeholder: "Purely additive — no existing command changes behaviour. / Changes the default of --foo from A to B; assets converted with the old default would differ in ..."
+      placeholder: "Purely additive. No existing command changes behavior. / Changes --foo from A to B. Existing assets would differ in ..."
     validations:
       required: true
 
@@ -113,8 +113,8 @@ body:
       label: Evidence and specification
       description: >-
         For a format or profile proposal: the specification, the profile definition, or the producer
-        documentation that establishes what correct behaviour is. For a quality or accuracy claim:
-        the measurement supporting it. Melkor does not adopt behaviour on the strength of a single
+        documentation that establishes what correct behavior is. For a quality or accuracy claim:
+        the measurement supporting it. Melkor does not adopt behavior on the strength of a single
         implementation's convention without saying that is what it is doing.
 
   - type: textarea
@@ -127,7 +127,7 @@ body:
         better to say so up front than to leave you waiting. If you are willing, note whether you can also
         cover the backends (Metal, CUDA, CPU) and the tests, since backend-semantic changes must land in
         all three together.
-      placeholder: "Yes, I can implement the CPU path and tests; I have no CUDA hardware. / No, reporting only."
+      placeholder: "Yes, I can implement the CPU path and tests. I have no CUDA hardware. / No, reporting only."
 
   - type: checkboxes
     id: acknowledgements

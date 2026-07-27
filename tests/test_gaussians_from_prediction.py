@@ -25,7 +25,13 @@ import types
 from pathlib import Path
 from types import SimpleNamespace
 
-import numpy as np
+if sys.flags.optimize:
+    raise SystemExit("refusing to run under PYTHONOPTIMIZE: asserts would be stripped")
+
+try:
+    import numpy as np
+except ImportError:
+    raise SystemExit("numpy is required for this test: pip install numpy")
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 

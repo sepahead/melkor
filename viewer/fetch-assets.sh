@@ -104,7 +104,15 @@ node make-4d-demo.js
 # Optional: dogfood melkor to emit a standard 3DGS .ply from one scene, so the
 # viewer's PLY entry (the 4th SparkJS format) lights up. Needs melkor built once:
 #   (cd .. && mkdir -p build && cd build && cmake .. && make melkor -j)
-MELKOR_BIN="$(ls ../build/melkor 2>/dev/null || true)"
+MELKOR_BIN="${MELKOR_BIN:-}"
+if [ -z "$MELKOR_BIN" ]; then
+  for candidate in ../build/dev/melkor ../build/melkor; do
+    if [ -x "$candidate" ]; then
+      MELKOR_BIN="$candidate"
+      break
+    fi
+  done
+fi
 PLY_OUT="public/splats/distant-igloo.ply"
 if [ -n "$MELKOR_BIN" ] && [ -s "public/splats/distant-igloo.spz" ] && [ ! -s "$PLY_OUT" ]; then
   echo "== melkor SPZ->PLY =="
@@ -118,7 +126,7 @@ fi
 # "Wave · 4D" scene and its temporal player light up. Real 4D content: run
 # 4D-GS export_perframe_3DGS.py and drop time_*.ply + a manifest.json here.
 # Optional: pack the demo to per-frame SPZ (the "4D format producer" path).
-# Needs the melkor binary; demonstrates ~94% smaller streamable 4D.
+# Needs the Melkor binary. The command reports the measured size change.
 if command -v node >/dev/null 2>&1 && [ -n "$MELKOR_BIN" ] \
    && [ -s "public/splats/4d/wave/manifest.json" ] \
    && [ ! -s "public/splats/4d/wave-spz/manifest.json" ]; then

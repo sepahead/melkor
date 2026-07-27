@@ -91,7 +91,7 @@ PlyWriteResult PlyWriter::writeToFile(const std::string& filepath, const SplatDa
 
     melkor::io::WriteOptions options;
     // The legacy entry point has no --force plumbing yet; CLI v2 (WP15) makes overwrite an
-    // explicit user decision. Preserving the historical replace-the-output behaviour keeps
+    // explicit user decision. Preserving the historical replace-the-output behavior keeps
     // this a pure data-safety fix rather than a silent contract change.
     options.overwrite = true;
 
@@ -885,21 +885,21 @@ PlyReader::ReadResult PlyReader::readFromBuffer(const uint8_t* data, size_t size
         }
     };
 
-    // Colour normalisation depends on the DECLARED SOURCE TYPE, never on the property name.
+    // Color normalization depends on the DECLARED SOURCE TYPE, never on the property name.
     //
     // This is the fix for P0-07. The reader previously divided every red/green/blue value by
-    // 255 unconditionally, as though every PLY stored colour as an 8-bit byte. A point cloud
+    // 255 unconditionally, as though every PLY stored color as an 8-bit byte. A point cloud
     // authored with `property float red` holds a value already in [0,1]; dividing it by 255
-    // turned mid-grey (0.5) into 0.00196 -- essentially black -- and the scene rendered unlit.
+    // turned middle gray (0.5) into 0.00196 -- essentially black -- and the scene rendered unlit.
     //
     // The scaling that actually reconstructs a value in [0,1]:
     //   - unsigned 8-bit  : divide by 255
     //   - unsigned 16-bit : divide by 65535
     //   - unsigned 32-bit : divide by 4294967295
-    //   - float / double  : already normalised; divide by nothing
+    //   - float / double  : already normalized. Divide by nothing.
     //
-    // Signed integer colour has no single conventional mapping (is -1 the minimum, or an HDR
-    // value?), so we normalise by the type's unsigned-width maximum rather than guess a signed
+    // Signed integer color has no single conventional mapping (is -1 the minimum, or an HDR
+    // value?), so we normalize by the type's unsigned-width maximum rather than guess a signed
     // convention; a profile-aware reader (WP07) will reject it explicitly instead. float/double
     // pass straight through, which is the whole point of this change.
     auto color_to_shdc = [](float c, PropKind kind) {
@@ -1060,7 +1060,7 @@ PlyReader::ReadResult PlyReader::readFromBuffer(const uint8_t* data, size_t size
         canonical_input.scales[i] = scale;
 
         // PLY is wxyz; the canonical oracle and SplatData are xyzw. Accept only values already
-        // unit within the documented tolerance, then normalise away serialization round-off.
+        // unit within the documented tolerance, then normalize away serialization round-off.
         const math::Quat source_rotation{
             ir1 >= 0 ? value(ir1) : 0.0f,
             ir2 >= 0 ? value(ir2) : 0.0f,

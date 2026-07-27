@@ -6,7 +6,7 @@ namespace melkor::math {
 
 float srgb_to_linear(float srgb) {
     // The exact piecewise sRGB electro-optical transfer function, not the gamma-2.2 shortcut.
-    // The linear segment near zero matters for dark colours, where a pure power curve is wrong.
+    // The linear segment near zero matters for dark colors, where a pure power curve is wrong.
     if (srgb <= 0.04045f) {
         return srgb / 12.92f;
     }

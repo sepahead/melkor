@@ -1,6 +1,6 @@
 // Rotation of real spherical-harmonic coefficients.
 //
-// When a scene node rotates a Gaussian splat, its view-dependent colour -- stored as real SH
+// When a scene node rotates a Gaussian splat, its view-dependent color -- stored as real SH
 // coefficients -- must rotate with it, or the specular highlights point the wrong way. This is the
 // transform the glTF spec notes "is usually performed using Wigner-D matrices". Melkor builds the
 // per-band rotation operator directly from its own SH basis, so the rotation is exact for the

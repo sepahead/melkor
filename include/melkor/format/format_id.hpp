@@ -24,7 +24,7 @@ enum class FormatId : std::uint32_t {
 const char* to_string(FormatId id) noexcept;
 
 // What a format can represent. The planner compares source and target capabilities to predict
-// loss; a reader/writer that claims a capability must actually honour it.
+// loss. A reader or writer must honor each capability that it claims.
 struct FormatCapabilities {
     bool can_probe = false;
     bool can_read = false;

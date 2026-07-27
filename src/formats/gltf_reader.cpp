@@ -135,7 +135,7 @@ Result<PrimitiveRead> read_primitive_local(const Document& doc, const PrimitiveD
     // The scan stops at the first absent degree. Any SH coefficient present for a *higher* degree is
     // a gap in the pyramid, which the KHR spec forbids ("either all coefficients for a given degree
     // and all lower degrees MUST be defined or none"). Reject it rather than silently dropping the
-    // higher-degree colour, which would be a hidden loss.
+    // higher-degree color, which would be a hidden loss.
     for (std::uint32_t l = degree + 1; l <= khr::kMaxProfileShDegree; ++l) {
         for (std::uint32_t c = 0; c < khr::sh_coefficients_at_degree(l); ++c) {
             if (prim.attributes.count(khr::sh_attribute({l, c})) != 0) {
@@ -226,8 +226,8 @@ Result<PrimitiveRead> read_primitive_local(const Document& doc, const PrimitiveD
                                                  : splats.diagnostics()[0].message);
     }
 
-    // An unrecognised colorSpace string is assumed sRGB (and reported), but the raw string is kept
-    // so the scene reader can still tell two different unrecognised spaces apart.
+    // An unrecognized colorSpace string is assumed sRGB (and reported), but the raw string is kept
+    // so the scene reader can still tell two different unrecognized spaces apart.
     auto cs = khr::color_space_from_string(prim.gaussian->color_space);
     const khr::ColorSpace color_space =
         cs.has_value() ? cs.value() : khr::ColorSpace::srgb_rec709_display;
@@ -429,7 +429,7 @@ Result<SceneRead> read_gaussian_scene(const Document& doc, const std::vector<Buf
             first_cs_raw = pr.value().color_space_raw;
             have_cs = true;
         } else if (pr.value().color_space_raw != first_cs_raw) {
-            // Compare the *declared* strings, so two different unrecognised spaces (both coerced to
+            // Compare the *declared* strings, so two different unrecognized spaces (both coerced to
             // the sRGB enum) are still detected as a conflict, not silently merged.
             mixed_cs = true;
         }
@@ -472,7 +472,7 @@ Result<SceneRead> read_gaussian_scene(const Document& doc, const std::vector<Buf
                 item.affected_splats = pr.value().data.size();
                 item.remediation =
                     "remove the reflection or degenerate scale from the node transform, or approve "
-                    "LOSS_SH_ROTATION_NOT_APPLIED to accept colour in the source frame";
+                    "LOSS_SH_ROTATION_NOT_APPLIED to accept color in the source frame";
                 losses.add(std::move(item));
             }
         }
@@ -513,7 +513,7 @@ Result<SceneRead> read_gaussian_scene(const Document& doc, const std::vector<Buf
             input.rotations.push_back(b.rotations[s]);
             input.opacities.push_back(b.opacities[s]);
             // Copy the splat's coefficients into the front of its max-degree block; the higher
-            // coefficients stay zero-initialised.
+            // coefficients stay zero-initialized.
             for (std::size_t i = 0; i < src_block; ++i) {
                 merged_sh[write * merged_block + i] = b.sh[s * src_block + i];
             }
@@ -555,12 +555,12 @@ Result<SceneRead> read_gaussian_scene(const Document& doc, const std::vector<Buf
         LossItem item;
         item.code = loss_code::kColorSpaceAssumed;
         item.severity = mixed_cs ? LossSeverity::severe : LossSeverity::warning;
-        item.source_feature = mixed_cs ? "primitives declaring different colour spaces"
+        item.source_feature = mixed_cs ? "primitives declaring different color spaces"
                                        : "a colorSpace string Melkor does not recognise";
-        item.target_constraint = "the canonical model carries one colour space; sRGB was assumed";
+        item.target_constraint = "the canonical model carries one color space. sRGB was assumed";
         item.affected_splats = total;
         item.remediation = mixed_cs
-                               ? "re-export the asset with a single colour space"
+                               ? "re-export the asset with a single color space"
                                : "approve LOSS_COLOR_SPACE_ASSUMED to accept the sRGB assumption";
         losses.add(std::move(item));
     }

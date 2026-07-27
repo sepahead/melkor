@@ -1,8 +1,8 @@
 // Tests for the glTF extension policy.
 //
-// The rule being pinned: a required extension Melkor cannot honour makes the asset unreadable
+// The rule being pinned: a required extension Melkor cannot honor makes the asset unreadable
 // (reject), a supported required extension is fine (accept), and a used-but-not-required unsupported
-// extension is safely ignored but reported. This is the P0-10 fix -- the old behaviour rejected
+// extension is safely ignored but reported. This is the P0-10 fix -- the old behavior rejected
 // required extensions too broadly.
 //
 // Self-contained (no external test framework).

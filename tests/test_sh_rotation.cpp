@@ -1,6 +1,6 @@
 // Tests for real spherical-harmonic rotation.
 //
-// A wrong SH rotation corrupts colour silently, so this suite verifies correctness from several
+// A wrong SH rotation corrupts color silently, so this suite verifies correctness from several
 // independent angles rather than trusting the construction:
 //   - the band matrices are orthogonal (SH rotation preserves inner products);
 //   - identity rotation gives identity matrices;

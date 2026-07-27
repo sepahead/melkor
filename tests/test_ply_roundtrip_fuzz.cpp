@@ -246,8 +246,12 @@ int main() {
                read.success && read.data.has_value() && approx(read.data->positions()[0].y, 2.0f));
     }
     {
-        const std::string huge = "ply\nformat binary_little_endian 1.0\nelement vertex 4294967295\n"
-                                 "property float x\nend_header\n\0\0\0\0";
+        // Sized construction keeps the four NUL payload bytes; the const char* constructor
+        // would stop at the first NUL and reduce this to an empty-payload case.
+        static const char huge_bytes[] =
+            "ply\nformat binary_little_endian 1.0\nelement vertex 4294967295\n"
+            "property float x\nend_header\n\0\0\0\0";
+        const std::string huge(huge_bytes, sizeof(huge_bytes) - 1);
         const auto read = PlyReader{}.readFromBuffer(
             reinterpret_cast<const std::uint8_t*>(huge.data()), huge.size());
         expect("huge declaration versus tiny payload", !read.success);

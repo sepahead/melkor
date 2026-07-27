@@ -77,10 +77,10 @@ jobs:
           test -s "$RUNNER_TEMP/melkor-install/share/melkor/LICENSE"
           test -s "$RUNNER_TEMP/melkor-install/share/melkor/NOTICE"
           test -s "$RUNNER_TEMP/melkor-install/share/melkor/THIRD_PARTY_LICENSES.md"
-      - name: Build CPU-only (stub link topology)
+      - name: Build CPU-only topology
         run: |
-          # Same link shape as Linux CPU builds; catches missing Metal-stub
-          # symbols that the default macOS configuration cannot see.
+          # This has the same link shape as Linux CPU builds.
+          # It catches accidental platform dependencies in neutral code.
           cmake -B build-cpu -DMELKOR_USE_METAL=OFF -DMELKOR_WERROR=ON \
             -DPython3_EXECUTABLE="$(command -v python)"
           cmake --build build-cpu -j$(sysctl -n hw.ncpu)
@@ -171,7 +171,7 @@ jobs:
         run: |
           # Strip the preinstalled Microsoft/azure-cli apt sources that
           # intermittently serve a bad InRelease ('NOSPLIT') and fail
-          # apt-get update; melkor's CUDA deps need none of them.
+          # apt-get update. Melkor's CUDA dependencies need none of them.
           sudo rm -f /etc/apt/sources.list.d/microsoft-prod.list \
                      /etc/apt/sources.list.d/azure-cli.list \
                      /etc/apt/sources.list.d/azure-cli.sources || true
@@ -196,9 +196,11 @@ jobs:
         with:
           python-version: "3.11"
       - name: Install test tooling
-        run: >-
-          python -m pip install --disable-pip-version-check --only-binary=:all:
-          numpy==2.4.6 ruff==0.15.18
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y shellcheck
+          python -m pip install --disable-pip-version-check --only-binary=:all: \
+            numpy==2.4.6 ruff==0.15.18
       - name: Lint maintained Python
         run: |
           # Lint Melkor-authored Python only. The root pyproject.toml excludes the
@@ -209,14 +211,17 @@ jobs:
         run: |
           # The lock records the exact upstream revision and a content digest of every
           # vendored tree, plus every local patch. Drift here means either an undeclared
-          # fork or a stale notice -- both are licence problems, not style problems.
+          # fork or a stale notice -- both are license problems, not style problems.
           python3 tools/verify_third_party.py --check
           python3 tools/generate_notices.py --check
           python3 tools/check_version_sync.py --check
       - name: Verify source-bundle allowlist
         run: python3 tools/build_source_bundle.py --check
       - name: Lint public prose for unqualified claims
-        run: python3 tools/check_claims.py
+        run: |
+          python3 tools/check_claims.py
+          python3 tools/check_docs_links.py
+          python3 tools/check_docs_style.py
       - name: Validate format profiles
         run: python3 tools/check_profiles.py
       - name: Test DA3 synthetic Gaussian conversion
@@ -224,7 +229,9 @@ jobs:
           python -c "import numpy; print(f'NumPy {numpy.__version__}')"
           python tests/test_gaussians_from_prediction.py
       - name: Check Bash syntax
-        run: git ls-files -z -- '*.sh' | xargs -0 -n 1 bash -n --
+        run: |
+          git ls-files -z -- '*.sh' | xargs -0 -n 1 bash -n --
+          git ls-files -z -- '*.sh' | xargs -0 shellcheck --severity=warning
 
   viewer-tests:
     name: Viewer / Playwright (Chromium)

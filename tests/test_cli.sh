@@ -63,21 +63,37 @@ default_spz="$tmp_dir/default-opacity.spz"
 default_ply="$tmp_dir/default-opacity-roundtrip.ply"
 printf '%s\n' \
     '{"asset":{"version":"2.0"},"buffers":[{"uri":"data:application/octet-stream;base64,AACAPwAAAEAAAEBA","byteLength":12}],"bufferViews":[{"buffer":0,"byteOffset":0,"byteLength":12}],"accessors":[{"bufferView":0,"componentType":5126,"count":1,"type":"VEC3"}],"meshes":[{"primitives":[{"attributes":{"POSITION":0}}]}],"nodes":[{"mesh":0}],"scenes":[{"nodes":[0]}],"scene":0}' > "$default_gltf"
-"$bin" "$default_gltf" "$default_spz" --no-gpu >/dev/null
+if ! "$bin" "$default_gltf" "$default_spz" --no-gpu >/dev/null 2>"$tmp_dir/stderr.log"; then
+    echo "FAIL: default-opacity GLTF -> SPZ conversion failed" >&2
+    cat "$tmp_dir/stderr.log" >&2
+    exit 1
+fi
 default_report="$("$bin" inspect "$default_spz" --json)"
 if [[ "$default_report" != *'"valid":true'* ]]; then
     echo "FAIL: default GLTF opacity did not survive SPZ inspection" >&2
     echo "$default_report" >&2
     exit 1
 fi
-"$bin" "$default_spz" "$default_ply" --no-gpu >/dev/null
+if ! "$bin" "$default_spz" "$default_ply" --no-gpu >/dev/null 2>"$tmp_dir/stderr.log"; then
+    echo "FAIL: default-opacity SPZ -> PLY conversion failed" >&2
+    cat "$tmp_dir/stderr.log" >&2
+    exit 1
+fi
 if [[ ! -s "$default_ply" ]]; then
     echo "FAIL: default-opacity GLTF -> SPZ -> PLY roundtrip produced no output" >&2
     exit 1
 fi
 
 models="$("$bin" --list-models)"
-[[ "$models" == *"da3-base"* ]]
-[[ "$models" == *"noncommercial"* ]]
+if [[ "$models" != *"da3-base"* ]]; then
+    echo "FAIL: --list-models output is missing da3-base" >&2
+    echo "$models" >&2
+    exit 1
+fi
+if [[ "$models" != *"noncommercial"* ]]; then
+    echo "FAIL: --list-models output is missing noncommercial" >&2
+    echo "$models" >&2
+    exit 1
+fi
 
 echo "CLI validation tests passed"

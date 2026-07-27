@@ -1,8 +1,13 @@
-# Scene Completion (Densification / Hole Filling)
+# Scene completion development status
 
-Melkor can fill holes and densify sparse regions of a Gaussian-splat scene
-directly, without a learned prior. In the 3D Gaussian Splatting literature
-this family of operations goes by several names:
+Melkor contains an internal geometric densifier.
+The public CLI does not expose this implementation.
+`--fill-holes` fails until the densifier accepts canonical `SplatData`.
+
+Do not automate the compatibility flags.
+They parse only to provide a clear migration error.
+
+The internal implementation covers a family of operations with several established names:
 
 - **Densification** — the 3DGS-native mechanism (the original paper's
   *Adaptive Density Control*): adding Gaussians where the scene is
@@ -13,28 +18,22 @@ this family of operations goes by several names:
 - **3D inpainting** — the same task viewed from the image-editing tradition.
   diffusion-based methods (InFusion, GScream, Inpaint360GS, …) use that name.
 
-Melkor implements the *geometric* form: deterministic, prior-free
-densification that extends the scene's own local structure into its gaps.
-It runs in milliseconds on Metal. The CPU fallback has the same behavior.
-Thus, automated pipelines do not need a diffusion model.
+The prototype uses geometric densification.
+It extends local scene structure without a learned prior.
+This method cannot reconstruct appearance that is absent from the source.
 
-## Usage
+## Internal configuration
 
-```bash
-melkor scene.spz completed.spz --fill-holes
-melkor scene.ply completed.ply --fill-holes --fill-strength 0.8 --max-hole-size 12
-```
+`DensifyConfig` defines the prototype controls.
+The values are not a stable CLI contract.
 
-| Flag | Default | Meaning |
-|------|---------|---------|
-| `--fill-holes` | off | Enable scene completion |
-| `--fill-iterations <int>` | 3 | Advancing-front passes. Each pass can close roughly one ring of the hole. |
-| `--fill-strength <float>` | 1.0 | Fill spacing in units of the median splat spacing (lower = denser fill) |
-| `--max-hole-size <float>` | 8.0 | Largest bridgeable hole, in multiples of the median splat spacing |
-| `--knn <int>` | 8 | Neighborhood size used for the density statistics |
-
-This operation works on each input that Melkor can load (PLY, SPZ, and
-GLB-derived clouds). Melkor writes the filled cloud in the requested format.
+| Field | Default | Meaning |
+|---|---:|---|
+| `k_neighbors` | 8 | Neighborhood size for density statistics |
+| `max_iterations` | 3 | Maximum advancing-front passes |
+| `spacing_multiplier` | 1.0 | Fill spacing in median-spacing units |
+| `max_hole_size` | 8.0 | Maximum bridge distance in median-spacing units |
+| `max_growth` | 1.0 | Added-splat limit as an input-size fraction |
 
 ## Algorithm
 
@@ -59,7 +58,7 @@ Each pass:
      cloud or to an already-accepted candidate (no clumping).
    - **far-support gate**: a rim candidate is accepted only if existing
      geometry lies *ahead of it* (in the forward half-space of its gap
-     direction) within `--max-hole-size` median spacings. An interior hole
+     direction) within `max_hole_size` median spacings. An interior hole
      always has a far rim to bridge to. The scene's outer boundary has
      nothing beyond it. This is what keeps hole filling from growing the
      scene outward indefinitely.
@@ -68,20 +67,18 @@ Each pass:
    from their source splat, so filled regions blend with the surrounding
    appearance.
 
-Passes repeat until the fronts meet, nothing is accepted, or the growth cap
-(`max_growth`, default 1.0x the input size) is reached. The whole procedure
-is deterministic — no RNG — so identical inputs produce identical outputs
-across runs and across CPU/Metal backends.
+Passes repeat until the fronts meet, no candidate passes, or the growth cap is reached.
+The procedure does not use random numbers.
+Backend parity tests allow normal floating-point differences.
 
 ## Choosing parameters
 
 - Occlusion shadows behind objects in ground-level scans are usually a few
   splat spacings wide: the defaults close them.
-- Larger voids (unscanned courtyards, roof gaps in aerial captures) need a
-  bigger `--max-hole-size` and more `--fill-iterations`. Expect a flat
-  continuation of the rim geometry.
-- `--fill-strength` below 1.0 fills more densely than the surrounding
-  scene. This setting is useful when a trainer will reoptimize the fill.
+- Larger voids require a larger `max_hole_size` and more iterations.
+  Expect a flat continuation of the rim geometry.
+- A `spacing_multiplier` below 1.0 makes a denser fill.
+  A later optimizer can process that fill.
 
 A sphere test uses a cap-hole radius of approximately six median spacings.
 The front closes the cap in six passes. At the cap center, the fill extends at
@@ -95,7 +92,7 @@ rim instead of curving it. `test_fills_sphere_cap` in
 - Purely geometric: the fill continues local structure and copies nearby
   appearance. It will not hallucinate texture detail the way
   diffusion-based 3D inpainting does.
-- Holes larger than `--max-hole-size` median spacings are deliberately left
+- Holes larger than `max_hole_size` median spacings are deliberately left
   open (the far-support gate cannot distinguish them from open boundary).
 - The scene's outer boundary is never extended — by design.
 

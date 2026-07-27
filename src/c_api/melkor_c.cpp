@@ -6,7 +6,7 @@
 // symbols, and the C++ implementation behind them stays private.
 //
 // No C++ exception may escape any function here. A C caller has no way to catch one, and an
-// exception crossing the ABI boundary is undefined behaviour. Every entry point is wrapped so
+// exception crossing the ABI boundary is undefined behavior. Every entry point is wrapped so
 // that an unexpected throw becomes MELKOR_INTERNAL_ERROR rather than a crash.
 
 #include "melkor/c/melkor.h"

@@ -163,7 +163,7 @@ void test_accepts_json_only_and_json_plus_bin() {
 }
 
 void test_skips_unknown_trailing_chunk() {
-    // A recognised JSON chunk followed by an unknown chunk: the unknown one is ignored, and the
+    // A recognized JSON chunk followed by an unknown chunk: the unknown one is ignored, and the
     // overall parse still succeeds with the JSON recovered.
     auto with_unknown = raw_glb(glb::kMagic, 2, -1,
                                 {{glb::kChunkTypeJson, "{}  "}, {0x99887766u, "\x01\x02\x03\x04"}});

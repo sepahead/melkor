@@ -117,7 +117,7 @@ Result<Quat> from_matrix(const Mat3& m) {
 Result<Quat> from_frame(const Vec3& ax, const Vec3& ay, const Vec3& az) {
     // Reject a frame that is not orthonormal within tolerance: a non-orthonormal frame does not
     // correspond to a rotation, and forcing a quaternion out of it would silently produce a
-    // non-rotation. The tolerance is loose enough for a frame built from normalised cross
+    // non-rotation. The tolerance is loose enough for a frame built from normalized cross
     // products but tight enough to catch a genuinely skewed frame.
     constexpr double kOrtho = 1e-3;
     const bool unit = std::fabs(dot3(ax, ax) - 1.0) < kOrtho &&

@@ -306,7 +306,7 @@ void test_non_covariance_is_rejected() {
 }
 
 // ---------------------------------------------------------------------------
-// Colour
+// Color
 // ---------------------------------------------------------------------------
 
 void test_color_conversions() {
@@ -315,13 +315,13 @@ void test_color_conversions() {
         const float linear = srgb_to_linear(srgb);
         CHECK(approx(linear_to_srgb(linear), srgb, 1e-5));
     }
-    // Known anchors: 0 -> 0, 1 -> 1, and mid-grey sRGB 0.5 is ~0.214 linear (darker), which is
+    // Known anchors: 0 -> 0, 1 -> 1, and middle gray sRGB 0.5 is ~0.214 linear (darker), which is
     // exactly the perceptual point the sRGB curve exists to encode.
     CHECK(approx(srgb_to_linear(0.0f), 0.0, 1e-6));
     CHECK(approx(srgb_to_linear(1.0f), 1.0, 1e-6));
     CHECK(srgb_to_linear(0.5f) < 0.25f && srgb_to_linear(0.5f) > 0.20f);
 
-    // DC <-> RGB are inverses, and DC is NOT a gamma conversion: mid-grey linear 0.5 maps to DC 0.
+    // DC <-> RGB are inverses, and DC is NOT a gamma conversion: middle gray linear 0.5 maps to DC 0.
     CHECK(approx(sh_dc_to_rgb(rgb_to_sh_dc(0.7f)), 0.7, 1e-5));
     CHECK(approx(rgb_to_sh_dc(0.5f), 0.0, 1e-6));  // rgb 0.5 is the DC zero point
     // A DC term can legitimately be negative or exceed the input range -- it is not clamped.

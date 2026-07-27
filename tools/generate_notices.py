@@ -12,7 +12,7 @@ Two distinct outputs, because they answer two different questions:
 
 ``NOTICE``
     What is *compiled into the artifact you downloaded*. This is the file whose accuracy is
-    a licence obligation. It lists only dependencies that are actually linked into the core.
+    a license obligation. It lists only dependencies that are actually linked into the core.
 
 ``THIRD_PARTY_LICENSES.md``
     Everything third-party the *repository* touches, including external tools that Melkor
@@ -58,7 +58,7 @@ def iter_shipped(lock: dict):
 
     Yields ``(id, license, upstream, revision, license_file, note)``. Embedded
     sub-dependencies (a library bundled inside another library, like nlohmann/json inside
-    tinygltf) ship too, and are yielded separately: the parent's licence does not cover
+    tinygltf) ship too, and are yielded separately: the parent's license does not cover
     them, and a notice that omits them is incomplete.
     """
     for dep in lock["dependencies"]:
@@ -102,7 +102,7 @@ def render_notice(lock: dict) -> str:
     lines.append("")
     lines.append(
         "The components below are redistributed as part of Melkor's binaries and source\n"
-        "bundle. Their licences apply to the code they cover, not to Melkor as a whole."
+        "bundle. Their licenses apply to the code they cover, not to Melkor as a whole."
     )
     lines.append("")
 
@@ -142,7 +142,7 @@ def render_notice(lock: dict) -> str:
     lines.append(
         "Melkor's reconstruction and training adapters run external programs that the user\n"
         "installs separately. Melkor does not ship their source or their model weights, and\n"
-        "their licences are not Melkor's licence. Those terms — including copyleft,\n"
+        "their licenses are not Melkor's license. Those terms — including copyleft,\n"
         "research-only, and non-commercial restrictions — are recorded per adapter."
     )
     lines.append("")
@@ -153,7 +153,7 @@ def render_notice(lock: dict) -> str:
 
 def render_third_party(lock: dict) -> str:
     lines: list[str] = []
-    lines.append("# Third-party licences")
+    lines.append("# Third-party licenses")
     lines.append("")
     lines.append("<!--")
     for line in GENERATED_BANNER.splitlines():
@@ -164,7 +164,7 @@ def render_third_party(lock: dict) -> str:
         "Melkor's core is MIT-licensed. This file records every third-party component the\n"
         "repository depends on, and distinguishes what Melkor **redistributes** from what it\n"
         "merely **invokes**. That distinction is the whole point: shipping a library means its\n"
-        "licence travels with our artifact, whereas calling a program the user installed does\n"
+        "license travels with our artifact, whereas calling a program the user installed does\n"
         "not."
     )
     lines.append("")
@@ -176,7 +176,7 @@ def render_third_party(lock: dict) -> str:
         "`tools/verify_third_party.py`."
     )
     lines.append("")
-    lines.append("| Component | Licence | Version | Upstream |")
+    lines.append("| Component | License | Version | Upstream |")
     lines.append("|---|---|---|---|")
     for dep in iter_shipped(lock):
         name = dep["id"]
@@ -214,12 +214,12 @@ def render_third_party(lock: dict) -> str:
     lines.append(
         "Reconstruction, training, and depth systems are separate programs. Melkor describes\n"
         "them with pinned adapter manifests; it does not vendor their source or their weights.\n"
-        "Their code licences and their **model-weight licences are different fields**, because\n"
+        "Their code licenses and their **model-weight licenses are different fields**, because\n"
         "they routinely differ — permissive code frequently ships with research-only weights."
     )
     lines.append("")
     lines.append(
-        f"The upstream projects, their licences, and why the research snapshots were removed\n"
+        f"The upstream projects, their licenses, and why the research snapshots were removed\n"
         f"from this repository are documented in [{ADAPTERS_DOC}]({ADAPTERS_DOC})."
     )
     lines.append("")
@@ -228,9 +228,9 @@ def render_third_party(lock: dict) -> str:
     lines.append(
         "The web viewer's npm dependencies and the Tauri desktop shell's Rust crates are\n"
         "locked in `viewer/package-lock.json` and `viewer/src-tauri/Cargo.lock`. The desktop\n"
-        "shell generates its own crate licence inventory\n"
+        "shell generates its own crate license inventory\n"
         "(`viewer/RUST_THIRD_PARTY_LICENSES.html`) via `cargo-about`, and `cargo-deny`\n"
-        "enforces the licence policy in CI."
+        "enforces the license policy in CI."
     )
     lines.append("")
     return "\n".join(lines)

@@ -8,11 +8,9 @@ body:
   - type: markdown
     attributes:
       value: |
-        This form asks for more than a bug report does, and the reason is worth stating: **"it's slow"
-        is not actionable.** Without the hardware, the data, the versions, and a command someone else
-        can run, a performance report cannot be reproduced, cannot be bisected, and cannot be verified
-        as fixed. It becomes an anecdote, and anecdotes accumulate in the tracker without ever being
-        resolved. What is asked for below is the minimum needed to turn a complaint into a measurement.
+        This form asks for more than a bug report does. **"Slow" is not a reproducible finding.**
+        Give the hardware, data, versions, and exact command.
+        This information makes the report reproducible and verifiable.
 
         **Before you file:** if you can make Melkor consume unbounded memory, CPU, or disk from an
         input — whether that input is malformed, or merely enormous but well-formed — that is a
@@ -40,7 +38,7 @@ body:
         The numbers. Wall time, peak resident memory, or throughput, with the number of runs and the
         variance if you have it. A single run of a cold-cache operation is a noisy number, and knowing
         that it was a single run is part of the measurement.
-      placeholder: "convert PLY→SPZ, 2.1M Gaussians: 94 s wall, 11.2 GB peak RSS; mean of 3 runs, ±4 s"
+      placeholder: "convert PLY→SPZ, 2.1M Gaussians: 94 s wall, 11.2 GB peak RSS. Mean of 3 runs, ±4 s."
     validations:
       required: true
 
@@ -66,7 +64,7 @@ body:
       description: >-
         What was processed. Gaussian or vertex count, file size, format, spherical-harmonic degree, and
         how the asset was produced. Performance in this codebase is dominated by spatial distribution
-        and SH degree, not by file size alone, so a size on its own does not characterise the workload.
+        and SH degree, not by file size alone, so a size on its own does not characterize the workload.
 
         Paste `melkor inspect --input <asset> --level structure --output-mode json` if you can — it is
         safe to paste and it answers most of this. If the asset is shareable and small, attach it, but
@@ -94,12 +92,9 @@ body:
     attributes:
       label: Versions and environment
       description: >-
-        Melkor version or commit; how you installed it; OS and version; **build type** (Release,
-        RelWithDebInfo, Debug — a Debug build is expected to be slow and is not a defect); compiler and
-        version if built from source; whether a sanitizer build was used (it will be many times slower);
-        and the compute backend actually selected, from `melkor doctor --output-mode json` (or
-        `melkor --info` on older builds). A CPU fallback where you expected the GPU is the single most
-        common cause of a report like this, and this output is what reveals it.
+        Give the Melkor version or commit, install method, operating system, and version.
+        Give the **build type** and compiler version. State whether you used a sanitizer build.
+        Include the selected compute backend from `melkor --info`.
       render: text
     validations:
       required: true
@@ -108,7 +103,7 @@ body:
     id: regression
     attributes:
       label: Is this a regression?
-      description: A regression is prioritised differently from a "this was always slow", so please say.
+      description: State whether an earlier Melkor version completed the same work faster.
       options:
         - "Yes — it was faster in an earlier Melkor version (say which, below)"
         - "No — it has always been this slow, but I believe it should be faster"

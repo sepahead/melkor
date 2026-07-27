@@ -33,6 +33,13 @@ void check(bool condition, const char* what, int line) {
 
 #define CHECK(cond) check((cond), #cond, __LINE__)
 
+// The ReadResult carries only a message, not the MK0301 diagnostic, so the strongest
+// available reason check is that the message names a limit. Without it, a rejection
+// caused by an unrelated parse failure would satisfy a bare `!success` check.
+bool mentions_limit(const std::string& message) {
+    return message.find("limit") != std::string::npos;
+}
+
 SplatData make_data(int n) {
     SplatBufferInput input;
     input.positions.reserve(static_cast<std::size_t>(n));
@@ -71,18 +78,21 @@ int main() {
     tight.max_splats = 2;
     auto rejected = reader.readFromBuffer(buffer.data(), buffer.size(), tight);
     CHECK(!rejected.success);
+    CHECK(mentions_limit(rejected.error_message));
 
     // An input-size limit below the buffer refuses it before parsing the header.
     Limits tiny_input = Limits::for_profile(LimitsProfile::desktop);
     tiny_input.max_input_bytes = 8;  // far smaller than a real PLY
     auto rejected_input = reader.readFromBuffer(buffer.data(), buffer.size(), tiny_input);
     CHECK(!rejected_input.success);
+    CHECK(mentions_limit(rejected_input.error_message));
 
     // A memory limit below the cloud's footprint refuses it before reserving.
     Limits tiny_mem = Limits::for_profile(LimitsProfile::desktop);
     tiny_mem.max_memory_bytes = 16;  // less than three canonical splat records
     auto rejected_mem = reader.readFromBuffer(buffer.data(), buffer.size(), tiny_mem);
     CHECK(!rejected_mem.success);
+    CHECK(mentions_limit(rejected_mem.error_message));
 
     // A header that never reaches end_header (a header bomb) is refused once it exceeds the
     // configured header-size limit, instead of scanning the whole buffer with an O(n^2) property
@@ -95,6 +105,7 @@ int main() {
     auto rejected_header = reader.readFromBuffer(
         reinterpret_cast<const std::uint8_t*>(header_bomb.data()), header_bomb.size(), tiny_header);
     CHECK(!rejected_header.success);
+    CHECK(mentions_limit(rejected_header.error_message));
 
     // Zero means unlimited for every Limits field. The file preflight must not substitute an
     // undocumented 1 MiB cap while the in-memory path correctly permits the same header.

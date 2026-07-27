@@ -34,7 +34,6 @@
 namespace {
 
 constexpr int N_RANDOM = 400;
-constexpr int N_TRIALS_PER_QUAT = 1;
 // spz packs quaternions at 9-bit precision via "smallest three"; the resulting
 // rotation error is bounded but non-trivial. 0.02 rad (~1.1 deg) per axis is a
 // generous-but-meaningful bar; if ordering were wrong the error would be ~pi/2.

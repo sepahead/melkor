@@ -26,7 +26,7 @@
 namespace fs = std::filesystem;
 
 void printUsage(const char* program) {
-    std::cout << "Melkor - Advanced Gaussian Splatting Toolkit\n";
+    std::cout << "Melkor - Gaussian Splatting Toolkit\n";
     std::cout << "\nUsage: ";
     melkor::text::writeDisplayString(std::cout, program);
     std::cout << " <input.glb|gltf|ply|spz> <output.ply|spz> [options]\n       ";
@@ -41,7 +41,7 @@ void printUsage(const char* program) {
     std::cout << "  SPZ -> PLY    Convert SPZ to PLY format\n";
     std::cout << "  inspect       Validate and report PLY/SPZ/GLB/glTF metadata without GPU init\n";
     std::cout << "\nConversion mode:\n";
-    std::cout << "  --basic              Basic vertex-to-splat conversion (default, fast)\n";
+    std::cout << "  --basic              Basic vertex-to-splat conversion (default)\n";
     std::cout << "  --enhanced           Unavailable pending the canonical area-weighted sampler\n";
     std::cout << "\nNeural reconstruction:\n";
     std::cout << "  Use ./da3-infer after running scripts/setup_da3.sh. The native CLI only\n";
@@ -50,16 +50,16 @@ void printUsage(const char* program) {
     std::cout << "  --scale <float>      Scale factor for splat size (default: 0.01)\n";
     std::cout << "  --opacity <float>    Default opacity 0-1 (default: 1.0)\n";
     std::cout << "  --pos-scale <float>  Position scale factor (default: 1.0)\n";
-    std::cout << "  --no-coord-convert   Don't convert Y-up to Z-up\n";
+    std::cout << "  --no-coord-convert   Do not convert Y-up to Z-up\n";
     std::cout << "\nUnavailable compatibility options:\n";
     std::cout << "  --knn, --no-surface-align  Accepted for --enhanced script compatibility\n";
     std::cout << "  --fill-holes and fill knobs  Fail closed pending canonical densification\n";
-    std::cout << "\nGeneral Options:\n";
+    std::cout << "\nGeneral options:\n";
     std::cout << "  --ascii              Output ASCII PLY instead of binary\n";
-    std::cout << "  --no-gpu             Compatibility no-op; format conversion is CPU-only\n";
+    std::cout << "  --no-gpu             Compatibility no-op. Format conversion is CPU-only\n";
     std::cout << "  --no-metal           Deprecated alias for --no-gpu\n";
     std::cout << "  --info               Show GPU info and exit\n";
-    std::cout << "  --list-models        List supported DA3 reconstruction checkpoints\n";
+    std::cout << "  --list-models        List cataloged DA3 reconstruction checkpoints\n";
     std::cout << "  --version            Show version and exit\n";
     std::cout << "  -h, --help           Show this help\n";
 }
@@ -72,7 +72,7 @@ void printDeviceInfo() {
     }
 
     auto info = provider->deviceInfo();
-    std::cout << "GPU Information:\n";
+    std::cout << "Compute information:\n";
     std::cout << "  Backend: " << provider->backendName() << "\n";
     std::cout << "  Name: " << info.name << "\n";
     if (info.total_memory > 0) {
@@ -86,7 +86,7 @@ void printDeviceInfo() {
                   << info.compute_capability_minor << "\n";
     }
     if (provider->backend() == melkor::ComputeBackend::CPU) {
-        std::cout << "  Note: Use OpenSplat with CUDA on Linux for GPU training\n";
+        std::cout << "  Note: The CPU reference backend is active\n";
     }
 }
 
@@ -289,7 +289,7 @@ int main(int argc, char* argv[]) try {
         } else if (arg == "--ascii") {
             use_binary = false;
         } else if (arg == "--no-gpu" || arg == "--no-metal") {
-            // Canonical format conversion is CPU-only and does not initialise a backend. Keep
+            // Canonical format conversion is CPU-only and does not initialize a backend. Keep
             // accepting the historical flag so existing scripts remain valid.
         } else if (arg[0] != '-') {
             if (input_path.empty()) {
@@ -339,7 +339,7 @@ int main(int argc, char* argv[]) try {
     }
 
     if (list_models) {
-        std::cout << "Supported da3-infer reconstruction checkpoints:\n"
+        std::cout << "Cataloged da3-infer reconstruction checkpoints:\n"
                      "  da3-small, da3-base (Apache-2.0)\n"
                      "  da3-large-1.1, da3-giant-1.1, da3nested-giant-large-1.1 "
                      "(noncommercial)\n"

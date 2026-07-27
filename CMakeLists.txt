@@ -60,7 +60,7 @@ message(STATUS "Building for platform: ${MELKOR_PLATFORM}")
 option(MELKOR_USE_METAL "Use Metal GPU acceleration (macOS only)" ON)
 
 # Option to enable/disable CUDA (Linux/NVIDIA)
-# Note: CUDA is optional for the converter - the main GPU training uses OpenSplat
+# The converter remains CPU-only. External training uses a separate executable.
 # Requirements for CUDA:
 #   - CUDA Toolkit 11.0+ (12.0+ recommended for SM 90 / RTX 40 series)
 #   - NVIDIA GPU with compute capability 6.0+ (Pascal or newer)
@@ -79,8 +79,7 @@ if(MELKOR_PLATFORM STREQUAL "LINUX")
         # CMAKE_CUDA_ARCHITECTURES seeds each target's CUDA_ARCHITECTURES
         # property at target-creation time, and once the CUDA language is
         # enabled CMake requires the property on every target participating
-        # in device linking — including CXX-only libraries in the circular
-        # static-library arrangement. Some toolchains (distro-packaged nvcc)
+        # in device linking. Some toolchains (distro-packaged nvcc)
         # provide no default. SM support per toolkit: 60 Pascal, 70 Volta,
         # 75 Turing, 80 Ampere DC, 86 Ampere consumer (11.1+), 89 Ada
         # (11.8+), 90 Hopper (12.0+).
@@ -288,7 +287,7 @@ elseif(MELKOR_PLATFORM STREQUAL "LINUX" AND MELKOR_USE_CUDA AND CUDAToolkit_FOUN
     # It no longer compiles src/gpu_stub.cpp. That file existed to supply fake metal:: symbols
     # that platform-neutral code referenced -- which it should never have done. With
     # rawContext() removed from ComputeProvider and the dead Metal-typed facades deleted,
-    # nothing outside src/backends names a platform type, so there is nothing left to stub.
+    # nothing outside the platform backend directories names a platform type.
     add_library(melkor_cuda STATIC
         src/cuda/cuda_compute.cpp
         src/cuda/gaussian_processor.cu
@@ -329,8 +328,7 @@ else()
     # src/gpu_stub.cpp existed to fake the entire metal:: namespace so that platform-neutral
     # code -- which should never have referenced Metal types at all -- would link on non-Apple
     # platforms. With rawContext() gone from ComputeProvider and the dead GaussianFitter /
-    # FeedforwardModel facades deleted, nothing outside src/backends names a platform type,
-    # so there is nothing left to stub.
+    # FeedforwardModel facades deleted, no neutral code names a platform type.
     #
     # A CPU-only build is now simply a build with no GPU backend registered. CPU is not a
     # fallback that fills a hole; it is a complete, always-present backend and the semantic
@@ -346,7 +344,9 @@ endif()
 #
 # This target is what makes the graph acyclic. Dependencies point one way:
 #
-#     melkor_core  <--  melkor_backend_{metal,cuda}  <--  melkor_runtime  <--  CLI / tests
+#     melkor_core  <--  melkor_{metal,cuda}  <--  melkor_runtime  <--  CLI / tests
+#          ^
+#          +-- CPU reference implementation
 #
 # Previously melkor_core linked each backend PUBLIC *and* each backend linked melkor_core
 # PUBLIC, because ComputeProvider::create() was declared in core but defined in the backend.
@@ -388,11 +388,11 @@ endif()
 # ---------------------------------------------------------------------------
 # libmelkor — the installable shared library and its stable C ABI.
 #
-# This is what closes P0-04: before this, `cmake --install` shipped the CLI and the licence
+# This is what closes P0-04: before this, `cmake --install` shipped the CLI and the license
 # files but not the library, the headers, or a CMake package config, so no downstream project
 # could consume Melkor as an SDK at all.
 #
-# The stable, supported consumption boundary is the C ABI (include/melkor/c/melkor.h). The
+# The planned stable consumption boundary is the C ABI (include/melkor/c/melkor.h). The
 # shared library links the whole runtime PRIVATELY and exports only the C ABI, so a consumer
 # gets one relocatable libmelkor and a small, versioned surface -- not a web of internal static
 # archives and third-party headers.
@@ -443,7 +443,7 @@ if(MELKOR_INSTALL)
         INCLUDES DESTINATION ${CMAKE_INSTALL_INCLUDEDIR})
 
     # Public headers: install an explicit canonical surface, not every in-tree header. The
-    # backend, densifier, and superseded mesh-initialisation paths still use the pre-v2 mutable
+    # backend, densifier, and superseded mesh-initialization paths still use the pre-v2 mutable
     # cloud internally while their owning work packages replace them; those implementation
     # headers must not make that invariant-bypassing model part of the SDK contract.
     install(FILES
@@ -527,6 +527,7 @@ enable_testing()
 
 add_executable(test_melkor_core tests/test_melkor_core.cpp)
 target_link_libraries(test_melkor_core PRIVATE melkor_runtime)
+target_compile_options(test_melkor_core PRIVATE ${MELKOR_WARNING_FLAGS})
 if(SPZ_AVAILABLE)
     target_compile_definitions(test_melkor_core PRIVATE MELKOR_HAS_SPZ)
 endif()
@@ -548,7 +549,7 @@ target_link_libraries(test_atomic_writer PRIVATE melkor_runtime)
 target_compile_options(test_atomic_writer PRIVATE ${MELKOR_WARNING_FLAGS})
 add_test(NAME atomic_writer_tests COMMAND test_atomic_writer)
 
-# PLY colour conversion regression (P0-07): the source property type decides the scaling.
+# PLY color conversion regression (P0-07): the source property type decides the scaling.
 add_executable(test_ply_color tests/test_ply_color.cpp)
 target_link_libraries(test_ply_color PRIVATE melkor_core)
 target_compile_options(test_ply_color PRIVATE ${MELKOR_WARNING_FLAGS})
@@ -611,7 +612,7 @@ target_compile_options(test_probe PRIVATE ${MELKOR_WARNING_FLAGS})
 add_test(NAME probe_tests COMMAND test_probe)
 
 # KHR_gaussian_splatting layout core: SH attribute naming and m-ordering, the spec's C matrix,
-# and the defined colour spaces, pinned against the vendored RC spec text (WP09).
+# and the defined color spaces, pinned against the vendored RC spec text (WP09).
 add_executable(test_gltf_khr tests/test_gltf_khr.cpp)
 target_link_libraries(test_gltf_khr PRIVATE melkor_core)
 target_compile_options(test_gltf_khr PRIVATE ${MELKOR_WARNING_FLAGS})
@@ -756,6 +757,7 @@ endif()
 
 add_executable(test_cloud_inspector tests/test_cloud_inspector.cpp)
 target_link_libraries(test_cloud_inspector PRIVATE melkor_runtime)
+target_compile_options(test_cloud_inspector PRIVATE ${MELKOR_WARNING_FLAGS})
 set_target_properties(test_cloud_inspector PROPERTIES
     RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}
 )
@@ -775,6 +777,7 @@ add_test(NAME spz_stub_api_tests COMMAND test_spz_stub_api)
 if(SPZ_AVAILABLE)
     add_executable(test_spz_quaternion_fuzz tests/test_spz_quaternion_fuzz.cpp)
     target_link_libraries(test_spz_quaternion_fuzz PRIVATE melkor_runtime)
+    target_compile_options(test_spz_quaternion_fuzz PRIVATE ${MELKOR_WARNING_FLAGS})
     target_compile_definitions(test_spz_quaternion_fuzz PRIVATE MELKOR_HAS_SPZ)
     set_target_properties(test_spz_quaternion_fuzz PROPERTIES
         RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}
@@ -787,6 +790,7 @@ endif()
 # header-driven reader.
 add_executable(test_ply_roundtrip_fuzz tests/test_ply_roundtrip_fuzz.cpp)
 target_link_libraries(test_ply_roundtrip_fuzz PRIVATE melkor_runtime)
+target_compile_options(test_ply_roundtrip_fuzz PRIVATE ${MELKOR_WARNING_FLAGS})
 set_target_properties(test_ply_roundtrip_fuzz PROPERTIES
     RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}
 )
@@ -797,6 +801,7 @@ add_test(NAME ply_roundtrip_fuzz COMMAND test_ply_roundtrip_fuzz)
 # parity of the shared operations when a GPU backend is present.
 add_executable(test_compute_provider tests/test_compute_provider.cpp)
 target_link_libraries(test_compute_provider PRIVATE melkor_runtime)
+target_compile_options(test_compute_provider PRIVATE ${MELKOR_WARNING_FLAGS})
 set_target_properties(test_compute_provider PROPERTIES
     RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}
 )
@@ -807,6 +812,7 @@ add_test(NAME compute_provider_tests COMMAND test_compute_provider)
 # parity of the grid k-NN kernels when a GPU is present.
 add_executable(test_densifier tests/test_densifier.cpp)
 target_link_libraries(test_densifier PRIVATE melkor_runtime)
+target_compile_options(test_densifier PRIVATE ${MELKOR_WARNING_FLAGS})
 set_target_properties(test_densifier PROPERTIES
     RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}
 )
@@ -830,6 +836,11 @@ add_test(NAME cli_validation
 # GPU needed). Validates that the field transforms match ByteDance's exporter
 # and that the DC->rgb->DC round-trip through save_ply does not drift.
 find_package(Python3 COMPONENTS Interpreter QUIET)
+if(NOT Python3_Interpreter_FOUND)
+    message(WARNING "Python3 interpreter not found: the six Python-driven tests "
+                    "(gaussians_from_prediction, release_metadata, release_evidence, "
+                    "inspect_cli, convert_cli, tools) will not be registered.")
+endif()
 if(Python3_Interpreter_FOUND)
     add_test(NAME gaussians_from_prediction_tests
              COMMAND ${Python3_EXECUTABLE}

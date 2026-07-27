@@ -71,7 +71,7 @@ desktop runtime without external scenes:
 ```
 
 This fetches three.js r180 and Spark 2.1.0. Then, it deterministically
-generates the static SPLAT and 4D PLY fixtures. If `../build/melkor` exists,
+generates the static SPLAT and 4D PLY fixtures. If a known Melkor build exists,
 the full setup converts Distant Igloo from SPZ to PLY. This operation tests
 native conversion and Spark's PLY loader.
 
@@ -171,9 +171,12 @@ Create fixtures or package a real per-frame export with:
 ```bash
 node make-4d-demo.js
 node pack-4d.js /path/to/frames --out public/splats/4d/my-scene
-node pack-4d.js /path/to/frames --spz --melkor ../build/melkor \
+node pack-4d.js /path/to/frames --spz --melkor ../build/dev/melkor \
   --out public/splats/4d/my-scene-spz
 ```
+
+The packer refuses a nonempty output directory by default.
+Use `--force` only after you verify the target directory.
 
 The automation API exposes `load`, `setView`, `setAngles`, `setOrbit`,
 `waitRendered`, `getStats`, `play4D`, `pause4D`, `seek4D`, and `get4DState`

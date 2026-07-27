@@ -12,7 +12,7 @@ regenerate. CI fails if this file drifts from the manifest.
 Third-party code compiled into Melkor artifacts
 
 The components below are redistributed as part of Melkor's binaries and source
-bundle. Their licences apply to the code they cover, not to Melkor as a whole.
+bundle. Their licenses apply to the code they cover, not to Melkor as a whole.
 
 ------------------------------------------------------------------------------
 
@@ -66,7 +66,7 @@ External tools invoked but NOT redistributed
 
 Melkor's reconstruction and training adapters run external programs that the user
 installs separately. Melkor does not ship their source or their model weights, and
-their licences are not Melkor's licence. Those terms — including copyleft,
+their licenses are not Melkor's license. Those terms — including copyleft,
 research-only, and non-commercial restrictions — are recorded per adapter.
 
 See docs/adapters/index.md.

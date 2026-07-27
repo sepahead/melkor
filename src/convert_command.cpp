@@ -27,7 +27,7 @@ std::string lowercase_extension(const std::string& path) {
     return ext;
 }
 
-bool is_gltf_container(const std::string& ext) { return ext == "glb" || ext == "gltf"; }
+bool is_glb_container(const std::string& ext) { return ext == "glb"; }
 
 void print_usage(const char* program) {
     std::fprintf(stderr,
@@ -99,8 +99,8 @@ int runConvertCommand(int argc, char* argv[], const char* program) {
     const std::string& input_path = positionals[0];
     const std::string& output_path = positionals[1];
 
-    if (!is_gltf_container(lowercase_extension(input_path)) ||
-        !is_gltf_container(lowercase_extension(output_path))) {
+    if (!is_glb_container(lowercase_extension(input_path)) ||
+        !is_glb_container(lowercase_extension(output_path))) {
         std::fprintf(stderr,
                      "convert: this command handles GLB KHR_gaussian_splatting only; cross-format "
                      "conversion is planned (WP13)\n");

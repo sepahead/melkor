@@ -101,7 +101,7 @@ public:
     virtual bool processCloud(GaussianCloud& cloud,
                               const ProcessConfig& config) = 0;
 
-    // --- Grid-accelerated neighbourhood operations ---
+    // --- Grid-accelerated neighborhood operations ---
     //
     // These were previously reached by casting rawContext() to a metal::MetalContext* and
     // constructing a metal::GaussianProcessor directly, which dragged platform types into
@@ -111,10 +111,10 @@ public:
     // Every backend must implement them. The CPU implementation is the semantic reference: a
     // GPU result that disagrees with it is a bug in the GPU path, not a new answer.
 
-    // Neighbourhood statistics over a uniform grid. Returns 4 floats per point: the mean
-    // distance to the k nearest neighbours, then the gap vector (point minus neighbour
+    // Neighborhood statistics over a uniform grid. Returns 4 floats per point: the mean
+    // distance to the k nearest neighbors, then the gap vector (point minus neighbor
     // centroid) as xyz. Returns empty on failure, which the caller must treat as "fall back",
-    // not as "there were no neighbours".
+    // not as "there were no neighbors".
     virtual std::vector<float> knnStatsGrid(
         const std::vector<float>& positions,
         const std::vector<uint32_t>& cell_entries,

@@ -9,7 +9,9 @@ the standard library only, driven by CTest.
 from __future__ import annotations
 
 import importlib.util
+import subprocess
 import sys
+import tempfile
 import unittest
 from pathlib import Path
 
@@ -137,6 +139,413 @@ class NoticeGeneration(unittest.TestCase):
         # Should not raise.
         text = self.g.render_third_party(lock)
         self.assertIn("0001-x.patch", text)
+
+
+class DocumentationLinks(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        cls.docs = load("check_docs_links", "check_docs_links.py")
+
+    def test_missing_target_and_anchor_are_reported(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            source = root / "README.md"
+            guide = root / "Guide.md"
+            source.write_text(
+                "# Home\n\n[missing](missing.md)\n[case](guide.md)\n[anchor](Guide.md#no)\n",
+                encoding="utf-8",
+            )
+            guide.write_text("# Valid heading\n", encoding="utf-8")
+            findings = self.docs.check_markdown([source, guide], root)
+            messages = [finding.message for finding in findings]
+            self.assertTrue(any("does not exist" in message for message in messages))
+            self.assertTrue(any("incorrect path case" in message for message in messages))
+            self.assertTrue(any("anchor does not exist" in message for message in messages))
+
+    def test_valid_relative_link_and_anchor_pass(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            docs = root / "docs"
+            docs.mkdir()
+            source = root / "README.md"
+            guide = docs / "guide.md"
+            source.write_text("# Home\n\n[guide](docs/guide.md#valid-heading)\n", encoding="utf-8")
+            guide.write_text("# Valid heading\n", encoding="utf-8")
+            self.assertEqual(self.docs.check_markdown([source, guide], root), [])
+
+    def test_query_does_not_become_part_of_local_path(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            source = root / "README.md"
+            guide = root / "guide.md"
+            source.write_text("# Home\n\n[guide](guide.md?plain=1#valid)\n", encoding="utf-8")
+            guide.write_text("# Valid\n", encoding="utf-8")
+            self.assertEqual(self.docs.check_markdown([source, guide], root), [])
+
+
+class DocumentationStyle(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        cls.style = load("check_docs_style", "check_docs_style.py")
+
+    def test_style_violations_are_reported(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            source = root / "README.md"
+            source.write_text(
+                "# Test\n\nThis sentence has a colour issue; it isn't valid project prose.\n",
+                encoding="utf-8",
+            )
+            messages = [
+                finding.message for finding in self.style.check_markdown([source], root)
+            ]
+            self.assertTrue(any("American spelling" in message for message in messages))
+            self.assertTrue(any("contraction" in message for message in messages))
+            self.assertTrue(any("semicolon" in message for message in messages))
+
+    def test_short_american_english_passes(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            source = root / "README.md"
+            source.write_text("# Test\n\nUse the color profile.\n", encoding="utf-8")
+            self.assertEqual(self.style.check_markdown([source], root), [])
+
+    def test_long_paragraph_is_reported(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            source = root / "README.md"
+            source.write_text(
+                "# Test\n\nOne. Two. Three. Four. Five. Six. Seven.\n",
+                encoding="utf-8",
+            )
+            messages = [
+                finding.message for finding in self.style.check_markdown([source], root)
+            ]
+            self.assertIn("paragraph has 7 sentences", messages)
+
+
+class ClaimCoverage(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        cls.claims = load("check_claims", "check_claims.py")
+
+    def test_all_active_document_groups_are_covered(self):
+        relative = {
+            path.relative_to(REPO_ROOT).as_posix() for path in self.claims.linted_paths()
+        }
+        for expected in (
+            "docs/QUICKSTART.md",
+            "docs/PIPELINE.md",
+            "benchmarks/README.md",
+            "release/README.md",
+            "scripts/pipeline.sh",
+            "viewer/README.md",
+        ):
+            self.assertIn(expected, relative)
+        self.assertNotIn("docs/audit/production-blockers.md", relative)
+
+
+class ScriptContracts(unittest.TestCase):
+    @staticmethod
+    def make_colmap_project(root: Path) -> Path:
+        project = root / "project"
+        model = project / "sparse" / "0"
+        images = project / "images"
+        model.mkdir(parents=True)
+        images.mkdir()
+        for name in ("cameras.bin", "images.bin", "points3D.bin"):
+            (model / name).write_bytes(b"fixture")
+        (images / "frame.jpg").write_bytes(b"fixture")
+        return project
+
+    def test_global_mapper_dry_run_uses_colmap_without_writes(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            images = root / "images"
+            output = root / "output"
+            images.mkdir()
+            result = subprocess.run(
+                [
+                    str(REPO_ROOT / "scripts" / "glomap_wrapper.sh"),
+                    str(images),
+                    str(output),
+                    "--dry-run",
+                    "--matcher",
+                    "sequential",
+                ],
+                capture_output=True,
+                text=True,
+            )
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertIn("colmap global_mapper", result.stdout)
+            self.assertIn("colmap sequential_matcher", result.stdout)
+            self.assertFalse(output.exists())
+
+    def test_pipeline_rejects_retired_glomap_value_without_writes(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            images = root / "images"
+            output = root / "output"
+            images.mkdir()
+            result = subprocess.run(
+                [
+                    str(REPO_ROOT / "scripts" / "pipeline.sh"),
+                    str(images),
+                    str(output),
+                    "--sfm",
+                    "glomap",
+                ],
+                capture_output=True,
+                text=True,
+            )
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn("Use --sfm global", result.stderr)
+            self.assertFalse(output.exists())
+
+    def test_pipeline_dry_run_needs_no_external_binary_and_writes_nothing(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            images = root / "images"
+            output = root / "output"
+            images.mkdir()
+            for index in range(3):
+                (images / f"frame-{index}.jpg").write_bytes(b"fixture")
+            result = subprocess.run(
+                [
+                    str(REPO_ROOT / "scripts" / "pipeline.sh"),
+                    str(images),
+                    str(output),
+                    "--opensplat",
+                    str(root / "not-installed"),
+                    "--dry-run",
+                ],
+                capture_output=True,
+                text=True,
+            )
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertIn("colmap automatic_reconstructor", result.stdout)
+            self.assertIn("opensplat_wrapper.sh", result.stdout)
+            self.assertFalse(output.exists())
+
+    def test_opensplat_wrapper_runs_one_explicit_binary(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            project = self.make_colmap_project(root)
+            output = root / "result.ply"
+            fake = root / "fake-opensplat"
+            fake.write_text(
+                "#!/usr/bin/env bash\n"
+                "set -euo pipefail\n"
+                "while [[ $# -gt 0 ]]; do\n"
+                "  if [[ $1 == -o ]]; then printf fixture > \"$2\"; exit 0; fi\n"
+                "  shift\n"
+                "done\n"
+                "exit 2\n",
+                encoding="utf-8",
+            )
+            fake.chmod(0o755)
+            result = subprocess.run(
+                [
+                    str(REPO_ROOT / "scripts" / "opensplat_wrapper.sh"),
+                    str(project),
+                    "--opensplat",
+                    str(fake),
+                    "--output",
+                    str(output),
+                ],
+                capture_output=True,
+                text=True,
+            )
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertEqual(output.read_bytes(), b"fixture")
+
+    def test_opensplat_wrapper_rejects_simulated_multi_gpu_mode(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            project = self.make_colmap_project(root)
+            result = subprocess.run(
+                [
+                    str(REPO_ROOT / "scripts" / "opensplat_wrapper.sh"),
+                    str(project),
+                    "--gpu-ids",
+                    "0,1",
+                ],
+                capture_output=True,
+                text=True,
+            )
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn("not a verified wrapper option", result.stderr)
+
+    def test_opensplat_wrapper_preserves_existing_output_on_failure(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            project = self.make_colmap_project(root)
+            output = root / "result.ply"
+            output.write_bytes(b"original")
+            fake = root / "fake-opensplat"
+            fake.write_text("#!/usr/bin/env bash\nexit 9\n", encoding="utf-8")
+            fake.chmod(0o755)
+            result = subprocess.run(
+                [
+                    str(REPO_ROOT / "scripts" / "opensplat_wrapper.sh"),
+                    str(project),
+                    "--opensplat",
+                    str(fake),
+                    "--output",
+                    str(output),
+                    "--force",
+                ],
+                capture_output=True,
+                text=True,
+            )
+            self.assertEqual(result.returncode, 9)
+            self.assertEqual(output.read_bytes(), b"original")
+
+    def test_opensplat_wrapper_rejects_empty_staged_output(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            project = self.make_colmap_project(root)
+            output = root / "result.ply"
+            fake = root / "fake-opensplat"
+            fake.write_text("#!/usr/bin/env bash\nexit 0\n", encoding="utf-8")
+            fake.chmod(0o755)
+            result = subprocess.run(
+                [
+                    str(REPO_ROOT / "scripts" / "opensplat_wrapper.sh"),
+                    str(project),
+                    "--opensplat",
+                    str(fake),
+                    "--output",
+                    str(output),
+                ],
+                capture_output=True,
+                text=True,
+            )
+            self.assertEqual(result.returncode, 2)
+            self.assertFalse(output.exists())
+
+    def test_lichtfeld_wrapper_replaces_output_after_success(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            project = self.make_colmap_project(root)
+            output = root / "result"
+            output.mkdir()
+            (output / "old.txt").write_text("old", encoding="utf-8")
+            fake = root / "fake-lichtfeld"
+            fake.write_text(
+                "#!/usr/bin/env bash\n"
+                "set -euo pipefail\n"
+                "while [[ $# -gt 0 ]]; do\n"
+                "  if [[ $1 == -o ]]; then printf new > \"$2/result.ply\"; exit 0; fi\n"
+                "  shift\n"
+                "done\n"
+                "exit 2\n",
+                encoding="utf-8",
+            )
+            fake.chmod(0o755)
+            result = subprocess.run(
+                [
+                    str(REPO_ROOT / "scripts" / "lichtfeld_wrapper.sh"),
+                    str(project),
+                    "--lichtfeld",
+                    str(fake),
+                    "--output",
+                    str(output),
+                    "--force",
+                ],
+                capture_output=True,
+                text=True,
+            )
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertEqual((output / "result.ply").read_text(encoding="utf-8"), "new")
+            self.assertFalse((output / "old.txt").exists())
+
+    def test_lichtfeld_wrapper_preserves_output_on_failure(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            project = self.make_colmap_project(root)
+            output = root / "result"
+            output.mkdir()
+            old = output / "old.txt"
+            old.write_text("old", encoding="utf-8")
+            fake = root / "fake-lichtfeld"
+            fake.write_text("#!/usr/bin/env bash\nexit 9\n", encoding="utf-8")
+            fake.chmod(0o755)
+            result = subprocess.run(
+                [
+                    str(REPO_ROOT / "scripts" / "lichtfeld_wrapper.sh"),
+                    str(project),
+                    "--lichtfeld",
+                    str(fake),
+                    "--output",
+                    str(output),
+                    "--force",
+                ],
+                capture_output=True,
+                text=True,
+            )
+            self.assertEqual(result.returncode, 9)
+            self.assertEqual(old.read_text(encoding="utf-8"), "old")
+
+    def test_retired_general_installers_fail_without_writes(self):
+        for script in (
+            "setup_all.sh",
+            "setup_opensplat.sh",
+            "setup_gsplat_cuda.sh",
+            "setup_gsplat_mps.sh",
+            "setup_lichtfeld.sh",
+        ):
+            with self.subTest(script=script), tempfile.TemporaryDirectory() as directory:
+                result = subprocess.run(
+                    [str(REPO_ROOT / "scripts" / script)],
+                    cwd=directory,
+                    capture_output=True,
+                    text=True,
+                )
+                self.assertEqual(result.returncode, 2)
+                self.assertEqual(list(Path(directory).iterdir()), [])
+
+    def test_da3_setup_requires_unlocked_dependency_acceptance(self):
+        with tempfile.TemporaryDirectory() as directory:
+            result = subprocess.run(
+                [str(REPO_ROOT / "scripts" / "setup_da3.sh")],
+                cwd=directory,
+                capture_output=True,
+                text=True,
+            )
+            self.assertEqual(result.returncode, 2)
+            self.assertIn("--accept-unlocked-dependencies", result.stdout)
+            self.assertEqual(list(Path(directory).iterdir()), [])
+
+    def test_feedforward_setup_requires_unlocked_dependency_acceptance(self):
+        with tempfile.TemporaryDirectory() as directory:
+            result = subprocess.run(
+                [
+                    str(REPO_ROOT / "scripts" / "setup_feedforward_sota.sh"),
+                    "mapanything",
+                ],
+                cwd=directory,
+                capture_output=True,
+                text=True,
+            )
+            self.assertEqual(result.returncode, 2)
+            self.assertIn("--accept-unlocked-dependencies", result.stderr)
+            self.assertEqual(list(Path(directory).iterdir()), [])
+
+    def test_feedforward_catalog_is_read_only(self):
+        with tempfile.TemporaryDirectory() as directory:
+            result = subprocess.run(
+                [
+                    str(REPO_ROOT / "scripts" / "setup_feedforward_sota.sh"),
+                    "list",
+                ],
+                cwd=directory,
+                capture_output=True,
+                text=True,
+            )
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertIn("mapanything", result.stderr)
+            self.assertEqual(list(Path(directory).iterdir()), [])
 
 
 if __name__ == "__main__":

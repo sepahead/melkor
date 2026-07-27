@@ -88,7 +88,7 @@ body:
       label: Command and output
       description: >-
         The exact command or API call, copy-pasted rather than retyped, and its output. Capture both
-        streams (`2>&1`); Melkor's diagnostics go to stderr. Redact paths, hostnames, and anything
+        streams (`2>&1`). Melkor's diagnostics go to stderr. Redact paths, hostnames, and anything
         else private.
       render: shell
       placeholder: |
@@ -122,7 +122,7 @@ body:
         and it does not include environment variables, usernames, or home directories.
 
         A minimal reproducing asset helps most — **but only attach one if you have the right to
-        share it** (see the acknowledgements below). If you cannot share it, say so; an inspection
+        share it** (see the acknowledgements below). If you cannot share it, say so. An inspection
         report plus a description of how the file was produced is often enough.
       render: json
 
@@ -149,7 +149,7 @@ body:
         - label: >-
             I will not attach any asset I do not have the right to redistribute, and nothing I attach
             contains personal data. Licensed scan data, client scenes, and captures of identifiable
-            people are not to be uploaded here; a public GitHub issue is a public redistribution.
+            people are not to be uploaded here. A public GitHub issue is a public redistribution.
           required: true
         - label: >-
             I have redacted anything sensitive from the output I pasted, and I have said where I

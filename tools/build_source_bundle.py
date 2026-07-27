@@ -3,7 +3,7 @@
 
 The dangerous way to build a source release is "archive everything tracked". It works right
 up until someone commits a model checkpoint, a dataset, a local scratch directory, or a
-research snapshot under terms incompatible with the core licence — and then the release
+research snapshot under terms incompatible with the core license — and then the release
 quietly ships it. The failure is silent, and it is discovered by the recipient.
 
 So this bundles an **allowlist**: a path is included because it was named, not because it
@@ -35,7 +35,7 @@ REPO_ROOT = Path(__file__).resolve().parent.parent
 
 # Every path that belongs in a source release. A directory includes its tracked contents.
 #
-# Adding a line here is a deliberate act with licence and size consequences. Read
+# Adding a line here is a deliberate act with license and size consequences. Read
 # EXCLUDED_PATTERNS below before you add one.
 ALLOWLIST = [
     # Build system
@@ -51,7 +51,7 @@ ALLOWLIST = [
     "pipeline/",
     "viewer/",
     "packaging/",
-    # Data that defines behaviour
+    # Data that defines behavior
     "profiles/",
     "schemas/",
     "examples/",
@@ -94,9 +94,9 @@ ALLOWLIST = [
     ".editorconfig",
 ]
 
-# Defence in depth. Even if one of these somehow sits under an allowlisted directory, it does
+# Defense in depth. Even if one of these somehow sits under an allowlisted directory, it does
 # not ship. The allowlist alone should be sufficient; this exists because "should be" is not
-# a property you want to bet a licence violation on.
+# a property you want to bet a license violation on.
 EXCLUDED_PATTERNS = [
     # Build outputs and caches
     "build/",
@@ -121,7 +121,7 @@ EXCLUDED_DIRS = [d.rstrip("/") for d in EXCLUDED_PATTERNS if d.endswith("/")]
 
 # File extensions that must never ship, matched case-insensitively against the full suffix.
 #
-# Model weights are the ones that cause licence incidents -- a research-only checkpoint bundled
+# Model weights are the ones that cause license incidents -- a research-only checkpoint bundled
 # into an MIT release. The list is deliberately broad and matched without regard to case, so
 # `.PT` and `.SafeTensors` are caught as surely as `.pt` and `.safetensors`.
 EXCLUDED_EXTENSIONS = [
@@ -149,7 +149,7 @@ def git_tracked_entries(ref: str) -> list[tuple[str, str]]:
     """Every tracked file at ``ref`` as (mode, path).
 
     Built from git, not the working tree, so uncommitted local state can never leak into a
-    release. The mode is carried so symlinks (120000) can be recognised: ``git show`` of a
+    release. The mode is carried so symlinks (120000) can be recognized: ``git show`` of a
     symlink returns its *target path* as bytes, and storing that as a regular file would put a
     wrong, misleading file in the bundle.
     """
@@ -201,7 +201,7 @@ def exclusion_reason(path: str) -> str | None:
 
 
 def is_allowed(path: str) -> bool:
-    # The denylist is defence in depth over the allowlist: even a path under an allowlisted
+    # The denylist is defense in depth over the allowlist: even a path under an allowlisted
     # directory is dropped if it looks like a weight or a secret.
     if exclusion_reason(path) is not None:
         return False
@@ -327,7 +327,7 @@ def main() -> int:
 
         # Any weight, key, secret, or symlink that was dropped is surfaced explicitly and by
         # name, not folded into a directory count. A silently dropped weight reads as "we
-        # covered everything" when we did not, and a weight that was NOT dropped is a licence
+        # covered everything" when we did not, and a weight that was NOT dropped is a license
         # incident -- so both directions of this must be visible.
         notable = [
             (p, r) for p, r in excluded

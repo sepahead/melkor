@@ -3,15 +3,17 @@
 
 from __future__ import annotations
 
-import json
 import base64
 import gzip
+import json
 import os
 import struct
 import subprocess
 import sys
 import tempfile
 from pathlib import Path
+
+TIMEOUT_SECONDS = 120
 
 
 def run(binary: Path, *args: str) -> subprocess.CompletedProcess[str]:
@@ -20,6 +22,7 @@ def run(binary: Path, *args: str) -> subprocess.CompletedProcess[str]:
         check=False,
         capture_output=True,
         text=True,
+        timeout=TIMEOUT_SECONDS,
     )
 
 
@@ -29,6 +32,7 @@ def run_command(binary: Path, *args: str) -> subprocess.CompletedProcess[str]:
         check=False,
         capture_output=True,
         text=True,
+        timeout=TIMEOUT_SECONDS,
     )
 
 
@@ -121,6 +125,8 @@ def write_glb(path: Path) -> None:
 
 
 def main() -> int:
+    if sys.flags.optimize:
+        raise SystemExit("refusing to run under PYTHONOPTIMIZE: asserts would be stripped")
     if len(sys.argv) != 2:
         raise SystemExit("usage: test_inspect_cli.py /path/to/melkor")
     binary = Path(sys.argv[1]).resolve()
@@ -167,14 +173,14 @@ def main() -> int:
         # vertices), read through the KHR reader. The committed seed corpus provides one.
         khr_glb = Path(__file__).resolve().parent.parent / "fuzz" / "corpus" / "gltf_khr" / \
             "minimal_degree1.glb"
-        if khr_glb.is_file():
-            khr_result = run(binary, str(khr_glb), "--json")
-            assert khr_result.returncode == 0, khr_result.stderr
-            khr_report = json.loads(khr_result.stdout)
-            assert khr_report["source"]["kind"] == "splat_data", khr_report["source"]
-            assert khr_report["cloud"]["splats"] == 3, khr_report["cloud"]
-            assert khr_report["cloud"]["sh_degree"] == 1, khr_report["cloud"]
-            assert khr_report["cloud"]["fields"]["color"] == "explicit_sh_dc"
+        assert khr_glb.is_file(), f"missing seed corpus GLB: {khr_glb}"
+        khr_result = run(binary, str(khr_glb), "--json")
+        assert khr_result.returncode == 0, khr_result.stderr
+        khr_report = json.loads(khr_result.stdout)
+        assert khr_report["source"]["kind"] == "splat_data", khr_report["source"]
+        assert khr_report["cloud"]["splats"] == 3, khr_report["cloud"]
+        assert khr_report["cloud"]["sh_degree"] == 1, khr_report["cloud"]
+        assert khr_report["cloud"]["fields"]["color"] == "explicit_sh_dc"
 
         invalid_color = mesh_gltf()
         invalid_color["meshes"][0]["primitives"][0]["attributes"]["COLOR_0"] = 99
@@ -405,7 +411,7 @@ def main() -> int:
         except OSError:
             # APFS rejects non-UTF-8 path components; Linux filesystems permit
             # them and exercise the filename branch below.
-            pass
+            print("SKIP: filesystem rejects non-UTF-8 filenames; invalid-byte branch not run")
         else:
             invalid_byte_result = run(binary, str(invalid_byte_name))
             assert invalid_byte_result.returncode == 0

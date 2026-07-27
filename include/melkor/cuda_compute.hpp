@@ -123,8 +123,4 @@ private:
 } // namespace cuda
 } // namespace melkor
 
-// Note: this header used to alias `namespace melkor::metal = melkor::cuda`
-// under MELKOR_HAS_CUDA for legacy call sites. The alias is gone: it
-// collides with the real melkor::metal namespace (metal_compute.hpp, whose
-// stubs are compiled on every non-Metal platform) in any translation unit
-// that includes both headers.
+// This header does not create a melkor::metal alias. Platform namespaces stay independent.

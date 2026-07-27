@@ -128,7 +128,7 @@ Result<std::uint64_t> checked_sh_coefficient_count(std::uint32_t degree) {
         return Result<std::uint64_t>::failure(ErrorCode::invalid_data, std::move(diagnostic));
     }
 
-    // (degree + 1)^2 coefficients per colour channel. Degree 0 is 1 (the DC term), degree 3 is
+    // (degree + 1)^2 coefficients per color channel. Degree 0 is 1 (the DC term), degree 3 is
     // 16, degree 4 is 25.
     const std::uint64_t n = static_cast<std::uint64_t>(degree) + 1;
     return checked_mul(n, n, "spherical-harmonic coefficient count");

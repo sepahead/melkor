@@ -363,7 +363,7 @@ SpzEncodeResult SpzEncoder::encodeToFile(const std::string& filepath, const Spla
 
     melkor::io::WriteOptions options;
     // The legacy entry point has no --force plumbing yet; CLI v2 (WP15) makes overwrite an
-    // explicit user decision. Preserving the historical "replace the output" behaviour here
+    // explicit user decision. Preserving the historical "replace the output" behavior here
     // keeps this a pure data-safety fix rather than a silent contract change.
     options.overwrite = true;
 

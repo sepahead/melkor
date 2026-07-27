@@ -363,7 +363,7 @@ void test_allows_symlink_when_explicitly_requested() {
 
     // Note the semantics: the atomic replace installs a regular file AT the link path,
     // replacing the link itself. It does not write through to the target. That is the correct
-    // behaviour for an atomic writer -- rename() cannot write "through" a symlink -- and it is
+    // behavior for an atomic writer -- rename() cannot write "through" a symlink -- and it is
     // why allow_output_symlink is a niche escape hatch rather than a sensible default.
     CHECK(fs::exists(link));
     CHECK(!fs::is_symlink(fs::symlink_status(link)));

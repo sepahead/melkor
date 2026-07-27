@@ -30,8 +30,8 @@
 /pyproject.toml                     @sepahead
 /VERSION                            @sepahead
 
-# --- Vendored third-party code and licence evidence ---------------------------------------
-# Changes here move the redistributable boundary and alter the licence obligations of every
+# --- Vendored third-party code and license evidence ---------------------------------------
+# Changes here move the redistributable boundary and alter the license obligations of every
 # downstream consumer. A permissively licensed core must not acquire copyleft or research-only
 # source without an explicit, reviewed decision.
 /third_party/                       @sepahead

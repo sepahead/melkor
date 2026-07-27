@@ -938,7 +938,7 @@ std::vector<float> computeKnnDistances(
     // contract, and each backend -- CPU included -- implements it.
     //
     // An empty result means the backend could not do it, so we fall through to the CPU code
-    // below. It never means "there were no neighbours".
+    // below. It never means "there were no neighbors".
     if (provider) {
         auto g = grid::buildGrid(positions);
         if (g.valid) {

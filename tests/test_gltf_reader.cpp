@@ -224,7 +224,7 @@ void test_unknown_color_space_is_assumed() {
 void test_rejects_sh_degree_gap() {
     // Degree 0 present plus a stray degree-2 coefficient while degree 1 is absent: a non-contiguous
     // SH pyramid the KHR spec forbids. It must be rejected, not silently read as degree 0 with the
-    // degree-2 colour dropped.
+    // degree-2 color dropped.
     auto attrs = geometry(1, {0.f, 0.f, 0.f});
     attrs.push_back({"KHR_gaussian_splatting:SH_DEGREE_0_COEF_0", 3, {0.f, 0.f, 0.f}});
     attrs.push_back({"KHR_gaussian_splatting:SH_DEGREE_2_COEF_0", 3, {0.f, 0.f, 0.f}});

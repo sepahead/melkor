@@ -4,7 +4,9 @@
 // This file is the top of the dependency graph, and that is the whole point. Dependencies now
 // flow in one direction:
 //
-//     melkor_core  <--  melkor_backend_{cpu,metal,cuda}  <--  melkor_runtime  <--  CLI / tests
+//     melkor_core  <--  melkor_{metal,cuda}  <--  melkor_runtime  <--  CLI / tests
+//          ^
+//          +-- CPU reference implementation
 //
 // Previously they flowed both ways. `ComputeProvider::create()` was declared in a
 // platform-neutral header in melkor_core but *defined* inside whichever backend was compiled,

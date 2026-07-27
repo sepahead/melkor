@@ -38,9 +38,9 @@
 set -euo pipefail
 
 # ---- logging (to stderr so any captured stdout stays clean) ---------------
-log()  { echo "$@" >&2; }
-warn() { echo "[WARN] $@" >&2; }
-err()  { echo "[ERROR] $@" >&2; }
+log()  { printf '%s\n' "$*" >&2; }
+warn() { printf '[WARN] %s\n' "$*" >&2; }
+err()  { printf '[ERROR] %s\n' "$*" >&2; }
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(dirname "$SCRIPT_DIR")"
@@ -48,15 +48,16 @@ TOOLS_DIR="$PROJECT_ROOT/tools"
 
 ACCEPT_NC=0
 ACCEPT_UNLICENSED=0
+ACCEPT_UNLOCKED=0
 SELECTION=""
 
 usage() {
     cat >&2 <<EOF
-Usage: $0 <model|group> [--accept-noncommercial] [--accept-unlicensed]
+Usage: $0 <model|group> [acceptance options]
 
 Models:
   vggt          Geometry + camera poses; cleanest COLMAP export      (weights NC)
-  mapanything   Universal metric geometry (Apache weights available) (permissive*)
+  mapanything   Metric geometry (Apache weights available)           (permissive*)
   pi3           Pose-free permutation-equivariant geometry           (weights NC)
   amb3r         Metric geometry + SLAM/SfM; reports beating DA3       (UNLICENSED)
   yonosplat     Pose-free feedforward 3DGS -> splats directly         (MIT)
@@ -69,6 +70,11 @@ Groups:
   list          Print the catalog and exit
   all           Everything (requires both --accept-* flags)
 
+Acceptance options:
+  --accept-unlocked-dependencies  Accept unpinned Python dependency resolution
+  --accept-noncommercial         Accept recorded non-commercial weight terms
+  --accept-unlicensed            Accept missing or unspecified license terms
+
 * mapanything code is Apache-2.0; use the facebook/map-anything-apache weights
   for commercial use. The default facebook/map-anything weights are CC-BY-NC-4.0.
 EOF
@@ -78,6 +84,7 @@ for arg in "$@"; do
     case "$arg" in
         --accept-noncommercial) ACCEPT_NC=1 ;;
         --accept-unlicensed)    ACCEPT_UNLICENSED=1 ;;
+        --accept-unlocked-dependencies) ACCEPT_UNLOCKED=1 ;;
         -h|--help)              usage; exit 0 ;;
         --*)                    err "Unknown flag: $arg"; usage; exit 1 ;;
         *)                      SELECTION="$arg" ;;
@@ -106,6 +113,12 @@ if [ "$SELECTION" = "list" ]; then
         printf '  %-12s %-14s %-14s %s\n' "$name" "$cat" "$lic" "$note" >&2
     done
     exit 0
+fi
+
+if [ "$ACCEPT_UNLOCKED" -ne 1 ]; then
+    err "Installation requires --accept-unlocked-dependencies."
+    err "The source revisions are pinned, but Python dependencies are not hash-locked."
+    exit 2
 fi
 
 # Resolve selection -> list of catalog names.
@@ -169,6 +182,10 @@ install_one() {
     log "$note"
 
     if [ -d "$dir/repo/.git" ]; then
+        if [ "$(git -C "$dir/repo" remote get-url origin)" != "$repo" ]; then
+            err "$name has an unexpected origin: $dir/repo"
+            return 2
+        fi
         log "Selecting reviewed revision $ref from $repo ..."
         git -C "$dir/repo" fetch --depth 1 origin "$ref" >&2
         git -C "$dir/repo" checkout --detach FETCH_HEAD >&2
@@ -179,10 +196,18 @@ install_one() {
         git -C "$dir/repo" fetch --depth 1 origin "$ref" >&2
         git -C "$dir/repo" checkout --detach FETCH_HEAD >&2
     fi
+    if [ "$(git -C "$dir/repo" rev-parse HEAD)" != "$ref" ]; then
+        err "$name does not match the reviewed revision."
+        return 2
+    fi
+    if [ -n "$(git -C "$dir/repo" status --porcelain --untracked-files=all)" ]; then
+        err "$name contains local or generated files. Use a clean checkout."
+        return 2
+    fi
 
     # Surface the ACTUAL license from the checkout.
     local lic_file
-    lic_file="$(find "$dir/repo" -maxdepth 1 -iname 'LICENSE*' | head -1)"
+    lic_file="$(find "$dir/repo" -maxdepth 1 -iname 'LICENSE*' -print -quit)"
     if [ -n "$lic_file" ]; then
         log "License ($name): $(head -1 "$lic_file" | tr -d '\r')  [$lic_file]"
     else
@@ -205,7 +230,8 @@ install_one() {
     # requirements.txt handle it there.
     case "$name" in
         vggt)
-            pip install -r "$dir/repo/requirements.txt" >&2 || pip install -e "$dir/repo" >&2 ;;
+            pip install -r "$dir/repo/requirements.txt" >&2
+            pip install -e "$dir/repo" >&2 ;;
         mapanything)
             pip install -e "$dir/repo[colmap]" >&2 ;;
         moge2)
@@ -224,7 +250,7 @@ install_one() {
                 pip install -r "$dir/repo/requirements.txt" >&2
             fi ;;
     esac
-    deactivate || true
+    deactivate
 
     create_wrapper "$name" "$cat"
     log "Installed '$name' -> $dir"

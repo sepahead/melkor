@@ -12,7 +12,7 @@
 // harmonics: KHR stores one accessor per coefficient (each accessor is all splats' RGB for that one
 // coefficient), which is coefficient-major across splats, and it must be transposed into the scene
 // model's splat-major per-splat blocks. That transpose is the easiest place in the whole reader to
-// silently corrupt colour, so it is done here in one place and pinned by tests.
+// silently corrupt color, so it is done here in one place and pinned by tests.
 
 #ifndef MELKOR_FORMAT_GLTF_READER_HPP
 #define MELKOR_FORMAT_GLTF_READER_HPP
@@ -31,7 +31,7 @@
 
 namespace melkor::format::gltf {
 
-// The result of reading one splat primitive: the local-space splats, the declared colour space, and
+// The result of reading one splat primitive: the local-space splats, the declared color space, and
 // the SH degree that was actually present in the source. `color_space_assumed` is true when the
 // primitive's `colorSpace` string was not one Melkor recognises and sRGB was assumed -- the caller
 // turns that into a LOSS_COLOR_SPACE_ASSUMED entry rather than the reader silently guessing.
@@ -40,7 +40,7 @@ struct PrimitiveRead {
     khr::ColorSpace color_space = khr::ColorSpace::srgb_rec709_display;
     bool color_space_assumed = false;
     // The colorSpace string exactly as declared. Retained so the scene reader can detect a genuine
-    // colour-space conflict between primitives even when one or both strings are unrecognised (and
+    // color-space conflict between primitives even when one or both strings are unrecognized (and
     // therefore both coerced to the sRGB enum above).
     std::string color_space_raw;
     std::uint32_t source_sh_degree = 0;
@@ -76,12 +76,10 @@ struct SceneRead {
 // The reference graph is walked iteratively with a visited-set so a cyclic or shared-node document
 // cannot loop forever. Primitives of differing SH degree are padded to the maximum with zeros.
 //
-// What the walk cannot fully preserve is reported, not hidden: an unsupported *required* extension
-// is a hard error; a node rotation applied to degree>=1 SH is a severe loss (the Wigner-D rotation
-// is not yet implemented, so the view-dependent colour is left in the source frame); an assumed or
-// mixed colour space, a flattened hierarchy, and any splat dropped by a singular node transform are
-// each recorded. The caller applies the loss policy (approving codes) before treating the result as
-// a clean conversion.
+// The reader reports each item that it cannot preserve. It rejects an unsupported required
+// extension. It rotates degree 0-3 SH for each proper node rotation. A reflection or singular
+// transform has no proper rotation, so the reader reports a severe loss. It also reports color-space
+// assumptions, hierarchy flattening, and dropped splats. The caller applies the loss policy.
 //
 // `limits` bounds resource use. Because a mesh shared by many nodes is instantiated once per node,
 // a small file can otherwise describe an enormous splat cloud; the walk charges each node and each

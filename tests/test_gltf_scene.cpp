@@ -1,8 +1,8 @@
 // Tests for the glTF scene-graph walk (read_gaussian_scene).
 //
-// These pin the whole-scene behaviour: node transforms are composed and applied to geometry, the
+// These pin the whole-scene behavior: node transforms are composed and applied to geometry, the
 // walk terminates on a node graph that is not a plain tree, primitives of different SH degree merge
-// by padding, and the loss report records what could not be preserved (an assumed colour space, a
+// by padding, and the loss report records what could not be preserved (an assumed color space, a
 // flattened hierarchy, an un-applied SH rotation) while an unsupported required extension is a hard
 // error. Buffers are built by hand.
 //

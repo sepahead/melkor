@@ -2,7 +2,7 @@
 // metal::GaussianProcessor behind the ComputeProvider interface.
 //
 // Compiled only on macOS with Metal enabled (part of melkor_metal).
-// Also supplies the ComputeProvider::create() factory for Metal builds.
+// Supplies createMetalProvider() for registration by melkor_runtime.
 
 #include "melkor/compute_provider.hpp"
 #include "melkor/metal_compute.hpp"
@@ -97,7 +97,7 @@ public:
     // (P0-05, P1-02). They are part of the abstract ComputeProvider contract now.
     //
     // An empty return means "this backend could not do it", which the caller treats as a
-    // signal to fall back -- never as "there were no neighbours".
+    // signal to fall back -- never as "there were no neighbors".
     std::vector<float> knnStatsGrid(
         const std::vector<float>& positions,
         const std::vector<uint32_t>& cell_entries,
@@ -130,10 +130,6 @@ private:
     std::unique_ptr<metal::MetalContext> ctx_;
     std::unique_ptr<metal::GaussianProcessor> processor_;
 };
-
-// --- Factory (Metal build) ---
-
-
 
 // The one entry point this backend exposes to the runtime layer.
 //

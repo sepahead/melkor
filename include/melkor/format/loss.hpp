@@ -36,8 +36,8 @@ enum class LossSeverity : std::uint8_t {
     // A measurable but usually acceptable loss, such as quantisation within a published bound.
     // Recorded, does not block by default.
     warning = 1,
-    // Semantic data removed or guessed -- SH degree 4 reduced to 3, or a colour space assumed
-    // because the source named an unrecognised one. Blocks the commit unless the caller approves
+    // Semantic data removed or guessed -- SH degree 4 reduced to 3, or a color space assumed
+    // because the source named an unrecognized one. Blocks the commit unless the caller approves
     // this exact loss code.
     severe = 2,
     // The target cannot represent the asset without violating an invariant. Always blocks;
@@ -62,10 +62,8 @@ struct LossItem {
 namespace loss_code {
 inline constexpr const char* kShDegreeTruncated = "LOSS_SH_DEGREE_TRUNCATED";
 inline constexpr const char* kShCoefficientsDropped = "LOSS_SH_COEFFICIENTS_DROPPED";
-// A node rotation applies to the geometry, but its rotation of the (degree >= 1) spherical
-// harmonics -- a Wigner-D transform -- is not yet implemented, so the view-dependent colour is left
-// in the source frame. Severe: it changes rendered appearance for a rotated splat, so it must be
-// approved rather than silently accepted.
+// A reflection or singular node transform has no proper rotation for degree 1-3 SH.
+// This severe loss leaves the view-dependent color in the source frame.
 inline constexpr const char* kShRotationNotApplied = "LOSS_SH_ROTATION_NOT_APPLIED";
 inline constexpr const char* kSceneGraphFlattened = "LOSS_SCENE_GRAPH_FLATTENED";
 inline constexpr const char* kNodeNameDropped = "LOSS_NODE_NAME_DROPPED";

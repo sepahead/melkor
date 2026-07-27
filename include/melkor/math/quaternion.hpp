@@ -61,7 +61,7 @@ Result<Quat> normalize(const Quat& q);
 bool is_unit(const Quat& q);
 
 // Converts a unit quaternion to its rotation matrix. Precondition: q is finite; the caller
-// should have normalised it. The matrix is orthonormal within floating tolerance.
+// should have normalized it. The matrix is orthonormal within floating tolerance.
 Mat3 to_matrix(const Quat& q);
 
 // Recovers a quaternion from a rotation matrix, using the numerically stable branch selection
@@ -71,7 +71,7 @@ Mat3 to_matrix(const Quat& q);
 Result<Quat> from_matrix(const Mat3& m);
 
 // Builds a quaternion from an orthonormal right-handed frame given as three column axes. Used
-// by mesh initialisation to turn a tangent frame into an orientation. The axes must be
+// by mesh initialization to turn a tangent frame into an orientation. The axes must be
 // orthonormal within tolerance; otherwise this fails rather than producing a non-rotation.
 Result<Quat> from_frame(const Vec3& axis_x, const Vec3& axis_y, const Vec3& axis_z);
 

@@ -3,7 +3,7 @@
   "profile_id": "ply:graphdeco-3dgs-v1",
   "container": "ply",
   "status": "stable",
-  "description": "The PLY layout produced by the reference Inria/Graphdeco 3D Gaussian Splatting trainer. Recognised only when the identifying property set is present, never guessed from value ranges.",
+  "description": "The PLY layout produced by the reference Inria/Graphdeco 3D Gaussian Splatting trainer. Recognized only when the identifying property set is present, never guessed from value ranges.",
   "coordinate_system": "unspecified",
   "length_unit": "unspecified",
   "quaternion_order": "wxyz",

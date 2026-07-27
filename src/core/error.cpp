@@ -99,10 +99,10 @@ std::string redact_path(const std::string& path, DiagnosticPathPolicy policy,
             // A plain `path.compare(0, root.size(), root) == 0` treats "/home/alice/work" as a
             // prefix of "/home/alice/workshop/secret.ply" -- it is, as a string -- and returns
             // "shop/secret.ply", which is both a nonsense relative path and a leak of a
-            // directory the caller never authorised. The character immediately after the root
+            // directory the caller never authorized. The character immediately after the root
             // must be a separator for this to be genuine containment.
             //
-            // A trailing separator on the root is normalised away first, so both
+            // A trailing separator on the root is normalized away first, so both
             // "/home/alice/work" and "/home/alice/work/" behave identically.
             std::string base = root;
             while (!base.empty() && (base.back() == '/' || base.back() == '\\')) {

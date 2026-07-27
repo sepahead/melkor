@@ -15,7 +15,7 @@
 // use the float64 math oracle (melkor/math/*) and convert back, so the numerically sensitive
 // work is done in double even though the result is stored in single.
 //
-// This is the canonical public scene model. Deferred backend, densifier, and mesh-initialisation
+// This is the canonical public scene model. Deferred backend, densifier, and mesh-initialization
 // implementations temporarily retain a private compatibility representation, but it is not
 // installed with the SDK and must not cross into new model, format, inspection, or CLI code.
 
@@ -57,7 +57,7 @@ struct Quatf {
 //
 // Note this is splat-major, NOT coefficient-major: a format like glTF KHR_gaussian_splatting that
 // stores one accessor per coefficient (all splats' COEF_0, then all splats' COEF_1, ...) must
-// transpose into this block layout, and getting that transpose wrong silently corrupts colour.
+// transpose into this block layout, and getting that transpose wrong silently corrupts color.
 //
 // There is no per-splat heap allocation: everything is one contiguous vector, sized and checked
 // once at construction.
@@ -75,7 +75,7 @@ class ShBuffer {
     static Result<ShBuffer> create(std::uint32_t degree, std::size_t splat_count,
                                    std::vector<float> data);
 
-    // A degree-0 (DC only) buffer initialised to black. Used as the safe default appearance.
+    // A degree-0 (DC only) buffer initialized to black. Used as the safe default appearance.
     static Result<ShBuffer> black(std::size_t splat_count);
 
     std::uint32_t degree() const noexcept { return degree_; }
@@ -147,7 +147,7 @@ class SplatData {
     // byte-for-byte unchanged.
     EditTransaction edit() const;
 
-    // Re-checks every invariant. Cheap defence for a value that has crossed an ABI or been
+    // Re-checks every invariant. Cheap defense for a value that has crossed an ABI or been
     // deserialised; a well-formed SplatData created through create() always passes.
     Result<void> validate() const;
 

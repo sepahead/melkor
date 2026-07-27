@@ -1,15 +1,15 @@
-// PLY colour conversion: the source property TYPE decides the scaling, not folklore.
+// PLY color conversion: the source property TYPE decides the scaling, not folklore.
 //
 // This suite exists because of a shipped correctness bug (P0-07). The reader collapsed every
 // property to a float and then divided every red/green/blue value by 255 unconditionally --
-// as though every PLY on earth stored colour as an 8-bit byte. So a point cloud authored with
+// as though every PLY on earth stored color as an 8-bit byte. So a point cloud authored with
 //
-//     property float red      (value 0.5, meaning mid-grey in [0,1])
+//     property float red      (value 0.5, meaning middle gray in [0,1])
 //
 // was decoded as 0.5 / 255 = 0.00196, i.e. essentially black. The scene rendered nearly
 // unlit, and nothing in the old suite noticed because nothing tested a float-RGB PLY.
 //
-// The rule this suite pins: colour normalisation depends on the declared source type.
+// The rule this suite pins: color normalization depends on the declared source type.
 //   - unsigned 8-bit  -> divide by 255
 //   - unsigned 16-bit -> divide by 65535
 //   - float / double  -> already in [0,1], divide by nothing
@@ -60,7 +60,7 @@ bool approx(float a, float b, float tol = 1e-5f) {
 // ---------------------------------------------------------------------------
 
 void test_ascii_float_rgb_is_not_divided_by_255() {
-    // Three grey levels the blueprint names explicitly: 0.25, 0.5, 1.0.
+    // Three gray levels the blueprint names explicitly: 0.25, 0.5, 1.0.
     const std::string ply = "ply\n"
                             "format ascii 1.0\n"
                             "element vertex 3\n"
@@ -117,7 +117,7 @@ void test_binary_float_rgb_is_not_divided_by_255() {
            "property float green\n"
            "property float blue\n"
            "end_header\n");
-    // Vertex 0: grey 0.5
+    // Vertex 0: gray 0.5
     append_float(0.0f);
     append_float(0.0f);
     append_float(0.0f);
@@ -201,7 +201,7 @@ void test_uchar_rgb_is_divided_by_255() {
 }
 
 // ---------------------------------------------------------------------------
-// 16-bit unsigned colour scales by 65535, not 255.
+// 16-bit unsigned color scales by 65535, not 255.
 // ---------------------------------------------------------------------------
 
 void test_ushort_rgb_is_divided_by_65535() {
@@ -251,7 +251,7 @@ void test_ushort_rgb_is_divided_by_65535() {
 }
 
 // ---------------------------------------------------------------------------
-// 3DGS f_dc_* is NOT colour-scaled at all: it is already an SH coefficient.
+// 3DGS f_dc_* is NOT color-scaled at all: it is already an SH coefficient.
 // ---------------------------------------------------------------------------
 
 void test_fdc_is_not_colour_scaled() {
@@ -294,9 +294,9 @@ int main() {
     test_fdc_is_not_colour_scaled();
 
     if (g_failures == 0) {
-        std::printf("ply colour: %d checks passed\n", g_checks);
+        std::printf("ply color: %d checks passed\n", g_checks);
         return 0;
     }
-    std::fprintf(stderr, "ply colour: %d of %d checks FAILED\n", g_failures, g_checks);
+    std::fprintf(stderr, "ply color: %d of %d checks FAILED\n", g_failures, g_checks);
     return 1;
 }

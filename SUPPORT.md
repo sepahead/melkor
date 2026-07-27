@@ -16,7 +16,7 @@ If you need a stable, supported Melkor, wait for `v2.0.0`. Watch
 [Releases](https://github.com/sepahead/melkor/releases).
 
 This is deliberate. The project would rather tell you plainly that nothing is supported yet than
-imply that a release candidate carries a support promise it cannot honour.
+imply that a release candidate carries a support promise it cannot honor.
 
 ## Support policy after v2.0.0
 

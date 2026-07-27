@@ -65,7 +65,7 @@ Result<std::uint64_t> checked_array_bytes(std::uint64_t count, std::uint64_t str
 // per-channel, and lower degrees must be complete).
 Result<std::uint64_t> checked_sh_coefficient_count(std::uint32_t degree);
 
-// Total SH storage for `splat_count` splats at `degree`, across three colour channels.
+// Total SH storage for `splat_count` splats at `degree`, across three color channels.
 Result<std::uint64_t> checked_sh_total_floats(std::uint64_t splat_count, std::uint32_t degree);
 
 }  // namespace melkor

@@ -4,7 +4,10 @@ A living summary of where the `v2.0.0` production-hardening program stands. The 
 per-blocker status is in [`production-blockers.md`](production-blockers.md); this is the
 narrative overview and the record of what needs a human decision.
 
-Last updated: 2026-07-16. A1 implementation baseline: `32cd43f`.
+Last updated: 2026-07-25. A1 implementation baseline: `32cd43f`.
+
+The latest repository-wide review is in
+[`ten-lens-review-20260725.md`](ten-lens-review-20260725.md).
 
 The counts in this document classify individual production findings only. They do not claim that
 the blueprint's PR-level acceptance criteria are complete. A strict takeover audit at `090126e`
@@ -16,8 +19,8 @@ the exact-HEAD CI evidence are in [`takeover-20260715.md`](takeover-20260715.md)
 40 findings tracked (18 P0, 15 P1, 7 P2). As of this update:
 
 - **9 closed** with attached evidence: P0-04, P0-05, P0-06, P0-07, P0-08, P0-16, P1-02, P1-03, P1-14.
-- **11 in progress** with partial work landed: P0-01, P0-10, P0-11, P0-12, P0-14, P0-17, P1-06, P1-12, P1-15, P2-03, P2-04.
-- **20 open.**
+- **13 in progress** with partial work landed: P0-01, P0-10, P0-11, P0-12, P0-13, P0-14, P0-15, P0-17, P1-06, P1-12, P1-15, P2-03, P2-04.
+- **18 open.**
 
 ## Narrow blocker closures and their evidence
 
@@ -68,7 +71,8 @@ documented:
 - The safety substrate: `Result<T>` + stable diagnostics, checked arithmetic, resource-limit
   profiles + `Budget`, cancellation.
 - The canonical math oracle: activation, quaternion, and covariance `Σ' = AΣAᵀ` transform.
-- Prose claim lint + benchmark manifest schemas.
+- Recursive public-prose claim lint, local Markdown link checks, and benchmark manifest schemas.
+- Strict shell wrappers that reject fake multi-GPU modes, no-op options, and mutable general installers.
 - A stable `CI Gate` status check and `CMakePresets.json`.
 - Governance: `GOVERNANCE.md`, `MAINTAINERS.md`, `CODE_OF_CONDUCT.md`, issue forms, ten-lens PR
   template. Security: threat model + rewritten policy with DoS in scope.

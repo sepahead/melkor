@@ -5,7 +5,7 @@ to a standard 3DGS-layout PLY. This document describes the tested integration
 as of **2026-07-10**. The upstream project remains the authority for model
 architecture and benchmark results.
 
-The supported path is:
+The tested path is:
 
 ```text
 images -> pinned official DA3 checkpoint -> learned Gaussians or camera-aware
@@ -31,7 +31,7 @@ The native C++ converter and viewer do not require DA3.
 ## Install
 
 ```bash
-./scripts/setup_da3.sh
+./scripts/setup_da3.sh --accept-unlocked-dependencies
 ```
 
 The installer checks out official Depth Anything 3 commit
@@ -41,11 +41,18 @@ revision.
 Downloads are staged, checked for configuration and weight files, marked with
 their revision, and moved into place atomically.
 
+The Python dependency set does not have a complete hash lock.
+The required flag acknowledges this remaining supply-chain risk.
+Use an isolated development environment.
+Setup rejects an upstream checkout that contains modified or untracked files.
+
 The 1.1 LARGE, GIANT, and NESTED checkpoints are gated because their model
 cards declare CC-BY-NC-4.0 terms:
 
 ```bash
-./scripts/setup_da3.sh --accept-noncommercial
+./scripts/setup_da3.sh \
+  --accept-unlocked-dependencies \
+  --accept-noncommercial
 ```
 
 Review the model card before accepting. Melkor's MIT license does not replace
@@ -69,7 +76,7 @@ The setup writes two wrappers at the repository root:
   --output scene.ply
 
 # Compress and inspect
-./build/melkor scene.ply scene.spz
+./build/dev/melkor scene.ply scene.spz
 cd viewer && bun run serve
 ```
 
@@ -77,7 +84,7 @@ Input directory discovery is non-recursive and accepts JPEG, PNG, WebP, TIFF,
 and BMP files. Lexicographic filename order becomes view order, so use
 zero-padded names for video frames.
 
-## Supported reconstruction checkpoints
+## Tested reconstruction checkpoints
 
 | CLI name | Reconstruction path | Weight terms | Installer revision |
 |---|---|---|---|
@@ -121,12 +128,12 @@ is deliberately not accepted directly. Write PLY, then use the canonical native
 encoder:
 
 ```bash
-./build/melkor scene.ply scene.spz
+./build/dev/melkor scene.ply scene.spz
 ```
 
 JSON is a bounded debugging preview, NPZ preserves arrays for Python analysis,
 and GLB is a colored point-cloud visualization rather than a Gaussian-splat
-container. PLY/SPZ are the supported reconstruction interchange formats.
+container. PLY and SPZ are the tested reconstruction interchange formats.
 
 ## Geometry and filtering contract
 
@@ -182,11 +189,8 @@ The CoreML port was an experimental single-image surface. It was removed from th
 repository on 2026-07-14. See `docs/adapters/index.md`. The notes below describe
 its behavior for historical reference.
 
-Its inference and benchmark commands
-remain available for research. Its multi-view fusion, streaming, conversion,
-and Gaussian-export commands are disabled until they match official DA3
-semantics end to end. It is not the supported replacement
-for the CUDA bridge.
+The removed port has no commands in this repository.
+Use the CUDA bridge or a reviewed external tool.
 
 ## Validation
 

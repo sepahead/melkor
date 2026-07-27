@@ -2,7 +2,7 @@
 // cuda::GaussianProcessor behind the ComputeProvider interface.
 //
 // Compiled only on Linux with CUDA enabled (part of melkor_cuda).
-// Also supplies the ComputeProvider::create() factory for CUDA builds.
+// Supplies createCudaProvider() for registration by melkor_runtime.
 
 #include "melkor/compute_provider.hpp"
 #include "melkor/cuda_compute.hpp"
@@ -99,7 +99,7 @@ public:
     // (P0-05, P1-02). They are part of the abstract ComputeProvider contract now.
     //
     // An empty return means "this backend could not do it", which the caller treats as a
-    // signal to fall back -- never as "there were no neighbours".
+    // signal to fall back -- never as "there were no neighbors".
     std::vector<float> knnStatsGrid(
         const std::vector<float>& positions,
         const std::vector<uint32_t>& cell_entries,
@@ -132,10 +132,6 @@ private:
     std::unique_ptr<cuda::CudaContext> ctx_;
     std::unique_ptr<cuda::GaussianProcessor> processor_;
 };
-
-// --- Factory (CUDA build) ---
-
-
 
 // The one entry point this backend exposes to the runtime layer.
 //

@@ -67,7 +67,7 @@ set(MELKOR_ADAPTER_PROTOCOL_VERSION 1)
 # Wall-clock time is not embedded by default: it would make two builds of the same
 # commit differ, which defeats the reproducibility comparison in the release gate.
 # SOURCE_DATE_EPOCH, when the environment supplies it, is the standard reproducible
-# substitute and is honoured here.
+# substitute and is honored here.
 # ---------------------------------------------------------------------------
 
 if(DEFINED ENV{SOURCE_DATE_EPOCH})

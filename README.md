@@ -28,10 +28,10 @@
 > **Development status: v2 hardening in progress. No production binary release is
 > currently supported.**
 >
-> `main` is development software and its public contract is still changing. The `1.x`
-> releases remain downloadable but are not the supported production line, and
-> `v2.0.0-rc.1` is a source-only candidate — no signed binaries, SDK packages, Python
-> wheels, or desktop applications have been published for it.
+> `main` is development software and its public contract is still changing.
+> The `1.x` releases remain downloadable but are not the supported production line.
+> `v2.0.0-rc.1` is a source-only candidate.
+> It has no published signed binaries, SDK packages, Python wheels, or desktop applications.
 >
 > The first supported production line will be `v2.0.0`. What it must satisfy before it can
 > be called that is tracked in [production blockers](docs/audit/production-blockers.md),
@@ -40,32 +40,28 @@
 
 ## Overview
 
-Melkor combines a deterministic native CLI with reviewed reconstruction
-adapters and an offline-capable web viewer. The CLI converts GLB/glTF meshes
-and 3DGS assets, validates files without initializing a GPU, and does
-geometry-based scene completion. Photo training and neural reconstruction are
-handled by explicit external pipelines rather than being presented as native
-CLI features.
+Melkor combines a deterministic native CLI with external integration guides
+and an offline-capable web viewer. The CLI converts GLB/glTF meshes and 3DGS
+assets. It validates files without initializing a GPU. External programs
+handle photo training and neural reconstruction.
 
 ### Support at a glance
 
 | Capability | Status | Interface |
 |---|---|---|
-| Mesh → splats | Maintained native path | `melkor INPUT.glb OUTPUT.ply` (`--basic` or `--enhanced`) |
+| Mesh → splats | Maintained vertex path | `melkor INPUT.glb OUTPUT.ply --basic` |
 | 3DGS PLY ↔ SPZ | Maintained native path | Reads SPZ v1–v3. Writes SPZ v3. |
 | Asset validation | Maintained native path | `melkor inspect INPUT [--json] [--strict]` |
-| Scene completion | Maintained native path | Deterministic densification with `--fill-holes` |
-| Training from photos | External tool integrations | COLMAP/GLOMAP plus OpenSplat, gsplat, or LichtFeld-Studio |
+| Scene completion | Internal development code | `--fill-holes` fails until the canonical model migration is complete. |
+| Training from photos | Development wrapper | User-supplied COLMAP and OpenSplat executables |
 | Feedforward reconstruction | Reviewed bridge/catalog | DA3 bridge. Other adapters are license- and platform-dependent. |
 | Web viewing | Maintained viewer | PLY, SPZ, SPLAT, KSPLAT, and SOG/ZIP. The local file limit is 2 GiB. Browser and device memory can set a lower practical limit. |
 | Desktop viewing | Developer build | Optional Tauri shell. Local bundles are unsigned. |
 
 ### Highlights
 
-- **Honest conversion modes.** Basic is fast vertex-to-splat conversion.
-  Enhanced adds k-NN adaptive scale and surface alignment. Both operate on
-  mesh geometry. Trained fitting and neural reconstruction use dedicated
-  pipelines.
+- **Honest conversion mode.** Basic maps mesh vertices to splats. Enhanced
+  conversion is unavailable until the area-weighted sampler is complete.
 - **Deterministic inspection.** `melkor inspect` reports metadata, counts,
   bounds, field provenance, and numeric hazards without changing the source or
   initializing a GPU. The JSON schema is versioned as `melkor.inspect.v1`.
@@ -76,9 +72,8 @@ CLI features.
   representation, so a conversion into it is lossy by construction. Melkor does not
   currently publish a measured compression ratio. Any such figure will be stated only
   with the dataset, version, and configuration that produced it.
-- **Geometry-based completion.** The advancing-front densifier bridges
-  interior occlusion holes and sparse regions without a learned prior, while
-  preserving the scene's outer boundary.
+- **Gated scene completion.** The advancing-front implementation remains an
+  internal test target. The CLI fails closed until it uses canonical data.
 - **Backend parity.** Metal, CUDA, and CPU share the same `ComputeProvider`
   contract and host-built uniform grid. Runtime parity uses numeric tolerances
   appropriate for normal floating-point rounding.
@@ -86,22 +81,23 @@ CLI features.
   drag-and-drop, named camera views, deep-linked bundled scenes, progressive
   first-load rendering, orbit/fly controls, and a bounded-memory 4D player.
 
-Training integrations currently cover single-device OpenSplat, true
-distributed data-parallel training with gsplat CUDA, gsplat-mps on Apple
-Silicon, and LichtFeld-Studio on Linux/CUDA. The feedforward catalog includes a
-review date and license information. Some systems are evaluation adapters, not
-image-folder reconstruction tools. Some checkpoints have non-commercial or
-unspecified terms. See [the feedforward integration catalog](docs/FEEDFORWARD_SOTA.md).
+The OpenSplat and LichtFeld-Studio wrappers run one user-supplied executable.
+They do not install or pin an external tool. The gsplat guide describes the
+external boundary. It does not provide an install command.
+
+The feedforward catalog includes a review date and license information. Some
+checkpoints have non-commercial or unspecified terms. See
+[the feedforward integration catalog](docs/FEEDFORWARD_SOTA.md).
 
 Spark exposes `.RAD`/LOD primitives that Melkor can build on, but `.RAD` local
-opening and LOD authoring are not current Melkor features. Likewise,
-`setup_streaming.sh` checks out and scaffolds reviewed upstream SLAM/4D tools.
-each tool still needs its own Linux/CUDA environment and calibrated dataset.
+opening and LOD authoring are not current Melkor features.
+`setup_streaming.sh list` prints a read-only research catalog.
+It does not clone or install an external tool.
 See [Streaming and 4D](docs/STREAMING.md).
 
 ## Requirements
 
-- **Native CLI:** Git, CMake 3.20+, and a C++17 compiler.
+- **Native CLI:** Git, CMake 3.24+, and a C++17 compiler.
 - **macOS:** macOS 13+ with Xcode Command Line Tools. Metal is enabled by
   default.
 - **Linux:** GCC or Clang for the CPU build. NVIDIA CUDA is optional, disabled
@@ -174,14 +170,13 @@ reconstruction walkthrough.
 
 ```bash
 ./build/melkor model.glb scene.ply                 # Basic mesh conversion
-./build/melkor model.gltf scene.spz --enhanced     # Adaptive scale + alignment
+./build/melkor model.gltf scene.spz --basic        # Explicit basic mode
 ./build/melkor scene.ply scene.spz                 # 3DGS PLY → SPZ v3
 ./build/melkor scene.spz scene.ply                 # SPZ v1-v3 → 3DGS PLY
 ```
 
-Basic and Enhanced convert existing mesh geometry. Neither trains a scene from
-photographs. The retired native `--fit` and `--feedforward` facades fail closed
-instead of implying neural behavior they do not implement.
+Basic conversion uses existing mesh vertices. It does not train a scene from
+photographs. The retired `--fit` and `--feedforward` options fail closed.
 
 ### Inspect or inventory an asset
 
@@ -196,60 +191,45 @@ Exit `0` means no errors, exit `1` means invalid data (or warnings under
 [Asset inspection](docs/INSPECT.md) for the deterministic JSON contract and
 format limits.
 
-### Complete a scene
+### Scene completion status
 
-```bash
-# Fill interior occlusion holes and densify sparse regions.
-./build/melkor scene.spz completed.spz --fill-holes
-
-# Denser fill with larger bridgeable holes.
-./build/melkor scene.ply completed.ply \
-  --fill-holes --fill-strength 0.8 --max-hole-size 12
-```
-
-The advancing front does not extend the scene's outer boundary. Parameters,
-limits, and algorithm details are in [Scene completion](docs/SCENE_COMPLETION.md).
+`--fill-holes` currently returns an error.
+The internal densifier still uses the retired mutable data model.
+See [Scene completion](docs/SCENE_COMPLETION.md) for the migration status.
 
 ### Train or reconstruct from photos
 
-The convenience pipeline orchestrates structure-from-motion and an external
-trainer:
+The development pipeline runs COLMAP and one user-supplied OpenSplat binary:
 
 ```bash
-./scripts/setup_all.sh
-./scripts/train_from_images.sh ~/Photos/my_scene ~/output/my_scene
+./scripts/pipeline.sh ~/Photos/my_scene ~/output/my_scene \
+  --opensplat /reviewed/bin/opensplat
 ```
 
-On Linux/NVIDIA with Bash 4+, run the OpenSplat wrapper on one selected
-device:
+Run the OpenSplat wrapper on one selected CUDA device:
 
 ```bash
 ./scripts/opensplat_wrapper.sh /path/to/colmap/project \
-  --gpu 0 -o output.ply
+  --opensplat /reviewed/bin/opensplat \
+  --gpu 0 \
+  --output output.ply
 ```
 
-The wrapper's `data-parallel` mode runs complete replicas and keeps the first
-selected GPU's output. `memory-split` runs shorter independent rotations and
-keeps the last. Neither mode distributes one training job or shards a model.
-For actual multi-GPU distributed training, use gsplat CUDA:
-
-```bash
-./scripts/setup_gsplat_cuda.sh
-./gsplat-cuda-train-distributed --gpus 0,1,2,3 -- \
-  default --data_dir /path/to/colmap/project --result_dir ./output
-```
+The wrapper rejects the former simulated multi-GPU modes.
+Use the native command from a pinned external trainer for distributed work.
+See [the gsplat status guide](docs/GSPLAT_CUDA.md).
 
 DA3 provides a separate Linux/NVIDIA feedforward path. Review its checkpoint
 terms before setup:
 
 ```bash
-./scripts/setup_da3.sh
+./scripts/setup_da3.sh --accept-unlocked-dependencies
 ./da3-infer --input images/ --output scene.ply
 ```
 
 ## Viewer
 
-For a fast local viewer, fetch only digest-checked runtime libraries and
+For a local viewer, fetch only digest-checked runtime libraries and
 project-owned generated demos:
 
 ```bash
@@ -284,17 +264,15 @@ player, and Tauri developer builds.
 ```mermaid
 flowchart LR
     subgraph Inputs
-        P[Photos] --> SfM[COLMAP / GLOMAP]
+        P[Photos] --> SfM[COLMAP]
         M[GLB / glTF mesh]
     end
     SfM --> T[External training<br/>OpenSplat · gsplat · LichtFeld]
     P --> FF[Feedforward<br/>DA3 · reviewed adapters]
-    M --> C[melkor CLI<br/>Basic · Enhanced]
+    M --> C[melkor CLI<br/>Basic]
     T --> S[(3DGS scene)]
     FF --> S
     C --> S
-    S --> SC[Scene completion<br/>--fill-holes]
-    SC --> S
     S --> F[PLY / SPZ]
     F --> V[Web viewer<br/>SparkJS · optional Tauri]
 ```
@@ -310,7 +288,7 @@ differ only within documented floating-point tolerances.
 | Platform | Backend | Enable | Qualification |
 |---|---|---|---|
 | macOS 13+ (Apple Silicon) | Metal | Default on macOS | Runtime parity-tested in hosted CI |
-| Linux + NVIDIA | CUDA | `-DMELKOR_USE_CUDA=ON` | Supported build path. Hosted CI compiles it. Representative hardware runtime qualification is pending. |
+| Linux + NVIDIA | CUDA | `-DMELKOR_USE_CUDA=ON` | Maintained compile path. Hosted CI compiles it. Representative hardware runtime qualification is pending. |
 | Any supported host | CPU | Automatic fallback, or `--no-gpu` | Reference implementation. It has parity tests where hardware permits, with normal float-rounding differences. |
 
 `melkor --info` reports the active backend and device. Linux defaults to CPU
@@ -327,7 +305,7 @@ cmake -S . -B build-strict -DMELKOR_WERROR=ON
 cmake --build build-strict --parallel
 ctest --test-dir build-strict --output-on-failure --no-tests=error
 
-# Explicit CPU/stub topology.
+# Explicit CPU topology.
 cmake -S . -B build-cpu \
   -DMELKOR_USE_METAL=OFF -DMELKOR_USE_CUDA=OFF
 cmake --build build-cpu --parallel
@@ -346,7 +324,6 @@ The native test suites cover:
 - Hostile input and format round trips
 - Deterministic inspection and scene-graph transforms
 - Compute-provider parity and scene completion
-- Differentiable-renderer gradients
 - Strict CLI parsing and the DA3 extraction path
 
 Hosted gates include:
@@ -388,13 +365,13 @@ path. The full fetch is reserved for render-test fixtures.
 | [Asset inspection](docs/INSPECT.md) | Validation, JSON automation contract, and limits |
 | [Pipeline](docs/PIPELINE.md) | Photos-to-splats orchestration |
 | [Scene completion](docs/SCENE_COMPLETION.md) | Densification algorithm, parameters, and limits |
-| [OpenSplat wrapper](docs/OPENSPLAT_WRAPPER.md) | OpenSplat controls and independent multi-device runs |
-| [GLOMAP wrapper](docs/GLOMAP_WRAPPER.md) | GLOMAP structure-from-motion integration |
-| [gsplat CUDA](docs/GSPLAT_CUDA.md) | CUDA and true distributed data-parallel training |
-| [LichtFeld-Studio](docs/LICHTFELD_WRAPPER.md) | Linux/CUDA training integration |
+| [OpenSplat wrapper](docs/OPENSPLAT_WRAPPER.md) | Single-process external trainer contract |
+| [COLMAP global mapper](docs/GLOMAP_WRAPPER.md) | Transitional `global_mapper` wrapper |
+| [gsplat CUDA](docs/GSPLAT_CUDA.md) | External integration status and evidence needs |
+| [LichtFeld-Studio](docs/LICHTFELD_WRAPPER.md) | Pass-through development wrapper |
 | [DA3 feedforward](docs/DA3_FEEDFORWARD.md) | Depth Anything 3 reconstruction bridge |
 | [Feedforward catalog](docs/FEEDFORWARD_SOTA.md) | Dated, license-aware integration catalog |
-| [Streaming and 4D](docs/STREAMING.md) | Current viewer behavior, upstream scaffolding, and roadmap |
+| [Streaming and 4D](docs/STREAMING.md) | Current viewer behavior, read-only catalog, and roadmap |
 | [Viewer guide](viewer/README.md) | Web viewer, Tauri shell, provenance, and render tests |
 | [Release and trust](docs/RELEASE.md) | Reproducible source checks and production release gates |
 | [Release evidence](release/README.md) | Deterministic RC evidence format and reproduction |
@@ -418,8 +395,9 @@ melkor/
 └── third_party/       Pinned tinygltf, stb, and SPZ sources, with a lock manifest
 ```
 
-External reconstruction and training systems are **not** vendored here. They are separate
-programs that use pinned adapter manifests. Their licenses are not the Melkor license.
+External reconstruction and training systems are **not** vendored here.
+The planned adapter manifests are not complete.
+External programs retain their own licenses.
 
 The project removed three snapshots from the MIT core on 2026-07-14:
 

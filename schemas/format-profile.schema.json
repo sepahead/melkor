@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://melkor.dev/schemas/format-profile-v1.json",
   "title": "Melkor format profile v1",
-  "description": "A format profile is descriptive data, never executable. It records the exact semantic conventions of one way of storing Gaussian splats -- property names, activation domains, quaternion order, SH basis and order, colour space -- so a reader converts by a stated contract rather than by guessing from property names or value ranges. Container-specific fields beyond the common core are permitted.",
+  "description": "A format profile is descriptive data, never executable. It records the exact semantic conventions of one way of storing Gaussian splats -- property names, activation domains, quaternion order, SH basis and order, color space -- so a reader converts by a stated contract rather than by guessing from property names or value ranges. Container-specific fields beyond the common core are permitted.",
   "type": "object",
   "additionalProperties": true,
   "required": [

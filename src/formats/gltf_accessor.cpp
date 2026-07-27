@@ -111,7 +111,7 @@ Result<std::vector<float>> decode_accessor(const AccessorView& view, const std::
                                            std::size_t buffer_size) {
     const std::size_t comp_size = component_size(view.component);
     if (comp_size == 0) {
-        return fail("MK2120_GLTF_BAD_COMPONENT_TYPE", "unrecognised glTF component type");
+        return fail("MK2120_GLTF_BAD_COMPONENT_TYPE", "unrecognized glTF component type");
     }
     const std::size_t comps = component_count(view.element);
     const std::size_t element_size = comp_size * comps;  // <= 4*4, cannot overflow size_t

@@ -10,13 +10,25 @@ set -euo pipefail
 # Pin upstream for reproducible installs. Override deliberately when reviewing
 # a newer revision; never silently `git pull` a moving branch.
 DA3_REF="${MELKOR_DA3_REF:-41736238f5bced4debf3f2a12375d2466874866d}"
+DA3_REPO="https://github.com/ByteDance-Seed/Depth-Anything-3.git"
 PYTHON_BIN="${MELKOR_PYTHON:-python3}"
 ACCEPT_NONCOMMERCIAL=0
+ACCEPT_UNLOCKED=0
+STAGING_DIR=""
+
+cleanup() {
+    if [[ -n "$STAGING_DIR" && -d "$STAGING_DIR" ]]; then
+        rm -rf -- "$STAGING_DIR"
+    fi
+}
+trap cleanup EXIT
 for arg in "$@"; do
     case "$arg" in
         --accept-noncommercial) ACCEPT_NONCOMMERCIAL=1 ;;
+        --accept-unlocked-dependencies) ACCEPT_UNLOCKED=1 ;;
         -h|--help)
-            echo "Usage: $0 [--accept-noncommercial]"
+            echo "Usage: $0 --accept-unlocked-dependencies [--accept-noncommercial]"
+            echo "The unlocked flag acknowledges that Python dependencies lack a hash lock."
             echo "The flag is required before downloading CC-BY-NC DA3 1.1 weights."
             exit 0
             ;;
@@ -26,6 +38,15 @@ for arg in "$@"; do
             ;;
     esac
 done
+if [ "$ACCEPT_UNLOCKED" -ne 1 ]; then
+    echo "Error: setup requires --accept-unlocked-dependencies."
+    echo "The source and model revisions are pinned, but Python dependencies are not hash-locked."
+    exit 2
+fi
+if [[ ! "$DA3_REF" =~ ^[0-9a-f]{40}$ ]]; then
+    echo "Error: MELKOR_DA3_REF must be a full lowercase commit SHA."
+    exit 2
+fi
 
 echo "=========================================="
 echo "Depth-Anything-3 Setup (CUDA)"
@@ -83,6 +104,10 @@ echo ""
 
 # Clone or update Depth-Anything-3
 if [ -d "$DA3_DIR/Depth-Anything-3" ]; then
+    if [ "$(git -C "$DA3_DIR/Depth-Anything-3" remote get-url origin)" != "$DA3_REPO" ]; then
+        echo "Error: the existing DA3 checkout has an unexpected origin."
+        exit 2
+    fi
     echo "Selecting pinned Depth-Anything-3 revision $DA3_REF..."
     git -C "$DA3_DIR/Depth-Anything-3" fetch --depth 1 origin "$DA3_REF"
     git -C "$DA3_DIR/Depth-Anything-3" checkout --detach FETCH_HEAD
@@ -90,10 +115,19 @@ else
     echo "Cloning Depth-Anything-3 @ $DA3_REF..."
     mkdir -p "$DA3_DIR"
     git clone --filter=blob:none --no-checkout \
-        https://github.com/ByteDance-Seed/Depth-Anything-3.git \
+        "$DA3_REPO" \
         "$DA3_DIR/Depth-Anything-3"
     git -C "$DA3_DIR/Depth-Anything-3" fetch --depth 1 origin "$DA3_REF"
     git -C "$DA3_DIR/Depth-Anything-3" checkout --detach FETCH_HEAD
+fi
+if [ "$(git -C "$DA3_DIR/Depth-Anything-3" rev-parse HEAD)" != "$DA3_REF" ]; then
+    echo "Error: the DA3 checkout does not match the requested commit."
+    exit 2
+fi
+if [ -n "$(git -C "$DA3_DIR/Depth-Anything-3" status --porcelain --untracked-files=all)" ]; then
+    echo "Error: the DA3 checkout contains local or generated files."
+    echo "Use a clean checkout before setup."
+    exit 2
 fi
 
 # Create virtual environment
@@ -158,15 +192,6 @@ python -m pip install \
 # failure isolated from required runtime dependency installation.
 python -m pip install open3d || echo "Warning: optional Open3D could not be installed"
 
-# Link to our inference scripts (they live in tools/da3/)
-echo ""
-echo "Setting up inference scripts..."
-# The inference scripts are already in $PROJECT_ROOT/tools/da3/
-# Create symlinks if running from a different location
-if [ ! -f "$DA3_DIR/inference.py" ] && [ -f "$PROJECT_ROOT/tools/da3/inference.py" ]; then
-    ln -sf "$PROJECT_ROOT/tools/da3/inference.py" "$DA3_DIR/inference.py" 2>/dev/null || \
-    cp "$PROJECT_ROOT/tools/da3/inference.py" "$DA3_DIR/inference.py" 2>/dev/null || true
-fi
 echo ""
 echo "=========================================="
 echo "Downloading model weights..."
@@ -210,16 +235,15 @@ download_model() {
             return 0
         fi
         echo "Error: $target is partial, unverified, or from a different revision."
-        echo "Move it aside and rerun; the installer will not trust or overwrite it."
+        echo "Move it aside and rerun. The installer will not trust or overwrite it."
         return 1
     else
         echo "Downloading $name from Hugging Face at $revision..."
-        local staging="${target}.partial.$$"
-        rm -rf "$staging"
+        STAGING_DIR="$(mktemp -d "$output_dir/.melkor-${name}.XXXXXX")"
         # Pass values as argv, not interpolated Python source. snapshot_download
         # verifies Hugging Face's content-addressed cache and supports resumable
         # transfers for these multi-GB repositories.
-        python - "$name" "$staging" "$revision" <<'PY' || {
+        python - "$name" "$STAGING_DIR" "$revision" <<'PY' || {
 import sys
 from huggingface_hub import snapshot_download
 
@@ -231,18 +255,21 @@ snapshot_download(
 )
 print(f"Downloaded {name}")
 PY
-            rm -rf "$staging"
+            rm -rf -- "$STAGING_DIR"
+            STAGING_DIR=""
             echo "Error: Failed to download $name"
             return 1
         }
-        if [ ! -s "$staging/config.json" ] ||
-           ! find "$staging" -type f \( -name '*.safetensors' -o -name 'pytorch_model*.bin' \) -size +0c -print -quit | grep -q .; then
-            rm -rf "$staging"
+        if [ ! -s "$STAGING_DIR/config.json" ] ||
+           ! find "$STAGING_DIR" -type f \( -name '*.safetensors' -o -name 'pytorch_model*.bin' \) -size +0c -print -quit | grep -q .; then
+            rm -rf -- "$STAGING_DIR"
+            STAGING_DIR=""
             echo "Error: downloaded snapshot for $name is incomplete"
             return 1
         fi
-        printf '%s\n' "$revision" > "$staging/.melkor-revision"
-        mv "$staging" "$target"
+        printf '%s\n' "$revision" > "$STAGING_DIR/.melkor-revision"
+        mv "$STAGING_DIR" "$target"
+        STAGING_DIR=""
         echo "Downloaded $name to $target"
     fi
 }
@@ -257,14 +284,13 @@ echo "MAIN SERIES (Any-View Depth + Pose → camera-aware point splats):"
 echo "  All main models predict jointly consistent depth and camera poses."
 echo "  The learned Gaussian head is available only on GIANT and NESTED."
 echo ""
-echo "  1. DA3-BASE (recommended, ~2GB)  - balanced depth/pose; derived point splats"
+echo "  1. DA3-BASE (~2GB)               - depth/pose; derived point splats"
 echo "  2. DA3-LARGE-1.1 (~4GB)           - refreshed depth/pose; point splats (NC)"
-echo "  3. DA3-SMALL (~1GB)               - fastest depth/pose; point splats"
+echo "  3. DA3-SMALL (~1GB)               - depth/pose; point splats"
 echo "  4. DA3-GIANT-1.1 (~8GB)           - refreshed learned Gaussian head (NC)"
 echo ""
 echo "  5. DA3NESTED-GIANT-LARGE-1.1 (~12GB) - refreshed GS + metric alignment (NC)"
-echo "                                       Best for: Production-quality 3D with real scale"
-echo "                                       Output: Full 3DGS + metric depth"
+echo "                                       Output: learned Gaussians + metric depth"
 echo ""
 echo "BUNDLES:"
 echo "  6. All reconstruction models"
@@ -304,7 +330,8 @@ case $choice in
         download_model "DA3NESTED-GIANT-LARGE-1.1"
         ;;
     7)
-        echo "Skipping model download. Rerun scripts/setup_da3.sh later so the"
+        echo "Skipping model download. Rerun scripts/setup_da3.sh with the required"
+        echo "dependency acceptance flag later so the"
         echo "snapshot is revision-pinned, validated, and marked atomically."
         ;;
     *)
@@ -324,7 +351,7 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 DA3_DIR="$SCRIPT_DIR/tools/da3"
 if [ ! -f "$DA3_DIR/venv/bin/activate" ]; then
-    echo "Error: DA3 environment is missing; run scripts/setup_da3.sh" >&2
+    echo "Error: DA3 environment is missing. Run scripts/setup_da3.sh --accept-unlocked-dependencies" >&2
     exit 1
 fi
 source "$DA3_DIR/venv/bin/activate"
@@ -339,7 +366,7 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 DA3_DIR="$SCRIPT_DIR/tools/da3"
 if [ ! -f "$DA3_DIR/venv/bin/activate" ]; then
-    echo "Error: DA3 environment is missing; run scripts/setup_da3.sh" >&2
+    echo "Error: DA3 environment is missing. Run scripts/setup_da3.sh --accept-unlocked-dependencies" >&2
     exit 1
 fi
 source "$DA3_DIR/venv/bin/activate"

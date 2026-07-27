@@ -64,12 +64,8 @@ public:
     // CPU-only densifier (no GPU context).
     Densifier();
 
-    // ctx may be null: all neighbor searches then run on the CPU. On non-Metal
-    // platforms the Metal calls are stubs that return empty, which triggers
-
-    // Backend-agnostic constructor: uses the provider's GPU (Metal or CUDA
-    // grid kernels) when available, CPU otherwise. Preferred entry point for
-    // callers that already hold a ComputeProvider (the CLI).
+    // Uses the provider's Metal or CUDA grid operations when they are available. Uses the CPU
+    // implementation otherwise. The provider can be null.
     explicit Densifier(ComputeProvider* provider);
 
     ~Densifier();

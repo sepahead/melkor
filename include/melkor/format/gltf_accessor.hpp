@@ -5,7 +5,7 @@
 // optional "normalized" flag, a count, a starting byte offset, and a byte stride (which may be
 // larger than the element for interleaved data). Turning that into floats is exactly the kind of
 // arithmetic that goes wrong quietly: a normalized unsigned byte is `c/255`, a normalized signed
-// byte is `max(c/127, -1)`, and mixing those up shifts every colour or rotation subtly. This
+// byte is `max(c/127, -1)`, and mixing those up shifts every color or rotation subtly. This
 // module is the one place that decode is done, bounds-checked and pinned by tests.
 //
 // It is deliberately independent of JSON parsing: it takes an already-resolved `AccessorView` and
@@ -44,13 +44,13 @@ enum class ElementType : std::uint8_t {
     vec4 = 4,
 };
 
-// Size of one component in bytes, or 0 for an unrecognised value.
+// Size of one component in bytes, or 0 for an unrecognized value.
 std::size_t component_size(ComponentType type) noexcept;
 
 // Number of components in one element (1/2/3/4).
 std::size_t component_count(ElementType type) noexcept;
 
-// Maps a raw glTF `componentType` integer to the enum, if recognised.
+// Maps a raw glTF `componentType` integer to the enum, if recognized.
 std::optional<ComponentType> component_type_from_int(int value) noexcept;
 
 // A resolved accessor: everything needed to read the values, with the buffer supplied separately.
@@ -69,7 +69,7 @@ struct AccessorView {
 //     the glTF rules; when not normalized, to their exact integer value as a float;
 //   - the effective stride defaults to the tightly-packed element size when `byte_stride` is 0,
 //     and every element's bytes are validated to lie within `buffer_size`.
-// Fails with a diagnostic (never an out-of-bounds read) on an unrecognised type, a zero-size
+// Fails with a diagnostic (never an out-of-bounds read) on an unrecognized type, a zero-size
 // component, or any element that would fall outside the buffer.
 Result<std::vector<float>> decode_accessor(const AccessorView& view, const std::uint8_t* buffer,
                                            std::size_t buffer_size);

@@ -25,7 +25,7 @@
 namespace melkor {
 
 enum class Confidence : std::uint8_t {
-    none = 0,     // nothing recognised
+    none = 0,     // nothing recognized
     low = 1,      // a plausible but non-exclusive signal (a gzip stream, which might be SPZ)
     high = 2,     // a distinctive magic (glTF's "glTF", PLY's "ply")
     certain = 3,  // a full structural match; only a deeper probe can grant this

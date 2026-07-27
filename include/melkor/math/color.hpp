@@ -1,4 +1,4 @@
-// Colour conversions.
+// Color conversions.
 //
 // Two distinct conversions live here, and conflating them is a common source of dark or washed-
 // out splats:
@@ -9,9 +9,9 @@
 //   2. linear RGB <-> the degree-0 spherical-harmonic coefficient (the "DC" term). This is the
 //      pinned 3DGS relation `rgb = SH_C0 * sh_dc + 0.5`, i.e. `sh_dc = (rgb - 0.5) / SH_C0`.
 //      It is NOT a gamma conversion, and applying it in place of one -- or twice -- corrupts
-//      colour.
+//      color.
 //
-// Colour-space conversion is not clamping: an HDR or SH-derived value can be mathematically
+// Color-space conversion is not clamping: an HDR or SH-derived value can be mathematically
 // valid even when it falls outside displayable [0,1]. A writer that must land in a bounded range
 // reports the clipping as an explicit loss; it does not silently clamp here.
 

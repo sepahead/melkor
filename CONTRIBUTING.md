@@ -40,8 +40,8 @@ stay **operation-for-operation consistent**:
   parity where hardware allows. Extend them when you add operations.
 
 Primary development machines typically cannot compile CUDA. Verify backend
-changes against the stub configuration too. This configuration has the same
-link topology as Linux CPU builds:
+changes against the CPU-only configuration too. This configuration has the
+same link topology as Linux CPU builds:
 
 ```bash
 cmake -B build-cpu -DMELKOR_USE_METAL=OFF
@@ -75,7 +75,7 @@ cd build-cpu && ctest --output-on-failure
 ## Pull request checklist
 
 - [ ] `ctest` passes in the default configuration
-- [ ] `ctest` passes with `-DMELKOR_USE_METAL=OFF` (stub/CPU topology)
+- [ ] `ctest` passes with `-DMELKOR_USE_METAL=OFF` (CPU-only topology)
 - [ ] Backend-affecting changes applied to Metal, CUDA, and CPU together
 - [ ] No new compiler warnings
 - [ ] Python changes pass `ruff check`

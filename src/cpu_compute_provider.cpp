@@ -1,11 +1,8 @@
-// CPU compute provider — a first-class backend that implements all
-// ComputeProvider operations directly on the host.  Replaces the former
-// gpu_stub.cpp GaussianProcessor stubs for the common operations.
+// The CPU provider implements each ComputeProvider operation on the host.
+// It replaces the former gpu_stub.cpp implementation.
 //
-// Compiled as part of melkor_core so it is available on every platform.
-// The per-platform GPU library (melkor_metal / melkor_cuda / melkor_gpu_stub)
-// supplies the ComputeProvider::create() factory, which falls back to
-// CpuComputeProvider when no GPU is available.
+// melkor_core contains this provider on each supported platform. The runtime registers it with
+// optional Metal or CUDA providers.
 
 #include "melkor/compute_provider.hpp"
 #include "melkor/spatial_grid.hpp"

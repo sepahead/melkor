@@ -10,6 +10,7 @@
 #include "melkor/spz_encoder.hpp"
 
 #include <cstdio>
+#include <string>
 #include <vector>
 
 namespace {
@@ -55,10 +56,15 @@ int main() {
     CHECK(ok.success && ok.data.has_value() && ok.data->size() == 8);
 
     // An input-size limit below the compressed buffer refuses it before the decode.
+    // Zero means unlimited, so guard against a degenerate buffer before deriving the limit.
+    CHECK(buffer.size() > 1);
     Limits tiny = Limits::for_profile(LimitsProfile::desktop);
-    tiny.max_input_bytes = buffer.size() > 1 ? buffer.size() - 1 : 0;
+    tiny.max_input_bytes = buffer.size() - 1;
     auto rejected = decoder.decodeFromBuffer(buffer.data(), buffer.size(), tiny);
     CHECK(!rejected.success);
+    // The DecodeResult carries only a message, not the MK0301 diagnostic, so the strongest
+    // available reason check is that the message names a limit.
+    CHECK(rejected.error_message.find("limit") != std::string::npos);
 #else
     std::printf("spz budget: skipped (MELKOR_HAS_SPZ off)\n");
     return 0;

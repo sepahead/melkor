@@ -102,7 +102,9 @@ disclose on their own timeline.
 
 **Melkor has one maintainer. The bus factor is one.** If that person becomes unavailable, no one
 else can merge a fix or publish a release. No one else can revoke a signing identity or respond
-to a vulnerability report. This condition is the project's largest governance risk. This
+to a vulnerability report.
+
+This condition is the project's largest governance risk. This
 document does not mitigate it. Users can use this information to assess Melkor as a dependency.
 
 Two consequences follow, and they are binding:
@@ -224,7 +226,7 @@ A version may be tagged and published only when all conditions below hold:
 1. the blocker register in `docs/audit/production-blockers.md` has no open blocker for that
    version.
 2. CI is green on the exact commit being tagged, including the sanitizer build and the
-   stub/CPU-topology configuration.
+   CPU-only topology.
 3. the evidence bundle builds and verifies from the tag (`scripts/build_release_evidence.py`),
    and the tag matches the version recorded in the build system.
 4. the release notes, `SUPPORT.md`, and the platform matrix describe what was actually built and
@@ -284,7 +286,9 @@ manager can publish under them. The maintainer's informal permission does not ov
 **Current state, stated honestly.** As documented in [`docs/RELEASE.md`](docs/RELEASE.md), the
 project today builds **unsigned** developer and release-candidate artifacts. The project has no
 production signing identity, notarization credential, or keyless-attestation configuration. The
-evidence bundle produces deterministic but unsigned provenance. Thus, no current artifact proves
+evidence bundle produces deterministic but unsigned provenance.
+
+Thus, no current artifact proves
 publisher identity. Do not trust a current artifact as though it proves that identity.
 Provisioning and protecting these identities is a `v2.0.0` release blocker.
 
@@ -316,7 +320,9 @@ Silence is a failure mode, and a project that does not plan for it strands its u
 
 **Inactivity.** The project moves an unresponsive role holder to *Emeritus* in `MAINTAINERS.md`
 after **90 days**. Inactivity means no merges, reviews, triage, or response to a direct issue
-mention. The project also revokes the person's write access and publishing credentials. This action is not a
+mention. The project also revokes the person's write access and publishing credentials.
+
+This action is not a
 punishment. Unmonitored access creates a security risk. A returning role holder uses the normal
 nomination process.
 

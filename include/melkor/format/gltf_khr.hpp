@@ -45,9 +45,9 @@ inline constexpr int kPrimitiveModePoints = 0;
 // supports 0..4; the adapter converts a degree-4 source with LOSS_SH_DEGREE_TRUNCATED.
 inline constexpr std::uint32_t kMaxProfileShDegree = 3;
 
-// ---- Colour space ---------------------------------------------------------------------------
+// ---- Color space ---------------------------------------------------------------------------
 //
-// `colorSpace` is REQUIRED and refers only to the reconstructed splat colour values. The two
+// `colorSpace` is REQUIRED and refers only to the reconstructed splat color values. The two
 // values the base extension defines are display-referred BT.709 sRGB and linear. An unknown string
 // is allowed by the schema (the property is open) but is not one Melkor can interpret, so it is
 // surfaced as an assumption (LOSS_COLOR_SPACE_ASSUMED), never silently treated as sRGB.
@@ -59,7 +59,7 @@ enum class ColorSpace : std::uint8_t {
 
 const char* to_string(ColorSpace space) noexcept;
 
-// Parses one of the two defined colour-space strings. Returns nullopt for any other string,
+// Parses one of the two defined color-space strings. Returns nullopt for any other string,
 // including the empty string; the caller decides the policy for an unknown-but-present value.
 std::optional<ColorSpace> color_space_from_string(std::string_view s) noexcept;
 

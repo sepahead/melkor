@@ -1,26 +1,10 @@
 #!/usr/bin/env python3
-"""Lint public-facing prose for unqualified superlative and performance claims.
+"""Reject unsupported public superlative and performance claims.
 
-The rule the blueprint sets: a quantitative or superlative claim -- "SOTA", "10-100x faster",
-"fastest", "lossless", "production-grade" -- may appear in Melkor's public surfaces only when it
-is either (a) attributed to an upstream source rather than stated as a Melkor-reproduced fact, or
-(b) backed by a benchmark record. A bare "state of the art" in a README is marketing, and it is
-exactly the kind of claim that ages into a lie.
+A risky claim must cite upstream evidence, link benchmark evidence, or include a justified
+``claim-ok:`` marker. The default scan covers active first-party public text surfaces.
 
-This does not judge whether a claim is true. It enforces that a claim carries its evidence or its
-attribution on the same line, so a reader can tell the difference between "we measured this" and
-"we are hoping you do not check".
-
-Escape hatches, both explicit and visible in the diff:
-  - A line may carry an inline marker  <!-- claim-ok: why -->  with a real justification.
-  - A banned phrase is allowed on a line that also carries an attribution cue
-    ("reported by", "upstream", "the authors", "per ", "according to", a benchmark link, ...),
-    because that is the blueprint's sanctioned form for an upstream figure.
-
-Usage::
-
-    python3 tools/check_claims.py            # lint the default surfaces
-    python3 tools/check_claims.py --list     # show which files are linted
+Use ``python3 tools/check_claims.py [FILE ...]``.
 """
 
 from __future__ import annotations
@@ -32,31 +16,31 @@ from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 
-# The surfaces a prospective user reads to decide whether to trust the project. These are the
-# ones a marketing claim does the most damage in.
-#
-# The detailed pipeline wrapper docs (docs/PIPELINE.md, docs/GLOMAP_WRAPPER.md, ...) are NOT here
-# yet: they describe the deprecated standalone-GLOMAP flow and are scheduled for replacement by
-# the pinned adapter protocol (P0-14 / WP18). They will be brought under this lint when they are
-# rewritten. Excluding them is recorded, not silent.
+# These root files define the public project contract.
 LINTED_FILES = [
     "README.md",
     "ROADMAP.md",
     "SUPPORT.md",
     "SECURITY.md",
     "CONTRIBUTING.md",
-    "docs/index.md",
-    "docs/quickstart.md",
+    "GOVERNANCE.md",
+    "MAINTAINERS.md",
 ]
+# Check all first-party guides, references, release notes, and viewer documents.
 LINTED_GLOBS = [
-    "docs/reference/*.md",
-    "docs/formats/*.md",
-    "docs/security/*.md",
+    "benchmarks/**/*.md",
+    "docs/**/*.md",
+    "fuzz/corpus/**/*.md",
+    "release/**/*.md",
+    "scripts/*.sh",
+    "src/main.cpp",
+    "viewer/*.html",
+    "viewer/*.js",
+    "viewer/*.md",
 ]
 
-# Paths that legitimately contain the banned words: audits quote findings, this tool names the
-# words it bans, and the changelog records history.
-EXCLUDED_SUBSTRINGS = ["docs/audit/", "docs/history/", "docs/reviews/", "tools/check_claims.py"]
+# Audits and history must preserve the original finding text.
+EXCLUDED_SUBSTRINGS = ["docs/audit/", "docs/history/", "docs/reviews/"]
 
 # Banned phrases, as case-insensitive regexes with word boundaries where sensible.
 BANNED = [
@@ -67,6 +51,7 @@ BANNED = [
     r"\bfastest\b",
     r"\bbest[\s-]in[\s-]class\b",
     r"\bproduction[\s-]grade\b",
+    r"\bproduction[\s-]quality\b",
     r"\blossless\b",
     r"\buniversal(?:ly)?\b",
     r"\ball formats\b",
@@ -104,10 +89,14 @@ def linted_paths() -> list[Path]:
     return result
 
 
-def line_is_allowed(line: str) -> bool:
+def line_is_allowed(line: str, match_start: int | None = None) -> bool:
     lower = line.lower()
     if CLAIM_OK.search(line):
         return True
+    if match_start is not None:
+        prefix = re.sub(r"[*_`]", "", lower[:match_start])
+        if re.search(r"\b(?:not|never)\s+(?:\S+\s+)?$", prefix):
+            return True
     return any(cue in lower for cue in ATTRIBUTION_CUES)
 
 
@@ -116,7 +105,7 @@ def scan(path: Path) -> list[tuple[int, str, str]]:
     for lineno, line in enumerate(path.read_text(encoding="utf-8").splitlines(), start=1):
         for pattern in BANNED:
             m = re.search(pattern, line, re.IGNORECASE)
-            if m and not line_is_allowed(line):
+            if m and not line_is_allowed(line, m.start()):
                 findings.append((lineno, m.group(0), line.strip()))
     return findings
 
@@ -124,9 +113,17 @@ def scan(path: Path) -> list[tuple[int, str, str]]:
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("--list", action="store_true", help="list the linted files and exit")
+    parser.add_argument("files", nargs="*", type=Path, help="check only these files")
     args = parser.parse_args()
 
-    paths = linted_paths()
+    paths = []
+    for path in args.files:
+        candidate = path if path.is_absolute() else REPO_ROOT / path
+        if not candidate.is_file():
+            parser.error(f"file does not exist: {path}")
+        paths.append(candidate.resolve())
+    if not paths:
+        paths = linted_paths()
 
     if args.list:
         print("Claim lint covers:")
@@ -139,16 +136,18 @@ def main() -> int:
         findings = scan(path)
         for lineno, phrase, line in findings:
             total += 1
-            rel = path.relative_to(REPO_ROOT)
+            try:
+                rel = path.relative_to(REPO_ROOT)
+            except ValueError:
+                rel = path
             print(f"{rel}:{lineno}: unqualified claim {phrase!r}")
             print(f"    {line}")
 
     if total:
         print(
             f"\n{total} unqualified claim(s) found.\n"
-            "Each must be removed, attributed to its upstream source on the same line "
-            "(e.g. 'reported by the GLOMAP authors'), backed by a benchmark link, or marked "
-            "with an inline  <!-- claim-ok: reason -->  that justifies it.",
+            "Remove each claim or attribute it to an upstream source on the same line.\n"
+            "You can also link benchmark evidence or add a justified <!-- claim-ok: reason --> marker.",
             file=sys.stderr,
         )
         return 1

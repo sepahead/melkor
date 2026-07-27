@@ -2,7 +2,7 @@
 //
 // These pin the parts of the extension that are subtle and version-critical against the vendored
 // spec text (third_party/specs/KHR_gaussian_splatting/63770cc70a37): the SH attribute naming and
-// m-ordering, the exact `C` matrix, and the two defined colour spaces. If Melkor's understanding
+// m-ordering, the exact `C` matrix, and the two defined color spaces. If Melkor's understanding
 // of the wire format ever drifts from the pinned spec, one of these fails.
 //
 // Self-contained (no external test framework).

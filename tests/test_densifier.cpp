@@ -81,16 +81,6 @@ melkor::GaussianCloud makePlane(int side, float spacing, float hole_radius) {
     return cloud;
 }
 
-std::vector<float> positionsOf(const melkor::GaussianCloud& cloud) {
-    std::vector<float> p(cloud.size() * 3);
-    for (size_t i = 0; i < cloud.size(); ++i) {
-        p[i * 3 + 0] = cloud[i].x;
-        p[i * 3 + 1] = cloud[i].y;
-        p[i * 3 + 2] = cloud[i].z;
-    }
-    return p;
-}
-
 // ---- Test 1: grid construction --------------------------------------------
 bool test_grid_build() {
     printf("[test] uniform grid construction\n");

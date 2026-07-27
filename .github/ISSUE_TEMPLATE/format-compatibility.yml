@@ -12,7 +12,7 @@ body:
         loses meaning, is rejected, or is interpreted differently at each end.
 
         There is no single "Gaussian splat PLY" format. Producers disagree about activation domains,
-        quaternion order, spherical-harmonic layout, colour space, and the units of the scale field.
+        quaternion order, spherical-harmonic layout, color space, and the units of the scale field.
         Melkor's position is that these disagreements must be resolved by an **explicit profile**, not
         by guessing. That is why this form insists on exact tool names, exact versions, and the
         profile you used: without those three, "the file is wrong" cannot be adjudicated, because
@@ -51,7 +51,7 @@ body:
       options:
         - Melkor cannot read a file another tool produced
         - Another tool cannot read a file Melkor produced
-        - Both read it, but the result differs (rendering, orientation, colour, opacity, scale)
+        - Both read it, but the result differs (rendering, orientation, color, opacity, scale)
         - Melkor round-trip (read then write) loses or changes information
     validations:
       required: true
@@ -102,7 +102,7 @@ body:
         the specification, the profile definition, or the producer's documentation. A citation turns a
         preference into a defect.
       placeholder: |
-        Expected: rotations round-trip unchanged; the specification says the quaternion is stored (w, x, y, z).
+        Expected: rotations round-trip unchanged. The specification stores the quaternion as (w, x, y, z).
         Actual: the scene is mirrored about X after conversion, consistent with (x, y, z, w) being assumed.
     validations:
       required: true
@@ -113,7 +113,7 @@ body:
       label: Sample asset
       description: >-
         A minimal file that shows the problem is enormously helpful — often a few hundred Gaussians is
-        enough. Attach it **only if you have the right to redistribute it**. If you cannot, say so; the
+        enough. Attach it **only if you have the right to redistribute it**. If you cannot, say so. The
         inspection report plus a description of how to produce an equivalent file is usually workable.
 
   - type: checkboxes

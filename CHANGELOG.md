@@ -7,7 +7,16 @@ register is in `docs/audit/production-blockers.md`.
 
 ### Breaking
 
+- `melkor convert` now accepts only `.glb` input and output paths. It no longer writes GLB bytes to a `.gltf` path.
+- The pipeline now uses `--sfm global` for COLMAP `global_mapper`. It rejects the retired `--sfm glomap` value.
+- Trainer wrappers reject simulated multi-GPU modes and former no-op options.
+- General trainer setup scripts now fail closed. They no longer install mutable external dependencies.
+
 ### Fixed
+
+- Development wrappers now use strict shell behavior, argument arrays, explicit outputs, and safe temporary directories.
+- The pipeline now fails when requested SPZ output is unavailable. It no longer reports partial output as success.
+- The 4D packer now validates arguments, protects existing output, and writes its manifest atomically.
 
 - Lower-severity polish from the shipping-surface review: `Budget::remaining()` now returns
   UINT64_MAX for an unlimited (0) limit, matching `consume()`'s 0-means-unlimited convention
@@ -78,6 +87,9 @@ register is in `docs/audit/production-blockers.md`.
   reflections by determinant sign and judges singularity by a scale-invariant condition-number test.
 
 ### Added
+
+- CI now checks Markdown links, anchors, path case, style, claims, and shell warnings.
+- The documentation now distinguishes tested development paths from production support.
 
 - `melkor convert IN.glb OUT.glb` reads a KHR_gaussian_splatting GLB into the canonical scene model
   and writes it back out, making the glTF writer reachable from the CLI. It enforces the loss policy

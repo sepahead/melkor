@@ -1,7 +1,7 @@
 # Canonical semantics
 
 Melkor has one public and format-interchange representation of a Gaussian splat: `SplatData`.
-Every supported adapter entry point exchanges it. Formats with read and write paths convert at
+Every canonical format path exchanges it. Formats with read and write paths convert at
 their respective boundaries. This page defines that contract.
 
 The math oracle (`include/melkor/math/`) and scene model

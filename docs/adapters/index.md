@@ -3,10 +3,12 @@
 Melkor's core is an MIT-licensed asset interoperability library. It does **not** contain a
 learned 3D reconstruction model, and it does not redistribute one.
 
-Reconstruction, training, depth, and feedforward systems are separate programs with their own
-licenses, versions, hardware requirements, and quality characteristics. Melkor reaches them
-through **adapters**: immutable manifests that describe how to obtain, verify, invoke, and
-validate an external tool. An adapter describes a tool. It does not vendor it.
+Reconstruction, training, depth, and feedforward systems are separate programs.
+They have their own licenses, versions, hardware needs, and quality characteristics.
+
+Melkor plans immutable adapter manifests for these tools.
+The manifest runner is not complete.
+Current shell wrappers are development tools and do not provide this boundary.
 
 ## Why the research snapshots were removed
 
@@ -38,8 +40,7 @@ These projects remain the upstream systems Melkor interoperates with. Cite them,
 for the methods they implement.
 
 **OpenSplat** — Piero Toffanin and contributors.
-<https://github.com/pierotofy/OpenSplat>. AGPL-3.0-only. A production 3D Gaussian-splat trainer
-that runs on CPU, CUDA, and Metal.
+<https://github.com/pierotofy/OpenSplat>. AGPL-3.0-only. An external 3D Gaussian-splat trainer.
 
 **Depth Anything 3** — ByteDance.
 <https://github.com/ByteDance-Seed/Depth-Anything-3>. Apache-2.0 code. Model weights carry their
@@ -56,7 +57,7 @@ adapter targets that ([P0-14](../audit/production-blockers.md)).
 **gsplat** — Nerfstudio project. <https://github.com/nerfstudio-project/gsplat>. Apache-2.0. A
 CUDA-accelerated Gaussian-splat rasterizer and training library.
 
-## How an adapter works
+## Planned adapter contract
 
 An adapter manifest is **data, not code**. It records, at minimum:
 
@@ -75,10 +76,13 @@ An adapter is called **supported** only when that exact pinned configuration has
 end-to-end test. Anything else is experimental, off by default, and excluded from production
 claims.
 
-The adapter protocol, the process runner, and the run manifests are specified in
-[the pipeline documentation](../PIPELINE.md). They are delivered by work package 18 and are
-not complete yet. Until completion, the `scripts/setup_*.sh` installers remain and use mutable
-clones. The blocker register tracks this issue:
+The adapter protocol, process runner, and run manifests are not complete.
+[The pipeline documentation](../PIPELINE.md) describes the temporary wrapper.
+
+Mutable general trainer installers now fail closed.
+DA3 and feedforward setup use detached source revisions.
+Their Python dependencies still need complete hash locks.
+The blocker register tracks this issue as
 [P0-13](../audit/production-blockers.md).
 
 ## License boundary

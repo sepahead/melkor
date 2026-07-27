@@ -19,7 +19,9 @@
 // which sits above both, calls the registration entry points for whichever backends were
 // compiled in. Dependencies then point one way only:
 //
-//     melkor_core  <--  melkor_backend_{cpu,metal,cuda}  <--  melkor_runtime  <--  CLI/tests
+//     melkor_core  <--  melkor_{metal,cuda}  <--  melkor_runtime  <--  CLI/tests
+//          ^
+//          +-- CPU reference implementation
 //
 // Registration is an explicit function call rather than a static initializer. Static
 // initializers in a static library are stripped by the linker when nothing in that
@@ -92,8 +94,8 @@ class BackendRegistry {
 // Defined in `melkor_runtime`, which is the only layer that may name a concrete backend. It
 // is idempotent: calling it twice is harmless.
 //
-// The CLI, the tests, the Python bindings, and the WASM facade each call this once at startup.
-// Core never does -- core must not know that Metal exists.
+// The CLI calls this function once at startup. Core never calls it because core does not name a
+// platform backend.
 void register_builtin_backends();
 
 }  // namespace melkor

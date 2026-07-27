@@ -1,6 +1,6 @@
 {
   "version": 6,
-  "cmakeMinimumRequired": { "major": 3, "minor": 24, "patch": 0 },
+  "cmakeMinimumRequired": { "major": 3, "minor": 25, "patch": 0 },
   "configurePresets": [
     {
       "name": "dev",
@@ -18,7 +18,7 @@
     {
       "name": "release-cpu",
       "displayName": "Release (CPU, installable SDK)",
-      "description": "Optimised CPU build used to produce and install the SDK.",
+      "description": "Optimized CPU build used to produce and install the SDK.",
       "binaryDir": "${sourceDir}/build/release-cpu",
       "generator": "Ninja",
       "cacheVariables": {
