@@ -15,6 +15,9 @@
 
   <text class="h1" x="40" y="44">MELKOR &#183; CONVERSION LOSS POLICY</text>
   <text class="h2" x="40" y="64">EVERY CONVERSION EMITS A LOSS REPORT, EVEN A LOSSLESS ONE</text>
+  <circle cx="906" cy="40" r="5" fill="#fb923c"/>
+  <circle cx="888" cy="40" r="5" fill="#34d399"/>
+  <circle cx="870" cy="40" r="5" fill="#a78bfa"/>
 
   <g>
     <rect x="40" y="96" width="205" height="150" rx="10" fill="#161b22" stroke="#34d399" stroke-width="1.25"/>

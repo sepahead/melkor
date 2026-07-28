@@ -265,7 +265,7 @@ Every conversion reads into one validated canonical model and writes from it:
 
 ![Conversion architecture. PLY, SPZ, and GLB readers feed the validated SplatData model. Writers produce PLY, SPZ, and GLB from it. Budget, loss policy, and atomic writes guard every conversion.](assets/diagrams/architecture.svg)
 
-The full reconstruction ecosystem around the CLI:
+The diagram below shows the full reconstruction ecosystem around the CLI:
 
 ```mermaid
 flowchart LR
@@ -291,7 +291,7 @@ differ only within documented floating-point tolerances.
 
 ## Compute Backends
 
-![Compute backend registry. Startup registers backends explicitly. Selection probes Metal, then CUDA, then CPU. All backends share one operation set, and the CPU result is the contract.](assets/diagrams/backend-registry.svg)
+![Compute backend registry. Startup registers backends explicitly. Selection probes Metal, then CUDA, then CPU. All backends share one operation set. The CPU result is the contract.](assets/diagrams/backend-registry.svg)
 
 | Platform | Backend | Enable | Qualification |
 |---|---|---|---|

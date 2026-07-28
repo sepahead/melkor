@@ -85,5 +85,5 @@
     <text class="cell" x="856" y="449" fill="#34d399">linear</text>
   </g>
 
-  <text class="sub" x="40" y="504">green = canonical convention &#183; red = source convention that melkor converts on read &#183; source: profiles/*.json</text>
+  <text class="sub" x="40" y="504">green = canonical convention &#183; red = source convention that melkor converts on read &#183; source: profiles/*/*.json</text>
 </svg>

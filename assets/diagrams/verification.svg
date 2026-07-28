@@ -15,6 +15,9 @@
 
   <text class="h1" x="40" y="44">MELKOR &#183; VERIFICATION SURFACE</text>
   <text class="h2" x="40" y="64">41 REGISTERED TESTS &#183; 4 FUZZ TARGETS &#183; ONE EXIT-CODE CONTRACT</text>
+  <circle cx="906" cy="40" r="5" fill="#fb923c"/>
+  <circle cx="888" cy="40" r="5" fill="#34d399"/>
+  <circle cx="870" cy="40" r="5" fill="#a78bfa"/>
 
   <g>
     <text class="row" x="40" y="112">core + safety substrate</text>

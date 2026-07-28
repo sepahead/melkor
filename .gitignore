@@ -127,6 +127,7 @@ database.db
 .claude/
 .aider*
 .factory/
+.qoder/
 
 
 

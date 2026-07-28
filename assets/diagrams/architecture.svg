@@ -65,7 +65,7 @@
     <text class="sub" x="392" y="298">SH &#183; degree 0..4, R/G/B</text>
     <line x1="392" y1="314" x2="568" y2="314" stroke="#21262d"/>
     <text class="sub" x="392" y="336" fill="#34d399">create() validates every field</text>
-    <text class="sub" x="392" y="354" fill="#34d399">EditTransaction commits atomically</text>
+    <text class="sub" x="392" y="354" fill="#34d399">EditTransaction &#183; atomic commit</text>
   </g>
 
   <path class="flow" d="M590 220 C 636 200, 640 154, 692 154" marker-end="url(#arr)"/>

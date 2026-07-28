@@ -83,7 +83,7 @@
   <g>
     <rect x="40" y="504" width="880" height="66" rx="12" fill="#10151b" stroke="#2b333d"/>
     <text class="sub" x="64" y="530" fill="#fbbf24">HARD CEILINGS NO PROFILE CAN EXCEED</text>
-    <text class="sub" x="64" y="550">splats 4e9 &#183; mesh vertices 4e9 &#183; triangles 8e9 &#183; scene depth 4096 &#183; threads 1024 &#183; zero limit fails validation (MK0202)</text>
+    <text class="sub" x="64" y="550">splats 4e9 &#183; mesh vertices 4e9 &#183; triangles 8e9 &#183; image dim 2^20 &#183; scene depth 4096 &#183; threads 1024 &#183; zero limit fails validation (MK0202)</text>
   </g>
 
   <text class="sub" x="40" y="600">bars scaled within each row &#183; web deadline 60 s, desktop and server none &#183; source: src/core/limits.cpp</text>

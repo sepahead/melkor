@@ -21,6 +21,7 @@ final release. Each change needs a changelog entry because it affects accepted i
 |---|---:|---:|---:|
 | Input bytes | 2 GiB | 4 GiB | 32 GiB |
 | Decoded bytes | 2 GiB | 8 GiB | 64 GiB |
+| Temporary bytes | 2 GiB | 16 GiB | 128 GiB |
 | Working memory | 1 GiB | 4 GiB | 16 GiB |
 | Splats | 8 M | 25 M | 150 M |
 | Mesh triangles | 16 M | 50 M | 300 M |
