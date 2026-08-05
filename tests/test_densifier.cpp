@@ -348,7 +348,13 @@ bool test_metal_parity() {
 
     // Candidate filter parity on a plane-with-hole scenario.
     auto cloud = makePlane(40, 0.1f, 0.35f);
-    auto ppos = positionsOf(cloud);
+    std::vector<float> ppos;
+    ppos.reserve(cloud.size() * 3);
+    for (const auto& splat : cloud.splats()) {
+        ppos.push_back(splat.x);
+        ppos.push_back(splat.y);
+        ppos.push_back(splat.z);
+    }
     auto pg = melkor::grid::buildGrid(ppos);
     std::vector<float> cands, dirs;
     Lcg rng2(99);

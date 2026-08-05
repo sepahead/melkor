@@ -71,22 +71,29 @@ def anchors(path: Path) -> set[str]:
     return found
 
 
-def has_exact_case(path: Path, root: Path) -> bool:
-    """Return true when each path part has the exact stored case."""
+def path_case(path: Path, root: Path) -> str:
+    """Classify a path as exact, incorrect case, or missing."""
     try:
         relative = path.relative_to(root)
     except ValueError:
-        return False
+        return "missing"
     current = root
+    exact = True
     for part in relative.parts:
         try:
-            names = {entry.name for entry in current.iterdir()}
+            names = [entry.name for entry in current.iterdir()]
         except OSError:
-            return False
-        if part not in names:
-            return False
-        current /= part
-    return True
+            return "missing"
+        if part in names:
+            selected = part
+        else:
+            matches = [name for name in names if name.casefold() == part.casefold()]
+            if len(matches) != 1:
+                return "missing"
+            selected = matches[0]
+            exact = False
+        current /= selected
+    return "exact" if exact else "incorrect"
 
 
 def targets(path: Path) -> list[tuple[int, str]]:
@@ -128,11 +135,12 @@ def check_markdown(paths: list[Path], root: Path = REPO_ROOT) -> list[Finding]:
             except ValueError:
                 findings.append(Finding(source, line, f"local link escapes the repository: {raw_target}"))
                 continue
-            if not destination.exists():
-                findings.append(Finding(source, line, f"local link target does not exist: {raw_target}"))
-                continue
-            if not has_exact_case(destination, root):
+            case = path_case(destination, root)
+            if case == "incorrect":
                 findings.append(Finding(source, line, f"local link has incorrect path case: {raw_target}"))
+                continue
+            if case == "missing" or not destination.exists():
+                findings.append(Finding(source, line, f"local link target does not exist: {raw_target}"))
                 continue
             if fragment and destination.suffix.lower() == ".md":
                 expected = fragment.lower()

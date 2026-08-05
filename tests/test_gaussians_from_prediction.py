@@ -31,7 +31,7 @@ if sys.flags.optimize:
 try:
     import numpy as np
 except ImportError:
-    raise SystemExit("numpy is required for this test: pip install numpy")
+    raise SystemExit("numpy is required for this test: pip install numpy") from None
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 
