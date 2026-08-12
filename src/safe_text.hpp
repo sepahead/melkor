@@ -128,7 +128,10 @@ inline bool formatClassicFloat(float value, char* output, std::size_t capacity,
     // Format into a complete local value before the caller's buffer changes.
     std::array<char, 64> encoded{};
     int written = -1;
-#if defined(_WIN32)
+#if defined(_MSC_VER)
+    written = _snprintf_s_l(encoded.data(), encoded.size(), _TRUNCATE, "%.*g", locale,
+                            std::numeric_limits<float>::max_digits10, static_cast<double>(value));
+#elif defined(_WIN32)
     written = _snprintf_l(encoded.data(), encoded.size(), "%.*g", locale,
                           std::numeric_limits<float>::max_digits10, static_cast<double>(value));
 #else
