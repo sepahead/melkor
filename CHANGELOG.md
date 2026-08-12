@@ -65,6 +65,7 @@ See [`docs/audit/production-blockers.md`](docs/audit/production-blockers.md) for
 - Windows native builds now compile UTF-8 resource tests and portable fuzz invariants.
 - Windows native builds now isolate CLI and SDK link artifacts.
 - Windows atomic output now uses a handle-bound same-directory rename.
+- Atomic output now reports completion only after all commit work succeeds.
 - Windows checkouts now preserve required LF endings for extensionless version and Cargo lock files.
 - SPZ source license validation now runs before optional zlib discovery.
 - Prerelease CMake packages now report the complete SemVer and reject stable version requests.

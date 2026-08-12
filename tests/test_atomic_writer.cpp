@@ -343,6 +343,7 @@ void test_write_and_commit_report_progress() {
     CHECK(sink.events.front().completed == 0);
     CHECK(sink.events[1].completed == 3);
     CHECK(sink.events.back().operation == "atomic_writer.commit");
+    CHECK(sink.events.back().phase == "complete");
     CHECK(sink.events.back().completed == 3);
 }
 

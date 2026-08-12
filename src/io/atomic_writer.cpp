@@ -733,6 +733,7 @@ Result<void> AtomicWriter::commit() try {
         return Result<void>::failure(ErrorCode::io_error, std::move(diagnostic));
     }
     directory_handle_ = nullptr;
+    context_.report({"atomic_writer.commit", "complete", bytes_written_, bytes_written_, "bytes"});
     return Result<void>::success();
 
 #else
@@ -846,6 +847,7 @@ Result<void> AtomicWriter::commit() try {
         return Result<void>::failure(ErrorCode::io_error, std::move(diagnostic));
     }
 
+    context_.report({"atomic_writer.commit", "complete", bytes_written_, bytes_written_, "bytes"});
     return Result<void>::success();
 #endif
 } catch (const std::bad_alloc&) {
