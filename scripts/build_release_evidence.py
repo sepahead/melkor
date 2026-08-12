@@ -610,8 +610,7 @@ def validate_inventory(inventory: Any, files: dict[str, GitEntry]) -> tuple[dict
                 )
             if artifact_url.encode("utf-8") not in evidence_bytes:
                 raise EvidenceError(
-                    f"component artifact URL is absent from its evidence: "
-                    f"{name}: {artifact_path}"
+                    f"component artifact URL is absent from its evidence: {name}: {artifact_path}"
                 )
 
         license_files = component["license_files"]
@@ -1072,7 +1071,7 @@ def source_manifest_bytes(records: list[FileRecord]) -> bytes:
 
 def write_checksums(directory: Path, names: Iterable[str]) -> None:
     lines = [f"{sha256_file(directory / name)}  {name}\n" for name in sorted(names)]
-    (directory / "SHA256SUMS").write_text("".join(lines), encoding="utf-8")
+    (directory / "SHA256SUMS").write_bytes("".join(lines).encode("utf-8"))
 
 
 def resolve_commit(repo: Path, ref: str) -> str:

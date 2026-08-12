@@ -845,10 +845,13 @@ void test_same_file_detection() {
     auto missing = is_same_file(file, dir.path() / "does-not-exist.ply");
     CHECK(missing.has_value() && !missing.value());
 
+#if !defined(_WIN32)
+    // POSIX reports ENAMETOOLONG. Windows can report a long missing path as not found.
     const fs::path too_long = dir.path() / std::string(4096, 'x');
     auto failed = is_same_file(file, too_long);
     CHECK(!failed.has_value());
     CHECK(failed.error_code() == ErrorCode::io_error);
+#endif
 }
 
 // ---------------------------------------------------------------------------

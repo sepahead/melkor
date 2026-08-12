@@ -226,9 +226,7 @@ def main() -> int:
 
         override_path = root / "malformed.data"
         override_path.write_bytes(malformed.read_bytes())
-        override_result = run(
-            binary, str(override_path), "--json", "--input-format", "ply"
-        )
+        override_result = run(binary, str(override_path), "--json", "--input-format", "ply")
         assert override_result.returncode == 3, override_result.stderr
         override_report = load_report(override_result, validator)
         assert override_report["source"]["format"] == "ply"
@@ -322,11 +320,15 @@ def main() -> int:
             symlink_report = load_report(symlink_result, validator)
             assert symlink_report["validation"]["issues"][0]["code"] == "MK2302_INPUT_TYPE"
 
-        controlled_name = root / "line\ncontrol\x1b\u2028\u2029.ply"
+        controlled_component = (
+            "line-\u2028\u2029.ply" if os.name == "nt" else "line\ncontrol\x1b\u2028\u2029.ply"
+        )
+        controlled_name = root / controlled_component
         controlled_name.write_text(canonical_ply(), encoding="utf-8")
         controlled = run(binary, str(controlled_name))
         assert controlled.returncode == 0, controlled.stderr
-        assert "\\n" in controlled.stdout and "\\x1b" in controlled.stdout
+        if os.name != "nt":
+            assert "\\n" in controlled.stdout and "\\x1b" in controlled.stdout
         assert "\\u2028" in controlled.stdout and "\\u2029" in controlled.stdout
         assert "\x1b" not in controlled.stdout
         assert "\u2028" not in controlled.stdout and "\u2029" not in controlled.stdout

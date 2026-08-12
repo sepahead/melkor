@@ -64,8 +64,19 @@ BANNED = [
 
 # Cues that turn a banned phrase into a permitted, attributed one.
 ATTRIBUTION_CUES = [
-    "reported by", "upstream", "the authors", "authors'", "author's", "per ", "according to",
-    "benchmark", "measured", "claim", "as documented by", "documented in", "see benchmarks",
+    "reported by",
+    "upstream",
+    "the authors",
+    "authors'",
+    "author's",
+    "per ",
+    "according to",
+    "benchmark",
+    "measured",
+    "claim",
+    "as documented by",
+    "documented in",
+    "see benchmarks",
 ]
 
 CLAIM_OK = re.compile(r"claim-ok:\s*\S")
@@ -83,7 +94,7 @@ def linted_paths() -> list[Path]:
     seen: set[Path] = set()
     result: list[Path] = []
     for p in paths:
-        rel = str(p.relative_to(REPO_ROOT))
+        rel = p.relative_to(REPO_ROOT).as_posix()
         if any(sub in rel for sub in EXCLUDED_SUBSTRINGS):
             continue
         if p not in seen:

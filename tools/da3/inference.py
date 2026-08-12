@@ -201,9 +201,9 @@ def validate_model_snapshot(model_path: Path, expected_revision: Optional[str]) 
                 info = entry.lstat()
                 if stat.S_ISLNK(info.st_mode) or not stat.S_ISREG(info.st_mode):
                     raise RuntimeError(f"model snapshot contains an unsafe entry: {entry}")
-                if (
-                    name.endswith(".safetensors") or name.startswith("pytorch_model")
-                ) and (name.endswith(".safetensors") or name.endswith(".bin")):
+                if (name.endswith(".safetensors") or name.startswith("pytorch_model")) and (
+                    name.endswith(".safetensors") or name.endswith(".bin")
+                ):
                     has_weights |= info.st_size > 0
     except OSError as error:
         raise RuntimeError(f"cannot validate model snapshot: {model_path}") from error
@@ -1294,7 +1294,9 @@ def save_output_atomic(
         else:
             raise RuntimeError(f"unsupported output suffix: {suffix}")
 
-        flags = os.O_RDONLY | getattr(os, "O_BINARY", 0) | getattr(os, "O_CLOEXEC", 0)
+        # Windows requires a writable descriptor for fsync. The temporary is private and
+        # complete, so O_RDWR preserves the same validation and durability contract.
+        flags = os.O_RDWR | getattr(os, "O_BINARY", 0) | getattr(os, "O_CLOEXEC", 0)
         flags |= getattr(os, "O_NOFOLLOW", 0)
         artifact_descriptor = os.open(temporary, flags)
         try:

@@ -590,7 +590,10 @@ Result<void> AtomicWriter::commit() try {
     // Rename the open file through its handle. Closing it before a path-based rename lets
     // another process replace the temporary between close and rename.
     const std::size_t name_bytes = destination_name_.size() * sizeof(wchar_t);
-    const std::size_t rename_bytes = offsetof(FILE_RENAME_INFO, FileName) + name_bytes;
+    // Windows requires room for the complete base structure and the variable name.
+    // The extra zeroed WCHAR also keeps the buffer valid for filesystems that inspect a
+    // terminator, although FileNameLength does not include it.
+    const std::size_t rename_bytes = sizeof(FILE_RENAME_INFO) + name_bytes;
     const std::size_t rename_words =
         (rename_bytes + sizeof(std::max_align_t) - 1) / sizeof(std::max_align_t);
     std::vector<std::max_align_t> rename_storage(rename_words);

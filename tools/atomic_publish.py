@@ -227,10 +227,8 @@ def windows_publish(source: Path, destination: Path, replace: bool) -> None:
 
         encoded_name = destination.name.encode("utf-16-le")
         name_offset = RenameInformation.name.offset
-        information_size = name_offset + len(encoded_name)
-        storage = ctypes.create_string_buffer(
-            max(ctypes.sizeof(RenameInformation), information_size)
-        )
+        information_size = ctypes.sizeof(RenameInformation) + len(encoded_name)
+        storage = ctypes.create_string_buffer(information_size)
         rename_information = RenameInformation.from_buffer(storage)
         rename_information.replace = replace
         rename_information.root_directory = directory_handle

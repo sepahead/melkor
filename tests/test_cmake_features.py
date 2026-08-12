@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+import json
 import os
 import subprocess
 import sys
@@ -78,6 +79,9 @@ def verify_embedded_build(cmake: str, source_dir: Path) -> None:
             encoding="utf-8",
         )
         build_dir = parent / "build"
+        query = build_dir / ".cmake" / "api" / "v1" / "query" / "codemodel-v2"
+        query.parent.mkdir(parents=True)
+        query.touch()
         configured = subprocess.run(
             [cmake, "-S", str(parent), "-B", str(build_dir)],
             check=False,
@@ -85,14 +89,22 @@ def verify_embedded_build(cmake: str, source_dir: Path) -> None:
             text=True,
         )
         require_success(configured, "Embedded Melkor configuration")
-        targets = subprocess.run(
-            [cmake, "--build", str(build_dir), "--target", "help"],
-            check=False,
-            capture_output=True,
-            text=True,
-        )
-        require_success(targets, "Embedded Melkor target listing")
-        if "test_safety_substrate" in output(targets):
+        reply = build_dir / ".cmake" / "api" / "v1" / "reply"
+        indexes = sorted(reply.glob("index-*.json"))
+        if len(indexes) != 1:
+            raise AssertionError("Embedded Melkor configuration omitted the CMake File API index")
+        index = json.loads(indexes[0].read_text(encoding="utf-8"))
+        codemodel_reply = index.get("reply", {}).get("codemodel-v2", {})
+        codemodel_file = codemodel_reply.get("jsonFile")
+        if not isinstance(codemodel_file, str):
+            raise AssertionError("Embedded Melkor configuration omitted the CMake codemodel")
+        codemodel = json.loads((reply / codemodel_file).read_text(encoding="utf-8"))
+        targets = {
+            target.get("name")
+            for configuration in codemodel.get("configurations", [])
+            for target in configuration.get("targets", [])
+        }
+        if "test_safety_substrate" in targets:
             raise AssertionError("Embedded Melkor configuration added repository tests")
 
 
@@ -184,10 +196,8 @@ def main() -> int:
         source_copy = Path(temp_dir) / "source"
         copied_cmake = source_copy / "cmake" / "MelkorVersion.cmake"
         copied_cmake.parent.mkdir(parents=True)
-        copied_cmake.write_bytes(
-            (source_dir / "cmake" / "MelkorVersion.cmake").read_bytes()
-        )
-        (source_copy / "VERSION").write_text("99999999999.0.0\n", encoding="utf-8")
+        copied_cmake.write_bytes((source_dir / "cmake" / "MelkorVersion.cmake").read_bytes())
+        (source_copy / "VERSION").write_bytes(b"99999999999.0.0\n")
         result = subprocess.run(
             [cmake, "-P", str(copied_cmake)],
             check=False,

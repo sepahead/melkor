@@ -286,11 +286,7 @@ class SourceBundleExclusion(unittest.TestCase):
                 for mode, path in entries
                 if mode in {"100644", "100755"}
                 and self.b.is_allowed(path)
-                and (
-                    path.startswith(allowed)
-                    if allowed.endswith("/")
-                    else path == allowed
-                )
+                and (path.startswith(allowed) if allowed.endswith("/") else path == allowed)
             ]
             if not matches:
                 unused.append(allowed)
@@ -350,6 +346,7 @@ class SourceBundleExclusion(unittest.TestCase):
             self.assertEqual(self.b.resolve_commit("--help", repo), head)
             self.assertIn(("100644", "README.md"), self.b.git_tracked_entries("--help", repo))
 
+    @unittest.skipIf(os.name == "nt", "Windows forbids control bytes in file names")
     def test_diagnostics_escape_control_characters(self):
         relative = "src/line\nbreak\x1b[31m.txt"
         with tempfile.TemporaryDirectory() as directory:
@@ -927,8 +924,9 @@ class VersionSync(unittest.TestCase):
 
     def test_version_surfaces_reject_non_json_numbers(self):
         for text in ('{"version":NaN}', '{"version":1e999}'):
-            with self.subTest(text=text), self.assertRaisesRegex(
-                self.v.VersionError, "JSON number"
+            with (
+                self.subTest(text=text),
+                self.assertRaisesRegex(self.v.VersionError, "JSON number"),
             ):
                 self.v.parse_json_object(text, Path("surface.json"))
 
@@ -1544,6 +1542,7 @@ class ProfileValidation(unittest.TestCase):
         self.assertIn("jsonschema is required", result.stderr)
 
 
+@unittest.skipIf(os.name == "nt", "Bash contract tests require a POSIX host")
 class ScriptContracts(unittest.TestCase):
     @staticmethod
     def make_colmap_project(root: Path) -> Path:
@@ -2233,9 +2232,7 @@ class ScriptContracts(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             environment = os.environ.copy()
             secret = "melkor-test-secret"
-            environment["MELKOR_TORCH_INDEX_URL"] = (
-                f"https://user:{secret}@example.invalid/simple"
-            )
+            environment["MELKOR_TORCH_INDEX_URL"] = f"https://user:{secret}@example.invalid/simple"
             result = subprocess.run(
                 [
                     str(REPO_ROOT / "scripts" / "setup_da3.sh"),
