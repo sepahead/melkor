@@ -1243,6 +1243,11 @@ class DocumentationLinks(unittest.TestCase):
             guide.write_text("# Valid heading\n", encoding="utf-8")
             self.assertEqual(self.docs.check_markdown([source, guide], root), [])
 
+    def test_vendored_markdown_is_not_project_documentation(self):
+        self.assertFalse(self.docs.is_project_markdown("third_party/widget/README.md"))
+        self.assertFalse(self.docs.is_project_markdown("viewer/vendor/README.md"))
+        self.assertTrue(self.docs.is_project_markdown("docs/README.md"))
+
     def test_query_does_not_become_part_of_local_path(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)

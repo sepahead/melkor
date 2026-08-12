@@ -109,6 +109,7 @@ See [`docs/audit/production-blockers.md`](docs/audit/production-blockers.md) for
 ### Security
 
 - All native readers and writers now share checked limits, memory accounting, cancellation, and deadlines.
+- The Tauri Linux graph now uses a reviewed glib 0.18.5 source with the accepted VariantStrIter safety fix.
 - `AtomicWriter` now uses bound directory handles, safe temporary files, no-overwrite commit, and explicit durability states.
 - Native glTF sidecars now stay below the asset directory and reject links, schemes, traversal, and device names.
 - The viewer now limits local files to 256 MiB and 5,000,000 splats.

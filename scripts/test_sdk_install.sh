@@ -68,7 +68,8 @@ for required in \
     share/melkor/schemas/inspect-v1.schema.json \
     share/melkor/schemas/loss-report-v1.schema.json \
     share/melkor/licenses/spz-LICENSE \
-    share/melkor/licenses/nlohmann-json-LICENSE; do
+    share/melkor/licenses/nlohmann-json-LICENSE \
+    share/melkor/licenses/glib-LICENSE; do
     if [[ ! -s "$prefix/$required" ]]; then
         echo "FAIL: the installed SDK is missing $required" >&2
         exit 1

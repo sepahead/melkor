@@ -19,6 +19,8 @@ confidence-threshold = 0.8
 unused-allowed-license = "deny"
 
 [advisories]
+# Cargo.toml replaces glib 0.18.5 with the verified source under third_party.
+# That source includes the accepted fix for RUSTSEC-2024-0429.
 # Tauri 2's Linux WebKit shell currently depends on archived gtk-rs GTK3
 # crates. There is no safe upgrade path until Tauri/Wry migrate; review these
 # exceptions by 2026-10-01. New advisories remain deny-by-default.

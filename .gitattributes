@@ -32,8 +32,8 @@ CMakeLists.txt text eol=lf
 *.ico binary
 *.gif binary
 
-# Vendored trees: exclude from language stats and review diffs
-third_party/** linguist-vendored
+# Vendored trees: preserve upstream whitespace and exclude these files from language stats.
+third_party/** -whitespace linguist-vendored
 viewer/vendor/** linguist-vendored
 
 # Lockfiles

@@ -47,6 +47,22 @@ nlohmann-json
   License source: third_party/nlohmann-json/LICENSE.MIT
   Installed license: licenses/nlohmann-json-LICENSE
 
+------------------------------------------------------------------------------
+
+glib
+
+  Purpose:  Provide GLib bindings for the Tauri Linux GTK3 runtime.
+  License:  MIT
+  Build condition: MELKOR_TAURI_LINUX
+  Upstream: https://github.com/gtk-rs/gtk-rs-core
+  Version:  0.18.5
+  Revision: 42b9caf98e03ded086362d9653ca58fe94dc8658
+  License source: third_party/glib/LICENSE
+  Installed license: licenses/glib-LICENSE
+
+  Modified by Melkor. 1 local patch under third_party/patches/glib/:
+    - 0001-fix-variant-string-iterator-ub.patch
+
 ==============================================================================
 
 Third-party specifications in the Melkor source bundle

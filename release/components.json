@@ -33,6 +33,22 @@
     },
     {
       "distribution": "vendored",
+      "download_location": "https://github.com/gtk-rs/gtk-rs-core",
+      "license_declared": "MIT",
+      "license_files": [
+        "third_party/glib/LICENSE"
+      ],
+      "name": "glib",
+      "paths": [
+        "third_party/glib",
+        "third_party/patches/glib"
+      ],
+      "spdx_id": "SPDXRef-Package-glib",
+      "supplier": "Organization: The gtk-rs Project Developers",
+      "version": "0.18.5"
+    },
+    {
+      "distribution": "vendored",
       "download_location": "https://github.com/KhronosGroup/glTF/tree/63770cc70a3709cf101a42cece0bdf602b37e2e7/extensions/2.0/Khronos/KHR_gaussian_splatting",
       "license_declared": "CC-BY-4.0",
       "license_files": [

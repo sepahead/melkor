@@ -21,6 +21,7 @@ A binary contains a component only when its build condition applies.
 |---|---|---|---|---|
 | spz | MIT | `MELKOR_SPZ_ENABLED` | v2.1.0 | <https://github.com/nianticlabs/spz> |
 | nlohmann-json | MIT | `always` | v3.12.0 | <https://github.com/nlohmann/json> |
+| glib | MIT | `MELKOR_TAURI_LINUX` | 0.18.5 | <https://github.com/gtk-rs/gtk-rs-core> |
 
 ### Modifications to spz
 
@@ -34,6 +35,13 @@ Melkor applies local patches to upstream `2cf0be04d86b`. The patch files are in 
   Upstream status: not-submitted.
 - **`0004-reject-noncanonical-streams.patch`** — The codec now rejects trailing gzip data, unknown flags, and nonzero reserved data. It writes diagnostics to stderr instead of stdout.
   Upstream status: not-submitted.
+
+### Modifications to glib
+
+Melkor applies local patches to upstream `42b9caf98e03`. The patch files are in `third_party/patches/glib/`.
+
+- **`0001-fix-variant-string-iterator-ub.patch`** — glib 0.18.5 writes through an immutable pointer in VariantStrIter. The patch uses the accepted upstream mutable-pointer fix.
+  Upstream status: accepted.
 
 ## Specifications in the source bundle
 

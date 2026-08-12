@@ -131,6 +131,46 @@
         "owner": "sepahead",
         "next_review": "2027-02-11"
       }
+    },
+    {
+      "id": "glib",
+      "kind": "source",
+      "purpose": "Provide GLib bindings for the Tauri Linux GTK3 runtime.",
+      "upstream": "https://github.com/gtk-rs/gtk-rs-core",
+      "revision": "42b9caf98e03ded086362d9653ca58fe94dc8658",
+      "release": "0.18.5",
+      "archive": {
+        "url": "https://crates.io/api/v1/crates/glib/0.18.5/download",
+        "sha256": "233daaf6e83ae6a12a52055f568f9d7cf4671dabb78ff9560ab6da230ce00ee5"
+      },
+      "license": "MIT",
+      "license_file": "third_party/glib/LICENSE",
+      "vendored": {
+        "path": "third_party/glib",
+        "content_sha256": "dc636683ec2dc59965b298d4b166fa296eb6022265d7e27d2f6d8f01ee9c7d6e",
+        "file_count": 121,
+        "upstream_content_sha256": "92bb6c4aa4b159576aacc68bc00cfbd2fc4d987464f3c3babcf5de618189f88a",
+        "upstream_file_count": 121
+      },
+      "patches": [
+        {
+          "file": "0001-fix-variant-string-iterator-ub.patch",
+          "sha256": "b4284ac55e8f783d57d14de9c0f5dd2041cf579d66d13e1d82f0f36fc3d67602",
+          "rationale": "glib 0.18.5 writes through an immutable pointer in VariantStrIter. The patch uses the accepted upstream mutable-pointer fix.",
+          "upstream_status": "accepted"
+        }
+      ],
+      "used_by": [
+        "melkor-viewer"
+      ],
+      "build_condition": "MELKOR_TAURI_LINUX",
+      "update_policy": "manual-reviewed",
+      "security_contact": "upstream",
+      "review": {
+        "date": "2026-08-12",
+        "owner": "sepahead",
+        "next_review": "2027-02-12"
+      }
     }
   ]
 }

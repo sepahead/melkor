@@ -163,26 +163,8 @@ jobs:
         run: |
           python -m pip install --disable-pip-version-check --only-binary=:all: `
             jsonschema==4.26.0 numpy==2.4.6
-      - name: Build without SPZ
+      - name: Select the installed MSVC toolchain
         run: |
-          cmake -S . -B build/windows -G "Visual Studio 17 2022" -A x64 `
-            -DMELKOR_BUILD_SPZ=OFF `
-            -DMELKOR_WERROR=ON
-          cmake --build build/windows --config RelWithDebInfo --parallel
-      - name: Test
-        run: >-
-          ctest --test-dir build/windows --build-config RelWithDebInfo
-          --output-on-failure --no-tests=error
-      - name: Install and test the C ABI
-        run: |
-          $prefix = Join-Path $env:RUNNER_TEMP "melkor-install"
-          cmake --install build/windows --config RelWithDebInfo --prefix $prefix
-          if (-not (Test-Path "$prefix/include/melkor/c/melkor.h")) {
-            throw "The installed C header is missing."
-          }
-          if (-not (Test-Path "$prefix/bin/melkor.dll")) {
-            throw "The installed shared library is missing."
-          }
           $vswhere = "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe"
           $vsPath = & $vswhere -latest -products * `
             -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 `
@@ -190,13 +172,58 @@ jobs:
           if (-not $vsPath) {
             throw "Visual Studio with the C++ tools is missing."
           }
-          $toolsVersion = (Get-Content `
-            "$vsPath/VC/Auxiliary/Build/Microsoft.VCToolsVersion.default.txt").Trim()
-          $dumpbin = "$vsPath/VC/Tools/MSVC/$toolsVersion/bin/Hostx64/x64/dumpbin.exe"
-          if (-not (Test-Path $dumpbin -PathType Leaf)) {
-            throw "dumpbin.exe is missing."
+          $devCommand = "$vsPath/Common7/Tools/VsDevCmd.bat"
+          if (-not (Test-Path $devCommand -PathType Leaf)) {
+            throw "VsDevCmd.bat is missing."
           }
-          $exports = & $dumpbin /nologo /exports "$prefix/bin/melkor.dll" |
+          $devEnvironment = & $env:COMSPEC /d /s /c `
+            "call `"$devCommand`" -no_logo -arch=x64 -host_arch=x64 >nul && set"
+          if ($LASTEXITCODE -ne 0) {
+            throw "VsDevCmd.bat failed."
+          }
+          $values = @{}
+          foreach ($line in $devEnvironment) {
+            $separator = $line.IndexOf("=")
+            if ($separator -gt 0) {
+              $values[$line.Substring(0, $separator)] = $line.Substring($separator + 1)
+            }
+          }
+          foreach ($name in @("PATH", "INCLUDE", "LIB", "LIBPATH")) {
+            if (-not $values.ContainsKey($name)) {
+              throw "The MSVC environment does not define $name."
+            }
+            Set-Item -Path "Env:$name" -Value $values[$name]
+            "$name=$($values[$name])" | Out-File `
+              -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          }
+          $compiler = (Get-Command cl.exe -ErrorAction Stop).Source
+          $dumpbin = (Get-Command dumpbin.exe -ErrorAction Stop).Source
+          "CC=$compiler" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          "CXX=$compiler" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          "MELKOR_DUMPBIN=$dumpbin" | Out-File `
+            -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          Write-Output "MSVC compiler: $compiler"
+      - name: Build without SPZ
+        run: |
+          cmake -S . -B build/windows -G Ninja `
+            -DCMAKE_BUILD_TYPE=RelWithDebInfo `
+            -DCMAKE_CXX_COMPILER="$env:CXX" `
+            -DMELKOR_BUILD_SPZ=OFF `
+            -DMELKOR_WERROR=ON
+          cmake --build build/windows --parallel
+      - name: Test
+        run: ctest --test-dir build/windows --output-on-failure --no-tests=error
+      - name: Install and test the C ABI
+        run: |
+          $prefix = Join-Path $env:RUNNER_TEMP "melkor-install"
+          cmake --install build/windows --prefix $prefix
+          if (-not (Test-Path "$prefix/include/melkor/c/melkor.h")) {
+            throw "The installed C header is missing."
+          }
+          if (-not (Test-Path "$prefix/bin/melkor.dll")) {
+            throw "The installed shared library is missing."
+          }
+          $exports = & $env:MELKOR_DUMPBIN /nologo /exports "$prefix/bin/melkor.dll" |
             ForEach-Object {
               if ($_ -match '^\s+\d+\s+[0-9A-Fa-f]+\s+[0-9A-Fa-f]+\s+(\S+)') {
                 $Matches[1]
@@ -216,6 +243,7 @@ jobs:
           foreach ($required in @(
             "share/melkor/licenses/spz-LICENSE",
             "share/melkor/licenses/nlohmann-json-LICENSE",
+            "share/melkor/licenses/glib-LICENSE",
             "share/melkor/profiles/spz/spz-v1-v3.json",
             "share/melkor/schemas/loss-report-v1.schema.json"
           )) {
@@ -227,12 +255,11 @@ jobs:
           & "$prefix/bin/melkor.exe" --version
           foreach ($consumer in @("consumer-c", "consumer-cpp")) {
             $build = "build/$consumer-windows"
-            cmake -S "tests/install/$consumer" -B $build `
-              -G "Visual Studio 17 2022" -A x64 `
+            cmake -S "tests/install/$consumer" -B $build -G Ninja `
+              -DCMAKE_BUILD_TYPE=Release `
               -DCMAKE_PREFIX_PATH=$prefix
-            cmake --build $build --config Release --parallel
-            ctest --test-dir $build --build-config Release `
-              --output-on-failure --no-tests=error
+            cmake --build $build --parallel
+            ctest --test-dir $build --output-on-failure --no-tests=error
           }
 
   lint-python:

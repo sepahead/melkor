@@ -22,6 +22,7 @@ REFERENCE_LINK = re.compile(r"^\s*\[[^\]]+\]:\s*(?P<target><[^>]+>|\S+)")
 HTML_LINK = re.compile(r"(?:href|src)=[\"'](?P<target>[^\"']+)[\"']", re.IGNORECASE)
 HEADING = re.compile(r"^\s{0,3}#{1,6}\s+(?P<text>.+?)\s*#*\s*$")
 SCHEME = re.compile(r"^[A-Za-z][A-Za-z0-9+.-]*:")
+VENDORED_MARKDOWN_PREFIXES = ("third_party/", "viewer/vendor/")
 
 
 @dataclass(frozen=True)
@@ -29,6 +30,11 @@ class Finding:
     path: Path
     line: int
     message: str
+
+
+def is_project_markdown(path: str) -> bool:
+    """Return true when a Markdown path belongs to the project."""
+    return not path.startswith(VENDORED_MARKDOWN_PREFIXES)
 
 
 def read_markdown(path: Path) -> str:
@@ -60,7 +66,7 @@ def read_markdown(path: Path) -> str:
 
 
 def tracked_markdown(root: Path = REPO_ROOT) -> list[Path]:
-    """Return each tracked or proposed Markdown file below ``root``."""
+    """Return each project-owned Markdown file below ``root``."""
     result = subprocess.run(
         ["git", "ls-files", "-z", "--cached", "--others", "--exclude-standard", "--", "*.md"],
         cwd=root,
@@ -68,9 +74,12 @@ def tracked_markdown(root: Path = REPO_ROOT) -> list[Path]:
         capture_output=True,
     )
     try:
-        paths = [root / name.decode("utf-8", "strict") for name in result.stdout.split(b"\0") if name]
+        relative_paths = [
+            name.decode("utf-8", "strict") for name in result.stdout.split(b"\0") if name
+        ]
     except UnicodeDecodeError as error:
         raise ValueError("Git returned a non-UTF-8 Markdown path") from error
+    paths = [root / name for name in relative_paths if is_project_markdown(name)]
     links = [path for path in paths if path.is_symlink()]
     if links:
         raise ValueError(f"Markdown files must not be symbolic links: {links[0]}")

@@ -1,0 +1,29 @@
+Subject: [PATCH 0001] Fix undefined behavior in VariantStrIter
+
+glib 0.18.5 passes an immutable pointer as a C output argument.
+The C function writes through that pointer.
+Use a mutable pointer and a mutable reference for the output argument.
+
+Upstream status: accepted in gtk-rs/gtk-rs-core#1343.
+Upstream commit: 05dff0ee696f9bcd8617cd48c4b812d046d440cb.
+
+Applies to: gtk-rs/gtk-rs-core @ 42b9caf98e03ded086362d9653ca58fe94dc8658 (glib 0.18.5)
+
+--- a/src/variant_iter.rs
++++ b/src/variant_iter.rs
+@@ -117,13 +117,13 @@ impl<'a> VariantStrIter<'a> {
+ 
+     fn impl_get(&self, i: usize) -> &'a str {
+         unsafe {
+-            let p: *mut libc::c_char = std::ptr::null_mut();
++            let mut p: *mut libc::c_char = std::ptr::null_mut();
+             let s = b"&s\0";
+             ffi::g_variant_get_child(
+                 self.variant.to_glib_none().0,
+                 i,
+                 s as *const u8 as *const _,
+-                &p,
++                &mut p,
+                 std::ptr::null::<i8>(),
+             );
+             let p = std::ffi::CStr::from_ptr(p);

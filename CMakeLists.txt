@@ -307,6 +307,9 @@ if(MELKOR_INSTALL)
     install(FILES ${PROJECT_SOURCE_DIR}/third_party/nlohmann-json/LICENSE.MIT
         DESTINATION ${CMAKE_INSTALL_DATADIR}/melkor/licenses
         RENAME nlohmann-json-LICENSE)
+    install(FILES ${PROJECT_SOURCE_DIR}/third_party/glib/LICENSE
+        DESTINATION ${CMAKE_INSTALL_DATADIR}/melkor/licenses
+        RENAME glib-LICENSE)
 
     # The exported target set, the config, and a version file. Together these are what makes
     # `find_package(Melkor 2 CONFIG REQUIRED)` work from a clean consumer project.
