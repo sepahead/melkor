@@ -82,6 +82,25 @@ class AtomicPublication(unittest.TestCase):
             self.assertFalse(source.exists())
             self.assertEqual(destination.read_bytes(), b"new")
 
+    @unittest.skipUnless(sys.platform == "win32", "Windows uses same-directory handle rename")
+    def test_windows_rejects_a_different_destination_directory(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            source_parent = root / "source"
+            destination_parent = root / "destination"
+            source_parent.mkdir()
+            destination_parent.mkdir()
+            source = source_parent / "staged.ply"
+            destination = destination_parent / "output.ply"
+            source.write_bytes(b"new")
+
+            result = self.run_tool(source, destination)
+
+            self.assertEqual(result.returncode, 2, result.stderr)
+            self.assertIn("must use one directory", result.stderr)
+            self.assertEqual(source.read_bytes(), b"new")
+            self.assertFalse(destination.exists())
+
     @unittest.skipIf(sys.platform == "win32", "Windows symbolic-link creation needs privileges")
     def test_symbolic_link_paths_are_rejected(self):
         with tempfile.TemporaryDirectory() as directory:

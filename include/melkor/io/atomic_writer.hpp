@@ -128,7 +128,7 @@ private:
     // member is a warning under -Werror and because carrying a dead field invites someone to
     // eventually use the wrong one.
 #if defined(_WIN32)
-    // These handles bind the source file and target directory across commit.
+    // The source handle keeps commit in the temporary file's current directory.
     void* directory_handle_ = nullptr;
     void* handle_ = nullptr;  // Windows HANDLE, as void* to keep this header platform-free.
     std::wstring destination_name_;

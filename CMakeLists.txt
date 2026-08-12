@@ -98,6 +98,13 @@ target_include_directories(
 set(MELKOR_SPZ_ENABLED OFF)
 if(NOT MELKOR_BUILD_SPZ STREQUAL "OFF")
     if(EXISTS "${MELKOR_SPZ_SOURCE_DIR}/CMakeLists.txt")
+        set(MELKOR_SPZ_LICENSE_FILE "${MELKOR_SPZ_SOURCE_DIR}/LICENSE")
+        if(NOT EXISTS "${MELKOR_SPZ_LICENSE_FILE}" OR
+           IS_DIRECTORY "${MELKOR_SPZ_LICENSE_FILE}" OR
+           IS_SYMLINK "${MELKOR_SPZ_LICENSE_FILE}")
+            message(FATAL_ERROR
+                "The selected SPZ source must contain a regular LICENSE file.")
+        endif()
         find_package(ZLIB QUIET)
         if(ZLIB_FOUND)
             set(MELKOR_SPZ_ENABLED ON)
@@ -115,14 +122,6 @@ if(NOT MELKOR_BUILD_SPZ STREQUAL "OFF")
 endif()
 
 if(MELKOR_SPZ_ENABLED)
-    set(MELKOR_SPZ_LICENSE_FILE "${MELKOR_SPZ_SOURCE_DIR}/LICENSE")
-    if(NOT EXISTS "${MELKOR_SPZ_LICENSE_FILE}" OR
-       IS_DIRECTORY "${MELKOR_SPZ_LICENSE_FILE}" OR
-       IS_SYMLINK "${MELKOR_SPZ_LICENSE_FILE}")
-        message(FATAL_ERROR
-            "The selected SPZ source must contain a regular LICENSE file.")
-    endif()
-
     # EXCLUDE_FROM_ALL: build spz because melkor_core depends on it, but do NOT run its own
     # install rules. Without this, spz installs its CLI tools (ply_to_spz, spz_info, ...) and
     # its headers (load-spz.h, splat-types.h) into our SDK prefix, polluting the include root

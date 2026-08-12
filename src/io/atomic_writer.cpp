@@ -37,6 +37,49 @@ namespace {
 constexpr std::size_t kWriteChunkBytes = std::size_t{1024} * 1024;
 constexpr std::size_t kAtomicStreamBufferBytes = std::size_t{64} * 1024;
 
+#if defined(_WIN32)
+struct NativeIoStatusBlock {
+    union {
+        LONG status;
+        void* pointer;
+    };
+    ULONG_PTR information;
+};
+
+struct NativeRenameInformation {
+    BOOLEAN replace_if_exists;
+    HANDLE root_directory;
+    ULONG file_name_length;
+    WCHAR file_name[1];
+};
+
+using NtSetInformationFileFunction = LONG(NTAPI*)(HANDLE, NativeIoStatusBlock*, void*, ULONG,
+                                                  ULONG);
+using RtlNtStatusToDosErrorFunction = ULONG(NTAPI*)(LONG);
+
+constexpr ULONG kFileRenameInformation = 10;
+
+NtSetInformationFileFunction nt_set_information_file() noexcept {
+    static const auto function = []() noexcept {
+        const HMODULE module = ::GetModuleHandleW(L"ntdll.dll");
+        return module == nullptr ? nullptr
+                                 : reinterpret_cast<NtSetInformationFileFunction>(
+                                       ::GetProcAddress(module, "NtSetInformationFile"));
+    }();
+    return function;
+}
+
+DWORD native_status_to_windows_error(LONG status) noexcept {
+    static const auto function = []() noexcept {
+        const HMODULE module = ::GetModuleHandleW(L"ntdll.dll");
+        return module == nullptr ? nullptr
+                                 : reinterpret_cast<RtlNtStatusToDosErrorFunction>(
+                                       ::GetProcAddress(module, "RtlNtStatusToDosError"));
+    }();
+    return function == nullptr ? ERROR_GEN_FAILURE : function(status);
+}
+#endif
+
 Diagnostic io_error(const std::string& code, const std::string& message, const fs::path& path,
                     const OperationContext& context) {
     Diagnostic diagnostic(code, Severity::error, message);
@@ -587,22 +630,27 @@ Result<void> AtomicWriter::commit() try {
         }
     }
 
-    // Rename the open file through its handle. Closing it before a path-based rename lets
-    // another process replace the temporary between close and rename.
+    // The native simple-name form keeps the destination in the source handle's directory.
+    // The Win32 wrapper instead resolves a relative name against the process directory.
     const std::size_t name_bytes = destination_name_.size() * sizeof(wchar_t);
-    // Windows requires room for the complete base structure and the variable name.
-    // The extra zeroed WCHAR also keeps the buffer valid for filesystems that inspect a
-    // terminator, although FileNameLength does not include it.
-    const std::size_t rename_bytes = sizeof(FILE_RENAME_INFO) + name_bytes;
+    const std::size_t rename_bytes = sizeof(NativeRenameInformation) + name_bytes;
     const std::size_t rename_words =
         (rename_bytes + sizeof(std::max_align_t) - 1) / sizeof(std::max_align_t);
     std::vector<std::max_align_t> rename_storage(rename_words);
     std::memset(rename_storage.data(), 0, rename_bytes);
-    auto* rename_info = reinterpret_cast<FILE_RENAME_INFO*>(rename_storage.data());
-    rename_info->ReplaceIfExists = options_.overwrite ? TRUE : FALSE;
-    rename_info->RootDirectory = static_cast<HANDLE>(directory_handle_);
-    rename_info->FileNameLength = static_cast<DWORD>(name_bytes);
-    std::memcpy(rename_info->FileName, destination_name_.data(), name_bytes);
+    auto* rename_info = reinterpret_cast<NativeRenameInformation*>(rename_storage.data());
+    rename_info->replace_if_exists = options_.overwrite ? TRUE : FALSE;
+    rename_info->root_directory = nullptr;
+    rename_info->file_name_length = static_cast<ULONG>(name_bytes);
+    std::memcpy(rename_info->file_name, destination_name_.data(), name_bytes);
+
+    const auto rename_function = nt_set_information_file();
+    if (rename_function == nullptr) {
+        abort();
+        return Result<void>::failure(
+            ErrorCode::io_error, Diagnostic("MK0539_RENAME_API_MISSING", Severity::error,
+                                            "the Windows atomic rename function is unavailable"));
+    }
 
     // Antivirus and search indexers can cause a temporary sharing violation.
     const int kMaxAttempts = 10;
@@ -616,12 +664,15 @@ Result<void> AtomicWriter::commit() try {
             abort();
             return control;
         }
-        if (::SetFileInformationByHandle(handle, FileRenameInfo, rename_info,
-                                         static_cast<DWORD>(rename_bytes))) {
+        NativeIoStatusBlock status_block{};
+        const LONG status =
+            rename_function(handle, &status_block, rename_info, static_cast<ULONG>(rename_bytes),
+                            kFileRenameInformation);
+        if (status >= 0) {
             installed = true;
             break;
         }
-        const DWORD error = ::GetLastError();
+        const DWORD error = native_status_to_windows_error(status);
         last_rename_error = error;
         if (error != ERROR_SHARING_VIOLATION && error != ERROR_ACCESS_DENIED) {
             break;

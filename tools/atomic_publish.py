@@ -110,7 +110,7 @@ def posix_publish(source: Path, destination: Path, replace: bool) -> None:
 
 
 def windows_publish(source: Path, destination: Path, replace: bool) -> None:
-    """Publish through bound Windows handles."""
+    """Publish a same-directory object through a bound Windows handle."""
     from ctypes import wintypes
 
     delete_access = 0x00010000
@@ -125,7 +125,7 @@ def windows_publish(source: Path, destination: Path, replace: bool) -> None:
     file_type_disk = 0x0001
     file_flag_backup_semantics = 0x02000000
     file_flag_open_reparse_point = 0x00200000
-    file_rename_info_class = 3
+    file_rename_information = 10
     invalid_handle = ctypes.c_void_p(-1).value
 
     class FileInformation(ctypes.Structure):
@@ -142,9 +142,15 @@ def windows_publish(source: Path, destination: Path, replace: bool) -> None:
             ("index_low", wintypes.DWORD),
         ]
 
-    class RenameInformation(ctypes.Structure):
+    class NativeIoStatusBlock(ctypes.Structure):
         _fields_ = [
-            ("replace", wintypes.BOOL),
+            ("status_or_pointer", ctypes.c_void_p),
+            ("information", ctypes.c_size_t),
+        ]
+
+    class NativeRenameInformation(ctypes.Structure):
+        _fields_ = [
+            ("replace", ctypes.c_ubyte),
             ("root_directory", wintypes.HANDLE),
             ("name_length", wintypes.DWORD),
             ("name", wintypes.WCHAR * 1),
@@ -168,19 +174,35 @@ def windows_publish(source: Path, destination: Path, replace: bool) -> None:
     get_file_type = kernel.GetFileType
     get_file_type.argtypes = [wintypes.HANDLE]
     get_file_type.restype = wintypes.DWORD
-    set_information = kernel.SetFileInformationByHandle
+    native = ctypes.WinDLL("ntdll", use_last_error=True)
+    set_information = native.NtSetInformationFile
     set_information.argtypes = [
         wintypes.HANDLE,
-        ctypes.c_int,
+        ctypes.POINTER(NativeIoStatusBlock),
         wintypes.LPVOID,
-        wintypes.DWORD,
+        wintypes.ULONG,
+        wintypes.ULONG,
     ]
-    set_information.restype = wintypes.BOOL
+    set_information.restype = wintypes.LONG
+    status_to_error = native.RtlNtStatusToDosError
+    status_to_error.argtypes = [wintypes.LONG]
+    status_to_error.restype = wintypes.ULONG
     close_handle = kernel.CloseHandle
     close_handle.argtypes = [wintypes.HANDLE]
     close_handle.restype = wintypes.BOOL
 
-    directory_handle = create_file(
+    source_directory_handle = create_file(
+        str(source.parent),
+        file_list_directory | file_read_attributes,
+        file_share_read | file_share_write | file_share_delete,
+        None,
+        open_existing,
+        file_flag_backup_semantics | file_flag_open_reparse_point,
+        None,
+    )
+    if source_directory_handle == invalid_handle:
+        raise ctypes.WinError(ctypes.get_last_error())
+    destination_directory_handle = create_file(
         str(destination.parent),
         file_list_directory | file_read_attributes,
         file_share_read | file_share_write | file_share_delete,
@@ -189,8 +211,10 @@ def windows_publish(source: Path, destination: Path, replace: bool) -> None:
         file_flag_backup_semantics | file_flag_open_reparse_point,
         None,
     )
-    if directory_handle == invalid_handle:
-        raise ctypes.WinError(ctypes.get_last_error())
+    if destination_directory_handle == invalid_handle:
+        error = ctypes.get_last_error()
+        close_handle(source_directory_handle)
+        raise ctypes.WinError(error)
     source_handle = create_file(
         str(source),
         delete_access | file_read_attributes,
@@ -202,51 +226,77 @@ def windows_publish(source: Path, destination: Path, replace: bool) -> None:
     )
     if source_handle == invalid_handle:
         error = ctypes.get_last_error()
-        close_handle(directory_handle)
+        close_handle(destination_directory_handle)
+        close_handle(source_directory_handle)
         raise ctypes.WinError(error)
     try:
         source_information = FileInformation()
-        directory_information = FileInformation()
+        source_directory_information = FileInformation()
+        destination_directory_information = FileInformation()
         if not get_information(source_handle, ctypes.byref(source_information)):
             raise ctypes.WinError(ctypes.get_last_error())
-        if not get_information(directory_handle, ctypes.byref(directory_information)):
+        if not get_information(source_directory_handle, ctypes.byref(source_directory_information)):
+            raise ctypes.WinError(ctypes.get_last_error())
+        if not get_information(
+            destination_directory_handle, ctypes.byref(destination_directory_information)
+        ):
             raise ctypes.WinError(ctypes.get_last_error())
         if source_information.attributes & file_attribute_reparse_point:
             raise ValueError("the staged object must not be a Windows reparse point")
-        if directory_information.attributes & file_attribute_reparse_point:
+        if source_directory_information.attributes & file_attribute_reparse_point:
+            raise ValueError("the staged object's parent must not be a Windows reparse point")
+        if destination_directory_information.attributes & file_attribute_reparse_point:
             raise ValueError("the destination directory must not be a Windows reparse point")
-        if not directory_information.attributes & file_attribute_directory:
+        if not source_directory_information.attributes & file_attribute_directory:
+            raise ValueError("the staged object's parent must be a directory")
+        if not destination_directory_information.attributes & file_attribute_directory:
             raise ValueError("the publication destination parent must be a directory")
         if get_file_type(source_handle) != file_type_disk:
             raise ValueError("the staged object must be a disk file or directory")
         source_is_directory = bool(source_information.attributes & file_attribute_directory)
         if replace and source_is_directory:
             raise ValueError("replacement publication supports only regular files")
-        if source_information.volume_serial != directory_information.volume_serial:
+        if source_information.volume_serial != destination_directory_information.volume_serial:
             raise ValueError("the staged object and destination must use one filesystem")
+        source_directory_identity = (
+            source_directory_information.volume_serial,
+            source_directory_information.index_high,
+            source_directory_information.index_low,
+        )
+        destination_directory_identity = (
+            destination_directory_information.volume_serial,
+            destination_directory_information.index_high,
+            destination_directory_information.index_low,
+        )
+        if source_directory_identity != destination_directory_identity:
+            raise ValueError("the staged object and destination must use one directory")
 
         encoded_name = destination.name.encode("utf-16-le")
-        name_offset = RenameInformation.name.offset
-        information_size = ctypes.sizeof(RenameInformation) + len(encoded_name)
+        name_offset = NativeRenameInformation.name.offset
+        information_size = ctypes.sizeof(NativeRenameInformation) + len(encoded_name)
         storage = ctypes.create_string_buffer(information_size)
-        rename_information = RenameInformation.from_buffer(storage)
+        rename_information = NativeRenameInformation.from_buffer(storage)
         rename_information.replace = replace
-        rename_information.root_directory = directory_handle
+        rename_information.root_directory = None
         rename_information.name_length = len(encoded_name)
         ctypes.memmove(ctypes.addressof(storage) + name_offset, encoded_name, len(encoded_name))
-        if not set_information(
+        status_block = NativeIoStatusBlock()
+        status = set_information(
             source_handle,
-            file_rename_info_class,
+            ctypes.byref(status_block),
             storage,
             information_size,
-        ):
-            error = ctypes.get_last_error()
+            file_rename_information,
+        )
+        if status < 0:
+            error = status_to_error(status)
             if error in {80, 183}:
                 raise FileExistsError(error, "the publication destination already exists")
             raise ctypes.WinError(error)
     finally:
         close_handle(source_handle)
-        close_handle(directory_handle)
+        close_handle(destination_directory_handle)
+        close_handle(source_directory_handle)
 
 
 def publish(source: Path, destination: Path, replace: bool) -> None:
