@@ -246,6 +246,14 @@ set_target_properties(melkor_lib PROPERTIES
     VISIBILITY_INLINES_HIDDEN ON
     VERSION ${MELKOR_VERSION_CORE}
     SOVERSION ${MELKOR_ABI_VERSION})
+if(MSVC)
+    # The CLI and the SDK have the same output name on Windows. Keep the SDK link files in a
+    # separate directory so parallel links cannot both write melkor.pdb or melkor.ilk.
+    set_target_properties(melkor_lib PROPERTIES
+        RUNTIME_OUTPUT_DIRECTORY "${PROJECT_BINARY_DIR}/c-sdk"
+        ARCHIVE_OUTPUT_DIRECTORY "${PROJECT_BINARY_DIR}/c-sdk"
+        PDB_OUTPUT_DIRECTORY "${PROJECT_BINARY_DIR}/c-sdk")
+endif()
 target_compile_definitions(melkor_lib PRIVATE MELKOR_BUILDING_LIBRARY)
 # The C API uses the platform-neutral core.
 # It does not require a GPU backend.

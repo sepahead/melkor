@@ -63,6 +63,7 @@ See [`docs/audit/production-blockers.md`](docs/audit/production-blockers.md) for
 - Windows CLI arguments and diagnostics now preserve Unicode paths.
 - Windows native I/O now disables unsafe `windows.h` macros and uses secure locale formatting.
 - Windows native builds now compile UTF-8 resource tests and portable fuzz invariants.
+- Windows native builds now isolate CLI and SDK link artifacts.
 - Prerelease CMake packages now report the complete SemVer and reject stable version requests.
 - Numeric text conversion now supports the declared macOS 13 deployment target.
 - Numeric text conversion now supports GCC on POSIX systems and preserves too-small output buffers.
