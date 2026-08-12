@@ -6,6 +6,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <cstdio>
+#include <cstdlib>
 #include <cstring>
 #include <limits>
 #include <locale.h>
@@ -39,15 +40,27 @@ inline bool isAsciiSpace(char value) noexcept {
 }
 
 template <typename Value>
-inline Value parseWithLocale(const char* input, char** end, NumericLocale locale) noexcept {
+inline bool parseWithLocale(const char* input, char** end, NumericLocale locale, Value& output,
+                            int& parse_error) noexcept {
 #if defined(_WIN32)
+    errno = 0;
     if constexpr (std::is_same_v<Value, float>)
-        return _strtof_l(input, end, locale);
-    return _strtod_l(input, end, locale);
+        output = _strtof_l(input, end, locale);
+    else
+        output = _strtod_l(input, end, locale);
+    parse_error = errno;
+    return true;
 #else
+    const locale_t previous = uselocale(locale);
+    if (previous == nullptr)
+        return false;
+    errno = 0;
     if constexpr (std::is_same_v<Value, float>)
-        return strtof_l(input, end, locale);
-    return strtod_l(input, end, locale);
+        output = std::strtof(input, end);
+    else
+        output = std::strtod(input, end);
+    parse_error = errno;
+    return uselocale(previous) != nullptr;
 #endif
 }
 
@@ -81,12 +94,14 @@ inline bool parseClassicNumber(std::string_view input, Value& output) noexcept {
     NumericLocale locale = numericLocale();
     if (locale == nullptr)
         return false;
-    errno = 0;
     char* parsed_end = nullptr;
-    const Value parsed = parseWithLocale<Value>(begin, &parsed_end, locale);
+    Value parsed = Value{0};
+    int parse_error = 0;
+    if (!parseWithLocale<Value>(begin, &parsed_end, locale, parsed, parse_error))
+        return false;
     if (parsed_end != begin + input.size())
         return false;
-    if (errno == ERANGE && (parsed == Value{0} || !std::isfinite(parsed)))
+    if (parse_error == ERANGE && (parsed == Value{0} || !std::isfinite(parsed)))
         return false;
     output = parsed;
     return true;
@@ -110,21 +125,26 @@ inline bool formatClassicFloat(float value, char* output, std::size_t capacity,
     if (locale == nullptr)
         return false;
 
+    // Format into a complete local value before the caller's buffer changes.
+    std::array<char, 64> encoded{};
     int written = -1;
 #if defined(_WIN32)
-    written = _snprintf_l(output, capacity, "%.*g", locale,
+    written = _snprintf_l(encoded.data(), encoded.size(), "%.*g", locale,
                           std::numeric_limits<float>::max_digits10, static_cast<double>(value));
 #else
     const locale_t previous = uselocale(locale);
     if (previous == nullptr)
         return false;
-    written = std::snprintf(output, capacity, "%.*g", std::numeric_limits<float>::max_digits10,
-                            static_cast<double>(value));
+    written = std::snprintf(encoded.data(), encoded.size(), "%.*g",
+                            std::numeric_limits<float>::max_digits10, static_cast<double>(value));
     if (uselocale(previous) == nullptr)
         return false;
 #endif
-    if (written < 0 || static_cast<std::size_t>(written) >= capacity)
+    if (written < 0 || static_cast<std::size_t>(written) >= encoded.size() ||
+        static_cast<std::size_t>(written) >= capacity) {
         return false;
+    }
+    std::memcpy(output, encoded.data(), static_cast<std::size_t>(written) + 1);
     length = static_cast<std::size_t>(written);
     return true;
 }

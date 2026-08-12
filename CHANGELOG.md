@@ -63,7 +63,9 @@ See [`docs/audit/production-blockers.md`](docs/audit/production-blockers.md) for
 - Windows CLI arguments and diagnostics now preserve Unicode paths.
 - Prerelease CMake packages now report the complete SemVer and reject stable version requests.
 - Numeric text conversion now supports the declared macOS 13 deployment target.
+- Numeric text conversion now supports GCC on POSIX systems and preserves too-small output buffers.
 - CMake now sets that target before it enables the compiler.
+- Windows CI now selects MSVC explicitly and tests installed consumers with MSVC.
 - The installed version header now stays warning-free with C++98 compilers.
 - SPZ-disabled builds now compile their budget test without SPZ headers.
 - Standalone fuzz replays now turn setup exceptions into deterministic test failures.

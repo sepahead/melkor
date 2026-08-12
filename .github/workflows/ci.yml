@@ -165,24 +165,38 @@ jobs:
             jsonschema==4.26.0 numpy==2.4.6
       - name: Build without SPZ
         run: |
-          cmake -S . -B build/windows -G Ninja `
-            -DCMAKE_BUILD_TYPE=RelWithDebInfo `
+          cmake -S . -B build/windows -G "Visual Studio 17 2022" -A x64 `
             -DMELKOR_BUILD_SPZ=OFF `
             -DMELKOR_WERROR=ON
-          cmake --build build/windows --parallel
+          cmake --build build/windows --config RelWithDebInfo --parallel
       - name: Test
-        run: ctest --test-dir build/windows --output-on-failure --no-tests=error
+        run: >-
+          ctest --test-dir build/windows --build-config RelWithDebInfo
+          --output-on-failure --no-tests=error
       - name: Install and test the C ABI
         run: |
           $prefix = Join-Path $env:RUNNER_TEMP "melkor-install"
-          cmake --install build/windows --prefix $prefix
+          cmake --install build/windows --config RelWithDebInfo --prefix $prefix
           if (-not (Test-Path "$prefix/include/melkor/c/melkor.h")) {
             throw "The installed C header is missing."
           }
           if (-not (Test-Path "$prefix/bin/melkor.dll")) {
             throw "The installed shared library is missing."
           }
-          $exports = & dumpbin /nologo /exports "$prefix/bin/melkor.dll" |
+          $vswhere = "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe"
+          $vsPath = & $vswhere -latest -products * `
+            -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 `
+            -property installationPath
+          if (-not $vsPath) {
+            throw "Visual Studio with the C++ tools is missing."
+          }
+          $toolsVersion = (Get-Content `
+            "$vsPath/VC/Auxiliary/Build/Microsoft.VCToolsVersion.default.txt").Trim()
+          $dumpbin = "$vsPath/VC/Tools/MSVC/$toolsVersion/bin/Hostx64/x64/dumpbin.exe"
+          if (-not (Test-Path $dumpbin -PathType Leaf)) {
+            throw "dumpbin.exe is missing."
+          }
+          $exports = & $dumpbin /nologo /exports "$prefix/bin/melkor.dll" |
             ForEach-Object {
               if ($_ -match '^\s+\d+\s+[0-9A-Fa-f]+\s+[0-9A-Fa-f]+\s+(\S+)') {
                 $Matches[1]
@@ -213,11 +227,12 @@ jobs:
           & "$prefix/bin/melkor.exe" --version
           foreach ($consumer in @("consumer-c", "consumer-cpp")) {
             $build = "build/$consumer-windows"
-            cmake -S "tests/install/$consumer" -B $build -G Ninja `
-              -DCMAKE_BUILD_TYPE=Release `
+            cmake -S "tests/install/$consumer" -B $build `
+              -G "Visual Studio 17 2022" -A x64 `
               -DCMAKE_PREFIX_PATH=$prefix
-            cmake --build $build --parallel
-            ctest --test-dir $build --output-on-failure --no-tests=error
+            cmake --build $build --config Release --parallel
+            ctest --test-dir $build --build-config Release `
+              --output-on-failure --no-tests=error
           }
 
   lint-python:

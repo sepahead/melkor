@@ -218,9 +218,11 @@ void test_classic_float_text() {
         CHECK(source_bits == decoded_bits);
     }
 
-    char too_small[2]{};
-    std::size_t ignored_length = 0;
+    char too_small[2]{'x', 'y'};
+    std::size_t ignored_length = 17;
     CHECK(!text::formatClassicFloat(123.0f, too_small, sizeof(too_small), ignored_length));
+    CHECK(too_small[0] == 'x' && too_small[1] == 'y');
+    CHECK(ignored_length == 17);
 }
 
 void test_decompression_ratio_boundary_is_exact() {

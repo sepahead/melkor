@@ -34,6 +34,7 @@ using melkor::math::Vec3;
 
 int g_failures = 0;
 int g_checks = 0;
+constexpr double kHalfPi = 1.57079632679489661923;
 
 void check(bool condition, const char* what, int line) {
     ++g_checks;
@@ -223,7 +224,7 @@ void test_round_trip_and_composition() {
 void test_lobe_rotates_to_expected_direction() {
     // Build a degree-1 coefficient block whose radiance peaks toward +X, rotate 90 deg about Z
     // (+X -> +Y), and confirm the rotated block now peaks toward +Y.
-    auto rot = math::ShRotation::create(rot_z(M_PI / 2.0), 3).value();
+    auto rot = math::ShRotation::create(rot_z(kHalfPi), 3).value();
     // Degree-1 coefficients that reconstruct the direction +X: basis for +X is
     // [C0, 0, 0, -C1]; a block proportional to the +X basis peaks at +X. Use 1 channel.
     const double C0 = 0.28209479177387814, C1 = 0.4886025119029199;
@@ -250,7 +251,7 @@ void test_lobe_rotates_to_expected_direction() {
 void test_rotate_block_rgb_channels() {
     // Three channels rotate independently but share the band matrices; a per-channel scale must be
     // preserved. Give the R/G/B channels distinct scales of the same +X degree-1 lobe.
-    auto rot = math::ShRotation::create(rot_z(M_PI / 2.0), 3).value();
+    auto rot = math::ShRotation::create(rot_z(kHalfPi), 3).value();
     const double C1 = 0.4886025119029199;
     std::vector<float> block(16 * 3, 0.0f);
     // coefficient 3 (m=+1) for each channel, scaled 1, 2, 3.
