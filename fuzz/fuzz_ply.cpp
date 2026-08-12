@@ -18,6 +18,7 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <cstdlib>
 
 namespace {
 
@@ -32,7 +33,7 @@ void exercise(const uint8_t* data, size_t size) {
         return;  // A clean rejection is a correct outcome for malformed input.
     }
     if (!result.data.has_value()) {
-        __builtin_trap();  // Success without a canonical value violates the reader contract.
+        std::abort();  // Success without a canonical value violates the reader contract.
     }
 
     // On success the canonical data must be internally consistent. These are cheap checks whose
@@ -40,13 +41,13 @@ void exercise(const uint8_t* data, size_t size) {
     const auto& data_result = *result.data;
     const std::size_t n = data_result.size();
     if (!data_result.validate().has_value()) {
-        __builtin_trap();
+        std::abort();
     }
 
     if (data_result.positions().size() != n || data_result.scales().size() != n ||
         data_result.rotations().size() != n || data_result.opacities().size() != n ||
         data_result.sh().splat_count() != n) {
-        __builtin_trap();
+        std::abort();
     }
     volatile float sink = 0.0f;
     for (std::size_t i = 0; i < n; ++i) {

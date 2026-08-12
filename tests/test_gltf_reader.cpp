@@ -618,9 +618,9 @@ void test_file_reader_accepts_utf8_resource_name() {
     attrs.push_back({"KHR_gaussian_splatting:SH_DEGREE_0_COEF_0", 3, {0.1f, 0.2f, 0.3f}});
     const Built built = build(1, attrs);
     TempDirectory directory;
-    const auto binary_path = directory.path() / std::filesystem::u8path("wolke-\u2601.bin");
+    const auto binary_path = directory.path() / std::filesystem::u8path(u8"wolke-\u2601.bin");
     const auto json_path = directory.path() / "cloud.gltf";
-    const std::string document = scene_json(built, "wolke-\u2601.bin");
+    const std::string document = scene_json(built, u8"wolke-\u2601.bin");
     CHECK(write_bytes(binary_path, built.buffer.data(), built.buffer.size()));
     CHECK(write_bytes(json_path, reinterpret_cast<const std::uint8_t*>(document.data()),
                       document.size()));

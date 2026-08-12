@@ -13,6 +13,7 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <cstdlib>
 
 namespace {
 
@@ -28,7 +29,7 @@ void exercise(const uint8_t* data, size_t size) {
         return;
     }
     if (!result.data.has_value() || !result.data->validate().has_value()) {
-        __builtin_trap();
+        std::abort();
     }
     volatile float sink = 0.0f;
     for (std::size_t i = 0; i < result.data->size(); ++i) {

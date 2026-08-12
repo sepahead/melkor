@@ -12,6 +12,7 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <cstdlib>
 
 namespace {
 
@@ -21,7 +22,7 @@ void exercise(const uint8_t* data, size_t size) {
         return;
     }
     if (!result.value().data.validate().has_value()) {
-        __builtin_trap();
+        std::abort();
     }
     // Touch canonical positions so a sanitizer build observes any bad memory the reader set up.
     volatile float sink = 0.0f;
