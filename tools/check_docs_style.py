@@ -4,12 +4,15 @@
 from __future__ import annotations
 
 import re
+import os
+import stat
 import subprocess
 import sys
 from dataclasses import dataclass
 from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
+MAX_MARKDOWN_BYTES = 4 * 1024 * 1024
 
 EXCLUDED_PREFIXES = (
     "docs/audit/",
@@ -53,18 +56,50 @@ class Finding:
     message: str
 
 
+def read_markdown(path: Path) -> str:
+    """Read one bounded regular UTF-8 Markdown file."""
+    if path.is_symlink():
+        raise ValueError(f"Markdown input must not be a symbolic link: {path}")
+    flags = os.O_RDONLY | getattr(os, "O_BINARY", 0) | getattr(os, "O_CLOEXEC", 0)
+    flags |= getattr(os, "O_NOFOLLOW", 0)
+    descriptor = os.open(path, flags)
+    with os.fdopen(descriptor, "rb") as handle:
+        initial = os.fstat(handle.fileno())
+        if not stat.S_ISREG(initial.st_mode) or initial.st_size > MAX_MARKDOWN_BYTES:
+            raise ValueError(f"Markdown input must be a bounded regular file: {path}")
+        raw = handle.read(MAX_MARKDOWN_BYTES + 1)
+        final = os.fstat(handle.fileno())
+        if (
+            len(raw) != initial.st_size
+            or final.st_dev != initial.st_dev
+            or final.st_ino != initial.st_ino
+            or final.st_size != initial.st_size
+            or final.st_mtime_ns != initial.st_mtime_ns
+            or final.st_ctime_ns != initial.st_ctime_ns
+        ):
+            raise ValueError(f"Markdown input changed while it was read: {path}")
+    try:
+        return raw.decode("utf-8")
+    except UnicodeDecodeError as error:
+        raise ValueError(f"Markdown input is not UTF-8: {path}") from error
+
+
 def tracked_markdown(root: Path = REPO_ROOT) -> list[Path]:
     output = subprocess.check_output(
         ["git", "ls-files", "-z", "--cached", "--others", "--exclude-standard", "--", "*.md"],
         cwd=root,
-    ).decode("utf-8")
+    ).decode("utf-8", "strict")
     result = []
     for relative in output.split("\0"):
         if not relative or relative in EXCLUDED_FILES:
             continue
         if any(relative.startswith(prefix) for prefix in EXCLUDED_PREFIXES):
             continue
-        result.append(root / relative)
+        path = root / relative
+        if path.is_symlink():
+            raise ValueError(f"Markdown files must not be symbolic links: {path}")
+        if path.is_file():
+            result.append(path)
     return result
 
 
@@ -108,7 +143,7 @@ def check_markdown(paths: list[Path], root: Path = REPO_ROOT) -> list[Finding]:
                     )
             paragraph = []
 
-        for lineno, line in enumerate(path.read_text(encoding="utf-8").splitlines(), 1):
+        for lineno, line in enumerate(read_markdown(path).splitlines(), 1):
             stripped = line.strip()
             if stripped.startswith("```"):
                 flush_paragraph(paragraph_line)
@@ -159,14 +194,19 @@ def check_markdown(paths: list[Path], root: Path = REPO_ROOT) -> list[Finding]:
 
 
 def main() -> int:
-    findings = check_markdown(tracked_markdown())
+    try:
+        paths = tracked_markdown()
+        findings = check_markdown(paths)
+    except (OSError, subprocess.SubprocessError, UnicodeDecodeError, ValueError) as error:
+        print(f"error: documentation style check failed: {error}", file=sys.stderr)
+        return 2
     for finding in findings:
         relative = finding.path.relative_to(REPO_ROOT)
         print(f"{relative}:{finding.line}: {finding.message}", file=sys.stderr)
     if findings:
         print(f"Documentation style check found {len(findings)} issue(s).", file=sys.stderr)
         return 1
-    print(f"Documentation style passes in {len(tracked_markdown())} first-party Markdown files.")
+    print(f"Documentation style passes in {len(paths)} first-party Markdown files.")
     return 0
 
 

@@ -43,9 +43,9 @@ void put_u32(std::vector<std::uint8_t>& v, std::uint32_t x) {
 
 // Builds a raw GLB by hand so tests can lie about individual fields. `total_override` < 0 means
 // "use the real assembled length".
-std::vector<std::uint8_t> raw_glb(std::uint32_t magic, std::uint32_t version,
-                                  long long total_override,
-                                  const std::vector<std::pair<std::uint32_t, std::string>>& chunks) {
+std::vector<std::uint8_t>
+raw_glb(std::uint32_t magic, std::uint32_t version, long long total_override,
+        const std::vector<std::pair<std::uint32_t, std::string>>& chunks) {
     std::vector<std::uint8_t> body;
     for (const auto& [type, payload] : chunks) {
         put_u32(body, static_cast<std::uint32_t>(payload.size()));
@@ -61,7 +61,9 @@ std::vector<std::uint8_t> raw_glb(std::uint32_t magic, std::uint32_t version,
     return out;
 }
 
-auto parse(const std::vector<std::uint8_t>& v) { return glb::parse_glb(v.data(), v.size()); }
+auto parse(const std::vector<std::uint8_t>& v) {
+    return glb::parse_glb(v.data(), v.size());
+}
 
 void test_rejects_short_and_bad_magic() {
     std::vector<std::uint8_t> empty;
@@ -88,6 +90,10 @@ void test_rejects_lying_total_length() {
     // Declared length smaller than the header => reject.
     auto tiny = raw_glb(glb::kMagic, 2, 4, {{glb::kChunkTypeJson, "{}  "}});
     CHECK(!parse(tiny).has_value());
+    // Bytes after the declared container can hide a second payload.
+    auto trailing = raw_glb(glb::kMagic, 2, -1, {{glb::kChunkTypeJson, "{}  "}});
+    trailing.insert(trailing.end(), {0xde, 0xad, 0xbe, 0xef});
+    CHECK(!parse(trailing).has_value());
 }
 
 void test_rejects_overflowing_chunk_length() {
@@ -95,8 +101,8 @@ void test_rejects_overflowing_chunk_length() {
     std::vector<std::uint8_t> v;
     put_u32(v, glb::kMagic);
     put_u32(v, 2);
-    put_u32(v, 24);                 // declared total
-    put_u32(v, 0xFFFFFFFCu);        // chunk length: enormous, 4-aligned
+    put_u32(v, 24);           // declared total
+    put_u32(v, 0xFFFFFFFCu);  // chunk length: enormous, 4-aligned
     put_u32(v, glb::kChunkTypeJson);
     v.push_back('{');
     v.push_back('}');
@@ -128,8 +134,9 @@ void test_rejects_chunk_header_straddling_end() {
 
 void test_rejects_json_not_first_or_missing() {
     // First chunk is BIN, not JSON.
-    auto bin_first = raw_glb(glb::kMagic, 2, -1,
-                             {{glb::kChunkTypeBin, "\x00\x00\x00\x00"}, {glb::kChunkTypeJson, "{}  "}});
+    auto bin_first =
+        raw_glb(glb::kMagic, 2, -1,
+                {{glb::kChunkTypeBin, "\x00\x00\x00\x00"}, {glb::kChunkTypeJson, "{}  "}});
     CHECK(!parse(bin_first).has_value());
 
     // No JSON chunk at all (only an unknown chunk).
@@ -137,28 +144,32 @@ void test_rejects_json_not_first_or_missing() {
     CHECK(!parse(no_json).has_value());
 
     // Two JSON chunks.
-    auto two_json = raw_glb(glb::kMagic, 2, -1,
-                            {{glb::kChunkTypeJson, "{}  "}, {glb::kChunkTypeJson, "{}  "}});
-    CHECK(!parse(two_json).has_value());
+    auto two_json =
+        raw_glb(glb::kMagic, 2, -1, {{glb::kChunkTypeJson, "{}  "}, {glb::kChunkTypeJson, "{}  "}});
+    auto duplicate = parse(two_json);
+    CHECK(!duplicate.has_value());
+    CHECK(duplicate.diagnostics()[0].code == "MK2109_GLB_DUPLICATE_JSON");
 }
 
 void test_accepts_json_only_and_json_plus_bin() {
-    auto json_only = raw_glb(glb::kMagic, 2, -1, {{glb::kChunkTypeJson, "{\"a\":1}"  " "}});
+    auto json_only = raw_glb(glb::kMagic, 2, -1,
+                             {{glb::kChunkTypeJson, "{\"a\":1}"
+                                                    " "}});
     auto r1 = parse(json_only);
     CHECK(r1.has_value());
     if (r1.has_value()) {
         CHECK(!r1.value().bin.has_value());
-        CHECK(r1.value().json.length == 8);  // 7 payload + 1 space pad in the literal above
+        CHECK(r1.value().json.length() == 8);
     }
 
     std::string bin4 = std::string(8, '\x00');
-    auto json_bin = raw_glb(glb::kMagic, 2, -1,
-                            {{glb::kChunkTypeJson, "{}  "}, {glb::kChunkTypeBin, bin4}});
+    auto json_bin =
+        raw_glb(glb::kMagic, 2, -1, {{glb::kChunkTypeJson, "{}  "}, {glb::kChunkTypeBin, bin4}});
     auto r2 = parse(json_bin);
     CHECK(r2.has_value());
     if (r2.has_value()) {
         CHECK(r2.value().bin.has_value());
-        CHECK(r2.value().bin->length == 8);
+        CHECK(r2.value().bin->length() == 8);
     }
 }
 
@@ -169,12 +180,23 @@ void test_skips_unknown_trailing_chunk() {
                                 {{glb::kChunkTypeJson, "{}  "}, {0x99887766u, "\x01\x02\x03\x04"}});
     auto r = parse(with_unknown);
     CHECK(r.has_value());
-    if (r.has_value()) CHECK(!r.value().bin.has_value());
+    if (r.has_value()) {
+        CHECK(!r.value().bin.has_value());
+        CHECK(r.value().unknown_chunk_count == 1);
+    }
+}
+
+void test_rejects_bin_after_an_extension_chunk() {
+    auto misplaced = raw_glb(glb::kMagic, 2, -1,
+                             {{glb::kChunkTypeJson, "{}  "},
+                              {0x99887766u, "\x01\x02\x03\x04"},
+                              {glb::kChunkTypeBin, "\x00\x00\x00\x00"}});
+    CHECK(!parse(misplaced).has_value());
 }
 
 void test_build_roundtrip() {
     const std::string json = "{\"asset\":{\"version\":\"2.0\"}}";  // 27 bytes, needs 1 pad byte
-    const std::vector<std::uint8_t> bin = {1, 2, 3, 4, 5};        // 5 bytes, needs 3 pad bytes
+    const std::vector<std::uint8_t> bin = {1, 2, 3, 4, 5};         // 5 bytes, needs 3 pad bytes
 
     // JSON only.
     auto g1 = glb::build_glb(json, nullptr, 0);
@@ -187,9 +209,10 @@ void test_build_roundtrip() {
             CHECK(!p.value().bin.has_value());
             // The JSON payload, with trailing pad spaces stripped, must equal the original.
             const auto& range = p.value().json;
-            std::string recovered(reinterpret_cast<const char*>(g1.value().data() + range.offset),
-                                  static_cast<std::size_t>(range.length));
-            while (!recovered.empty() && recovered.back() == ' ') recovered.pop_back();
+            std::string recovered(reinterpret_cast<const char*>(g1.value().data() + range.offset()),
+                                  static_cast<std::size_t>(range.length()));
+            while (!recovered.empty() && recovered.back() == ' ')
+                recovered.pop_back();
             CHECK(recovered == json);
         }
     }
@@ -203,10 +226,16 @@ void test_build_roundtrip() {
         CHECK(p.has_value());
         if (p.has_value() && p.value().bin.has_value()) {
             const auto& br = *p.value().bin;
-            CHECK(br.length == 8);  // 5 + 3 pad
-            CHECK(std::memcmp(g2.value().data() + br.offset, bin.data(), bin.size()) == 0);
+            CHECK(br.length() == 8);  // 5 + 3 pad
+            CHECK(std::memcmp(g2.value().data() + br.offset(), bin.data(), bin.size()) == 0);
         }
     }
+}
+
+void test_build_rejects_null_nonempty_bin() {
+    auto built = glb::build_glb("{}", nullptr, 1);
+    CHECK(!built.has_value());
+    CHECK(built.error_code() == ErrorCode::invalid_argument);
 }
 
 }  // namespace
@@ -221,7 +250,9 @@ int main() {
     test_rejects_json_not_first_or_missing();
     test_accepts_json_only_and_json_plus_bin();
     test_skips_unknown_trailing_chunk();
+    test_rejects_bin_after_an_extension_chunk();
     test_build_roundtrip();
+    test_build_rejects_null_nonempty_bin();
 
     if (g_failures == 0) {
         std::printf("glb container: %d checks passed\n", g_checks);

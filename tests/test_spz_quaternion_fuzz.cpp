@@ -1,20 +1,13 @@
-// Fuzz the SPZ quaternion round-trip against rotation preservation.
-//
-// The single-value test in test_melkor_core.cpp proves the xyzw/wxyz reordering
-// is correct for one known quaternion. This fuzz test exercises the full
-// rotation space, including the edge cases that break naive implementations:
+// Fuzz the SPZ quaternion round trip against rotation preservation.
+// The test covers the full rotation space and these difficult cases:
 //   - identity and 180-degree flips
 //   - antipodal quaternions (q and -q encode the same rotation)
 //   - quaternions near the "smallest three" encoding's boundary cases
 //
-// The correct invariant is ROTATION PRESERVATION, not component equality,
-// because the spz "smallest three" packing may canonicalize the sign of the
-// largest component. We therefore compare rotation matrices, with a tolerance
-// that accounts for the 9-bit quaternion quantization inside spz.
-//
-// Crucially, this test decodes with spz's OWN loader (loadSpz), not melkor's
-// SpzDecoder. A symmetric double-bug (wrong order in BOTH encode and decode)
-// would pass a melkor-only round trip but fail this test.
+// SPZ packing can change the sign of all components. Thus, compare rotations instead of
+// components. The tolerance covers the 9-bit SPZ quaternion quantization.
+// The test decodes with the upstream SPZ loader. This step detects matching order defects in
+// the Melkor encoder and decoder.
 
 #include "melkor/math/quaternion.hpp"
 #include "melkor/spz_encoder.hpp"
@@ -101,6 +94,10 @@ int main() {
 
         SpzEncoder enc;
         SpzEncodeConfig cfg;
+        cfg.color_space = ColorSpace::lin_rec709_display;
+        cfg.antialiased = false;
+        cfg.approved_loss_codes = {loss_code::kColorSpaceMetadataDropped,
+                                   loss_code::kCoordinateMetadataDropped};
         std::vector<uint8_t> buf;
         auto res = enc.encodeToBuffer(buf, data, cfg);
         if (!res.success) {
@@ -110,7 +107,7 @@ int main() {
 
         // Decode with spz's OWN loader (canonical xyzw).
         spz::UnpackOptions uo;
-        uo.to = spz::CoordinateSystem::RDF;
+        uo.to = spz::CoordinateSystem::LUF;
         auto spz_cloud = spz::loadSpz(buf.data(), static_cast<int>(buf.size()), uo);
         if (spz_cloud.numPoints != 1) {
             printf("FAIL: decoded %d points, expected 1\n", spz_cloud.numPoints);

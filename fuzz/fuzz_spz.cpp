@@ -18,7 +18,10 @@ namespace {
 
 void exercise(const uint8_t* data, size_t size) {
     melkor::SpzDecoder decoder;
-    auto result = decoder.decodeFromBuffer(data, size);
+    melkor::SpzDecodeConfig config;
+    config.source_unit_to_meter = 1.0;
+    config.source_color_space = melkor::ColorSpace::lin_rec709_display;
+    auto result = decoder.decodeFromBuffer(data, size, config);
     // The decoder's success flag and canonical data must agree. Touch every position so ASan
     // sees any out-of-bounds the decoder set up.
     if (!result.success) {
@@ -48,25 +51,26 @@ extern "C" int LLVMFuzzerTestOneInput(const uint8_t* data, size_t size) {
 #include <vector>
 
 int main(int argc, char** argv) {
-    int cases = 0;
-    if (!melkor::fuzzing::replay_requested_inputs(argc, argv, exercise, cases))
-        return 1;
+    return melkor::fuzzing::run_standalone_main([&] {
+        int cases = 0;
+        if (!melkor::fuzzing::replay_requested_inputs(argc, argv, exercise, cases))
+            return 1;
 
-    // Built-in adversarial inputs: an empty file, a wrong magic, a truncated header, and a header
-    // claiming a colossal point count (the shape of an allocation attack).
-    const std::vector<std::vector<uint8_t>> builtins = {
-        {},
-        {'N', 'O', 'T', 'S', 'P', 'Z'},
-        {0x4e, 0x47, 0x53, 0x50},  // "NGSP" magic, then nothing
-        {0x4e, 0x47, 0x53, 0x50, 0x03, 0x00, 0x00, 0x00, 0xff, 0xff, 0xff,
-         0xff},  // magic, version 3, count 0xffffffff
-    };
-    for (const auto& b : builtins) {
-        exercise(b.data(), b.size());
-        ++cases;
-    }
+        // These inputs cover an empty file, wrong magic, a truncated header, and a huge point
+        // count. The huge count represents an allocation attack.
+        const std::vector<std::vector<uint8_t>> builtins = {
+            {},
+            {'N', 'O', 'T', 'S', 'P', 'Z'},
+            {0x4e, 0x47, 0x53, 0x50},
+            {0x4e, 0x47, 0x53, 0x50, 0x03, 0x00, 0x00, 0x00, 0xff, 0xff, 0xff, 0xff},
+        };
+        for (const auto& bytes : builtins) {
+            exercise(bytes.data(), bytes.size());
+            ++cases;
+        }
 
-    std::printf("spz fuzz replay: %d input(s) exercised without crash\n", cases);
-    return 0;
+        std::printf("spz fuzz replay: %d input(s) exercised without crash\n", cases);
+        return 0;
+    });
 }
 #endif  // MELKOR_FUZZER_RUNTIME

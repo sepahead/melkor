@@ -33,7 +33,9 @@ void check(bool condition, const char* what, int line) {
 
 #define CHECK(cond) check((cond), #cond, __LINE__)
 
-bool approx(double a, double b, double eps = 1e-12) { return std::fabs(a - b) <= eps; }
+bool approx(double a, double b, double eps = 1e-12) {
+    return std::fabs(a - b) <= eps;
+}
 
 void test_coefficient_counts() {
     // The spec: degree l has 2l+1 coefficients; the totals are the perfect squares.
@@ -44,8 +46,10 @@ void test_coefficient_counts() {
     CHECK(khr::sh_total_coefficients(0) == 1);
     CHECK(khr::sh_total_coefficients(1) == 4);
     CHECK(khr::sh_total_coefficients(2) == 9);
-    CHECK(khr::sh_total_coefficients(3) == 16);   // 45 SH floats = 15 coefficients * 3 channels + DC
+    CHECK(khr::sh_total_coefficients(3) == 16);  // 45 SH floats = 15 coefficients * 3 channels + DC
     CHECK(khr::sh_total_coefficients(4) == 25);
+    CHECK(khr::sh_coefficients_at_degree(5) == 0);
+    CHECK(khr::sh_total_coefficients(5) == 0);
     // The pinned profile ceiling is degree 3.
     CHECK(khr::kMaxProfileShDegree == 3);
 }
@@ -87,26 +91,35 @@ void test_flat_address_mapping() {
     // match the closed forms flat = degree^2 + coef.
     for (std::size_t flat = 0; flat < 25; ++flat) {
         auto addr = khr::sh_flat_to_address(flat);
-        CHECK(khr::sh_address_to_flat(addr) == flat);
-        CHECK(addr.coef < khr::sh_coefficients_at_degree(addr.degree));
+        CHECK(addr.has_value());
+        if (!addr.has_value())
+            continue;
+        CHECK(khr::sh_address_to_flat(*addr) == flat);
+        CHECK(addr->coef < khr::sh_coefficients_at_degree(addr->degree));
     }
     // Spot-check the boundaries where floor(sqrt) matters most.
-    CHECK(khr::sh_flat_to_address(0).degree == 0);
-    CHECK(khr::sh_flat_to_address(1).degree == 1 && khr::sh_flat_to_address(1).coef == 0);
-    CHECK(khr::sh_flat_to_address(3).degree == 1 && khr::sh_flat_to_address(3).coef == 2);
-    CHECK(khr::sh_flat_to_address(4).degree == 2 && khr::sh_flat_to_address(4).coef == 0);
-    CHECK(khr::sh_flat_to_address(8).degree == 2 && khr::sh_flat_to_address(8).coef == 4);
-    CHECK(khr::sh_flat_to_address(9).degree == 3 && khr::sh_flat_to_address(9).coef == 0);
-    CHECK(khr::sh_flat_to_address(15).degree == 3 && khr::sh_flat_to_address(15).coef == 6);
-    CHECK(khr::sh_flat_to_address(16).degree == 4 && khr::sh_flat_to_address(16).coef == 0);
-    CHECK(khr::sh_flat_to_address(24).degree == 4 && khr::sh_flat_to_address(24).coef == 8);
+    CHECK((khr::sh_flat_to_address(0) == khr::ShAddress{0, 0}));
+    CHECK((khr::sh_flat_to_address(1) == khr::ShAddress{1, 0}));
+    CHECK((khr::sh_flat_to_address(3) == khr::ShAddress{1, 2}));
+    CHECK((khr::sh_flat_to_address(4) == khr::ShAddress{2, 0}));
+    CHECK((khr::sh_flat_to_address(8) == khr::ShAddress{2, 4}));
+    CHECK((khr::sh_flat_to_address(9) == khr::ShAddress{3, 0}));
+    CHECK((khr::sh_flat_to_address(15) == khr::ShAddress{3, 6}));
+    CHECK((khr::sh_flat_to_address(16) == khr::ShAddress{4, 0}));
+    CHECK((khr::sh_flat_to_address(24) == khr::ShAddress{4, 8}));
+    CHECK(!khr::sh_flat_to_address(25).has_value());
+    CHECK(!khr::sh_address_to_flat({4, 9}).has_value());
+    CHECK(!khr::sh_address_to_flat({5, 0}).has_value());
 }
 
 void test_color_space() {
-    CHECK(std::string(khr::to_string(khr::ColorSpace::srgb_rec709_display)) == "srgb_rec709_display");
+    CHECK(std::string(khr::to_string(khr::ColorSpace::srgb_rec709_display)) ==
+          "srgb_rec709_display");
     CHECK(std::string(khr::to_string(khr::ColorSpace::lin_rec709_display)) == "lin_rec709_display");
-    CHECK(khr::color_space_from_string("srgb_rec709_display") == khr::ColorSpace::srgb_rec709_display);
-    CHECK(khr::color_space_from_string("lin_rec709_display") == khr::ColorSpace::lin_rec709_display);
+    CHECK(khr::color_space_from_string("srgb_rec709_display") ==
+          khr::ColorSpace::srgb_rec709_display);
+    CHECK(khr::color_space_from_string("lin_rec709_display") ==
+          khr::ColorSpace::lin_rec709_display);
     // An unknown-but-schema-legal string is not interpretable: nullopt, not a silent sRGB default.
     CHECK(!khr::color_space_from_string("aces_ap0").has_value());
     CHECK(!khr::color_space_from_string("").has_value());
@@ -126,9 +139,11 @@ void test_c_matrix_matches_spec_literal() {
     const double sx = s[0], sy = s[1], sz = s[2];
 
     math::Mat3 expected{
-        sx * (1 - 2 * (qy * qy + qz * qz)), sy * (2 * (qx * qy - qw * qz)), sz * (2 * (qx * qz + qw * qy)),
-        sx * (2 * (qx * qy + qw * qz)), sy * (1 - 2 * (qx * qx + qz * qz)), sz * (2 * (qy * qz - qw * qx)),
-        sx * (2 * (qx * qz - qw * qy)), sy * (2 * (qy * qz + qw * qx)), sz * (1 - 2 * (qx * qx + qy * qy)),
+        sx * (1 - 2 * (qy * qy + qz * qz)), sy * (2 * (qx * qy - qw * qz)),
+        sz * (2 * (qx * qz + qw * qy)),     sx * (2 * (qx * qy + qw * qz)),
+        sy * (1 - 2 * (qx * qx + qz * qz)), sz * (2 * (qy * qz - qw * qx)),
+        sx * (2 * (qx * qz - qw * qy)),     sy * (2 * (qy * qz + qw * qx)),
+        sz * (1 - 2 * (qx * qx + qy * qy)),
     };
     auto c = khr::c_matrix(q, s);
     for (std::size_t i = 0; i < 9; ++i) {
@@ -150,7 +165,8 @@ void test_c_matrix_covariance_consistency() {
         for (int b = 0; b < 3; ++b) {
             double sum = 0.0;
             for (int j = 0; j < 3; ++j) {
-                sum += c[static_cast<std::size_t>(a) * 3 + j] * c[static_cast<std::size_t>(b) * 3 + j];
+                sum +=
+                    c[static_cast<std::size_t>(a) * 3 + j] * c[static_cast<std::size_t>(b) * 3 + j];
             }
             cct[static_cast<std::size_t>(a) * 3 + b] = sum;
         }

@@ -1,0 +1,85 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="633 193 114 114" role="img" aria-labelledby="title description">
+  <title id="title">Melkor logo</title>
+  <desc id="description">An ember-lit hexagonal plate with a faceted twin-peak massif.</desc>
+  <defs>
+    <filter id="shadow" x="-40%" y="-40%" width="180%" height="180%">
+      <feDropShadow dx="0" dy="1.5" stdDeviation="2.4" flood-opacity="0.38"/>
+    </filter>
+    <filter id="soft" x="-60%" y="-60%" width="220%" height="220%">
+      <feGaussianBlur stdDeviation="4" result="blur"/>
+      <feMerge><feMergeNode in="blur"/><feMergeNode in="SourceGraphic"/></feMerge>
+    </filter>
+    <filter id="glow" x="-30%" y="-30%" width="160%" height="160%">
+      <feGaussianBlur stdDeviation="2.4" result="blur"/>
+      <feMerge><feMergeNode in="blur"/><feMergeNode in="SourceGraphic"/></feMerge>
+    </filter>
+    <linearGradient id="plate" x1="0" y1="202" x2="0" y2="298" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#2b1a10"/>
+      <stop offset=".55" stop-color="#170d07"/>
+      <stop offset="1" stop-color="#0b0604"/>
+    </linearGradient>
+    <linearGradient id="rock" x1="0" y1="214" x2="0" y2="274" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#241209"/>
+      <stop offset=".55" stop-color="#3a1e0e"/>
+      <stop offset="1" stop-color="#582d15"/>
+    </linearGradient>
+    <radialGradient id="heat" gradientUnits="userSpaceOnUse" cx="690" cy="272" r="62">
+      <stop offset="0" stop-color="#c2410c" stop-opacity=".72"/>
+      <stop offset=".45" stop-color="#9a3412" stop-opacity=".38"/>
+      <stop offset="1" stop-color="#7c2d12" stop-opacity="0"/>
+    </radialGradient>
+    <linearGradient id="bezel" x1="0" y1="202" x2="0" y2="298" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#fed7aa"/>
+      <stop offset=".45" stop-color="#b45309"/>
+      <stop offset="1" stop-color="#571c07"/>
+    </linearGradient>
+    <clipPath id="plate-clip">
+      <path d="M690 202 731.6 226v48L690 298l-41.6-24v-48Z"/>
+    </clipPath>
+    <clipPath id="massif-clip">
+      <path d="m660 274 18-46 12 20 12-32 18 58Z"/>
+    </clipPath>
+    <clipPath id="build-clip">
+      <rect x="638" y="210" width="104" height="92">
+        <animate attributeName="y" values="210;210;276;276;210;210" keyTimes="0;.12;.2;.32;.72;1" dur="6s" repeatCount="indefinite"/>
+        <animate attributeName="height" values="92;92;26;26;92;92" keyTimes="0;.12;.2;.32;.72;1" dur="6s" repeatCount="indefinite"/>
+      </rect>
+    </clipPath>
+  </defs>
+  <style>
+    .plate{fill:url(#plate)}.rock{fill:url(#rock)}.fog{opacity:.42}.ridge{fill:none;stroke:#fdba74;stroke-opacity:.7;stroke-width:1.3;stroke-linejoin:round;stroke-linecap:round}.facet{fill:#1a0e08}.tin{stroke:#000;stroke-opacity:.35;stroke-width:.6;stroke-linejoin:round}.front{fill:#ffedd5;filter:url(#glow)}.edge{fill:none;stroke:url(#bezel);stroke-width:2.4;stroke-linejoin:miter}.groove{fill:none;stroke:#05070b;stroke-opacity:.5}.hairline{fill:none;stroke:#2b333d;stroke-opacity:.55}@media(prefers-reduced-motion:reduce){.motion{display:none}.fog{opacity:1}}
+  </style>
+  <path d="M690 202 731.6 226v48L690 298l-41.6-24v-48Z" class="plate" filter="url(#shadow)"/>
+  <g clip-path="url(#plate-clip)">
+    <path d="M690 202 731.6 226v48L690 298l-41.6-24v-48Z" fill="url(#heat)"/>
+    <g class="fog" filter="url(#soft)">
+      <path d="m660 274 18-46 12 20 12-32 18 58Z" class="rock"/>
+      <path d="m702 216 18 58h-18Z" class="facet"/>
+      <path d="m660 274 18-46 6 46Z" fill="#4a2712" class="tin"/>
+      <path d="m678 228 12 20-6 26Z" fill="#2a1509" class="tin"/>
+      <path d="m690 248 2 26h-8Z" fill="#1c0e07" class="tin"/>
+      <path d="m690 248 12-32-10 58Z" fill="#5c3117" class="tin"/>
+      <path d="m702 216v58h-10Z" fill="#331a0c" class="tin"/>
+      <path d="m660 274 18-46 12 20 12-32 18 58" class="ridge"/>
+    </g>
+    <g class="motion" clip-path="url(#build-clip)">
+      <path d="m660 274 18-46 12 20 12-32 18 58Z" class="rock"/>
+      <path d="m702 216 18 58h-18Z" class="facet"/>
+      <path d="m660 274 18-46 6 46Z" fill="#4a2712" class="tin"/>
+      <path d="m678 228 12 20-6 26Z" fill="#2a1509" class="tin"/>
+      <path d="m690 248 2 26h-8Z" fill="#1c0e07" class="tin"/>
+      <path d="m690 248 12-32-10 58Z" fill="#5c3117" class="tin"/>
+      <path d="m702 216v58h-10Z" fill="#331a0c" class="tin"/>
+      <path d="m660 274 18-46 12 20 12-32 18 58" class="ridge"/>
+    </g>
+    <g class="motion" clip-path="url(#massif-clip)">
+      <rect class="front" x="656" y="274" width="68" height="3.4" opacity="0">
+        <animate attributeName="y" values="274;274;215;215;274" keyTimes="0;.32;.72;.74;1" dur="6s" repeatCount="indefinite"/>
+        <animate attributeName="opacity" values="0;0;.9;.9;0;0" keyTimes="0;.32;.37;.67;.72;1" dur="6s" repeatCount="indefinite"/>
+      </rect>
+    </g>
+  </g>
+  <path d="M690 202 731.6 226v48L690 298l-41.6-24v-48Z" class="edge"/>
+  <path d="m690 204.8 39.2 22.6v45.2L690 295.2l-39.2-22.6v-45.2Z" class="groove"/>
+  <path d="m690 200.4 43 24.8v49.6l-43 24.8-43-24.8v-49.6Z" class="hairline"/>
+</svg>

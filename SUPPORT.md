@@ -8,9 +8,9 @@ Melkor is in v2 hardening. Until `v2.0.0` is published:
 
 - `main` is development software. It may build, pass tests, and still change its public contract
   without notice.
-- `v2.0.0-rc.1` is a release candidate. It is not a supported production release.
-- The `1.x` releases remain downloadable, but they are not the supported production line and they
-  do not receive fixes.
+- The source tree identifies itself as `2.0.0-dev`.
+- No supported production tag or production artifact is published.
+- The existing `v2.0.0-rc.1` tag carries no production support.
 
 If you need a stable, supported Melkor, wait for `v2.0.0`. Watch
 [Releases](https://github.com/sepahead/melkor/releases).
@@ -33,16 +33,15 @@ security issue may be backported.
 
 **Not supported.** `main` and release candidates are accepted for bug reports but carry no
 production support promise. Versions earlier than `2.0` are not supported, though a coordinated
-security fix remains at maintainer discretion. Older unsupported versions stay downloadable with
-a warning. Deleting them would break provenance for users who already cited or pinned them.
+security fix remains at maintainer discretion.
 
 **Format profiles.** A minor release can revise support for a format profile or specification
 revision. Each revision requires a new profile ID and a migration note. An existing profile ID
 never silently changes meaning.
 
-**Platform matrix.** The supported operating system, Python, compiler, and backend matrix is
-versioned per release. The release page and `melkor backends --output-mode json` are
-authoritative. A backend is not supported on the strength of a compile-only CI job.
+**Platform matrix.** Each release defines its operating system, architecture, compiler, and format matrix.
+The release notes and published support matrix are authoritative.
+A compile-only CI job does not make a platform supported.
 
 **Effort.** Support is best-effort open source unless a separate commercial contract exists.
 There is no service-level agreement.
@@ -61,19 +60,18 @@ There is no service-level agreement.
 
 A report we can act on contains:
 
-- the output of `melkor version --output-mode json`
-- the output of `melkor doctor --output-mode json`, redacted if it contains anything sensitive
-- how you installed Melkor (released archive, wheel, or source build)
+- the output of `melkor --version`
+- the tested commit SHA
+- the exact CMake preset and build command
 - your operating system and architecture
 - the exact command or API call, and its output
 - what you expected and what happened instead
-- an inspection report (`melkor inspect --input <asset> --level structure --output-mode json`)
+- an inspection report (`melkor inspect <asset> --json`)
   where the problem involves an asset
 - a minimal asset that reproduces it, **only if you have the right to share it**.
 
-If you cannot share the asset, say so. An inspection report is often sufficient. By default, it
-reports a basename instead of a full path. It does not include environment variables, usernames,
-or home directories.
+If you cannot share the asset, say so. An inspection report is often sufficient.
+The report uses the input basename. It does not include environment variables or user names.
 
 Do not attach an asset you do not have permission to redistribute, and do not attach anything
 containing personal data.

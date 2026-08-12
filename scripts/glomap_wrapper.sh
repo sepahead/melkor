@@ -4,7 +4,14 @@ set -euo pipefail
 # The file name remains for command compatibility.
 # The wrapper uses COLMAP global_mapper, not the retired GLOMAP program.
 
-VERSION="2.0.0"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+REPO_DIR="$(dirname "$SCRIPT_DIR")"
+[[ -f "$REPO_DIR/VERSION" ]] || { printf '[ERROR] VERSION is missing\n' >&2; exit 2; }
+VERSION="$(<"$REPO_DIR/VERSION")"
+[[ "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?(\+[0-9A-Za-z.-]+)?$ ]] || {
+    printf '[ERROR] VERSION is invalid\n' >&2
+    exit 2
+}
 INPUT_PATH=""
 OUTPUT_DIR=""
 MATCHER="exhaustive"
@@ -15,10 +22,24 @@ SKIP_FEATURES=false
 SKIP_MATCHING=false
 DRY_RUN=false
 VERBOSE=false
+STAGING_DIR=""
+FINAL_OUTPUT_DIR=""
 
 log() { printf '[INFO] %s\n' "$*" >&2; }
 warn() { printf '[WARN] %s\n' "$*" >&2; }
 fail() { printf '[ERROR] %s\n' "$*" >&2; exit 1; }
+
+cleanup() {
+    local status=$?
+    trap - EXIT
+    if [[ -n "$STAGING_DIR" && -d "$STAGING_DIR" ]]; then
+        rm -rf -- "$STAGING_DIR"
+    fi
+    exit "$status"
+}
+trap cleanup EXIT
+trap 'exit 130' INT
+trap 'exit 143' TERM
 
 print_usage() {
     cat <<EOF
@@ -135,10 +156,20 @@ if [[ "$SKIP_FEATURES" == true ]]; then
 fi
 
 INPUT_PATH="$(cd "$INPUT_PATH" && pwd)"
-if [[ "$OUTPUT_DIR" != /* ]]; then
-    OUTPUT_DIR="$PWD/$OUTPUT_DIR"
+output_parent="$(dirname "$OUTPUT_DIR")"
+output_name="$(basename "$OUTPUT_DIR")"
+[[ "$output_name" != "." && "$output_name" != ".." && "$output_name" != "/" ]] || \
+    fail "Invalid output directory name"
+if [[ "$DRY_RUN" == true ]]; then
+    [[ "$output_parent" == /* ]] || output_parent="$PWD/$output_parent"
+else
+    mkdir -p "$output_parent"
+    output_parent="$(cd "$output_parent" && pwd)"
 fi
-[[ ! -e "$OUTPUT_DIR" ]] || fail "Output directory already exists: $OUTPUT_DIR"
+FINAL_OUTPUT_DIR="$output_parent/$output_name"
+[[ ! -e "$FINAL_OUTPUT_DIR" && ! -L "$FINAL_OUTPUT_DIR" ]] || \
+    fail "Output directory already exists: $FINAL_OUTPUT_DIR"
+OUTPUT_DIR="$FINAL_OUTPUT_DIR"
 
 GPU_FLAG="$USE_GPU"
 if [[ "$GPU_FLAG" == "auto" ]]; then
@@ -202,7 +233,8 @@ command -v colmap >/dev/null 2>&1 || fail "COLMAP is not installed"
 colmap global_mapper --help >/dev/null 2>&1 || \
     fail "This COLMAP build does not provide global_mapper"
 
-mkdir -p "$OUTPUT_DIR"
+STAGING_DIR="$(mktemp -d "$output_parent/.melkor-colmap.XXXXXX")"
+OUTPUT_DIR="$STAGING_DIR"
 
 if [[ "$SKIP_FEATURES" == true ]]; then
     cp "$INPUT_PATH/database.db" "$OUTPUT_DIR/database.db"
@@ -257,4 +289,10 @@ for file in cameras.bin images.bin points3D.bin; do
     [[ -s "$model_dir/$file" ]] || fail "global_mapper did not create $file"
 done
 
-log "Global mapping completed: $model_dir"
+model_suffix="${model_dir#"$OUTPUT_DIR"}"
+[[ ! -e "$FINAL_OUTPUT_DIR" && ! -L "$FINAL_OUTPUT_DIR" ]] || \
+    fail "Output directory appeared during processing: $FINAL_OUTPUT_DIR"
+python3 "$REPO_DIR/tools/atomic_publish.py" "$STAGING_DIR" "$FINAL_OUTPUT_DIR" || \
+    fail "The output directory could not be published without replacement"
+STAGING_DIR=""
+log "Global mapping completed: $FINAL_OUTPUT_DIR$model_suffix"

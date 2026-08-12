@@ -1,38 +1,21 @@
-# Blank issues stay enabled deliberately.
-#
-# The forms in this directory cover the reports the project can act on most efficiently, but they
-# cannot anticipate every problem. A reporter who does not fit a form must still have a way to reach
-# the project: forcing a real defect into the wrong template, or turning a reporter away because no
-# form matches, loses the report entirely. A form is a convenience for the reporter and the
-# maintainer, not a gate on who is allowed to speak.
-#
-# Vulnerabilities are the one exception, and they are redirected below rather than blocked — a public
-# issue is the wrong channel for an exploitable defect, and the private channel is one click away.
+# Keep blank issues available for reports that do not match a form.
 blank_issues_enabled: true
 
 contact_links:
-  - name: Report a security vulnerability (private)
+  - name: Report a security vulnerability privately
     url: https://github.com/sepahead/melkor/security/advisories/new
     about: >-
-      Never open a public issue for a suspected vulnerability. Report privately through GitHub Security
-      Advisories. Memory unsafety in the parsers, path or command injection, and unbounded memory, CPU,
-      or disk consumption driven by an input file are all in scope — see SECURITY.md.
+      Do not create a public issue for a suspected security defect.
+      Resource exhaustion, memory unsafety, and injection defects are in scope.
 
   - name: Ask a question or discuss an idea
     url: https://github.com/sepahead/melkor/discussions
-    about: >-
-      Usage questions, "is this a bug?", design discussion, and anything exploratory belong in
-      Discussions. Nothing is lost by starting there: a confirmed defect can be turned into an issue
-      afterwards, with the diagnosis already done.
+    about: Use Discussions for usage questions, uncertain reports, and early design work.
 
-  - name: Support policy and what to include in a report
+  - name: Read the support policy
     url: https://github.com/sepahead/melkor/blob/main/SUPPORT.md
-    about: >-
-      What is supported today (currently: no production release), which versions receive fixes, and
-      exactly what a report needs to be actionable. Worth two minutes before filing.
+    about: Read the supported-version policy and the required report information.
 
-  - name: Contributing and governance
+  - name: Read the contribution and governance guides
     url: https://github.com/sepahead/melkor/blob/main/CONTRIBUTING.md
-    about: >-
-      Development setup, the backend-parity rules, and the correctness conventions a change must follow.
-      See GOVERNANCE.md for how decisions are made and who makes them.
+    about: Read the development, verification, and decision rules.

@@ -4,6 +4,8 @@
 from __future__ import annotations
 
 import hashlib
+import gzip
+import io
 import json
 import importlib.util
 import os
@@ -13,10 +15,13 @@ import tarfile
 import tempfile
 import unittest
 from pathlib import Path
+from unittest import mock
 
 
 ROOT = Path(__file__).resolve().parent.parent
 TOOL = ROOT / "scripts" / "build_release_evidence.py"
+SOURCE_POLICY = ROOT / "tools" / "build_source_bundle.py"
+PUBLISH_TOOL = ROOT / "tools" / "atomic_publish.py"
 
 
 def load_evidence_module():
@@ -36,6 +41,8 @@ class RepositoryInventoryTests(unittest.TestCase):
         inventory = json.loads(inventory_path.read_text(encoding="utf-8"))
         required_paths = {
             "release/components.json",
+            module.SOURCE_POLICY_PATH,
+            module.PUBLISH_TOOL_PATH,
             inventory["generator_path"],
             inventory["project"]["version_source"],
             *inventory["dependency_manifests"],
@@ -51,11 +58,7 @@ class RepositoryInventoryTests(unittest.TestCase):
                     required_paths.add(prefix)
                 else:
                     first_file = next(
-                        (
-                            path
-                            for path in sorted(candidate.rglob("*"))
-                            if path.is_file()
-                        ),
+                        (path for path in sorted(candidate.rglob("*")) if path.is_file()),
                         None,
                     )
                     self.assertIsNotNone(first_file, f"empty component path: {prefix}")
@@ -74,9 +77,7 @@ class RepositoryInventoryTests(unittest.TestCase):
                     data=data,
                 )
             )
-        validated, version = module.validate_inventory(
-            inventory, module.entry_map(entries)
-        )
+        validated, version = module.validate_inventory(inventory, module.entry_map(entries))
         self.assertIs(validated, inventory)
 
         # Compare against the authoritative VERSION file, not a literal. Hard-coding the
@@ -84,6 +85,19 @@ class RepositoryInventoryTests(unittest.TestCase):
         # every bump — the exact failure mode the single version source exists to remove.
         expected = (ROOT / "VERSION").read_text(encoding="utf-8").strip()
         self.assertEqual(version, expected)
+
+    def test_verified_python_executes_selected_bytes_only(self) -> None:
+        module = load_evidence_module()
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "policy.py"
+            path.write_text("IDENTITY = 'unverified-file'\n", encoding="utf-8")
+            loaded = module.execute_verified_python(
+                "melkor_selected_source_test",
+                path,
+                b"IDENTITY = 'selected-tree'\n",
+            )
+        self.assertEqual(loaded.IDENTITY, "selected-tree")
+        self.assertNotIn("melkor_selected_source_test", sys.modules)
 
 
 class ReleaseEvidenceTests(unittest.TestCase):
@@ -103,13 +117,15 @@ class ReleaseEvidenceTests(unittest.TestCase):
         self.write("VERSION", "1.2.3\n")
         self.write("CMakeLists.txt", "project(melkor VERSION ${MELKOR_VERSION_CORE})\n")
         self.write("LICENSE", "Synthetic project license\n")
-        self.write("deps/widget/LICENSE", "Synthetic widget license\n")
-        self.write("deps/widget/widget.cpp", "int widget() { return 7; }\n")
-        self.write("locks/runtime.lock", "runtime==4.5.6\n")
+        self.write("third_party/widget/LICENSE", "Synthetic widget license\n")
+        self.write("third_party/widget/widget.cpp", "int widget() { return 7; }\n")
+        self.write("third_party/runtime.lock", "runtime==4.5.6\n")
         self.write("docs/external-license.txt", "Synthetic external license\n")
         self.write(
-            "scripts/fetch-runtime.sh",
-            "#!/bin/sh\n# sha256:"
+            "viewer/fetch-assets.sh",
+            "#!/bin/sh\n"
+            "# https://example.invalid/runtime.bin\n"
+            "# sha256:"
             + "a" * 64
             + "\nexit 0\n",
             executable=True,
@@ -118,6 +134,14 @@ class ReleaseEvidenceTests(unittest.TestCase):
             "scripts/build_release_evidence.py",
             TOOL.read_text(encoding="utf-8"),
             executable=True,
+        )
+        self.write(
+            "tools/build_source_bundle.py",
+            SOURCE_POLICY.read_text(encoding="utf-8"),
+        )
+        self.write(
+            "tools/atomic_publish.py",
+            PUBLISH_TOOL.read_text(encoding="utf-8"),
         )
         self.write_inventory(self.valid_inventory())
         self.commit("initial evidence fixture")
@@ -153,12 +177,12 @@ class ReleaseEvidenceTests(unittest.TestCase):
                 "supplier": "Organization: Melkor Test",
                 "evidence_builder": "https://example.invalid/evidence-builder/v1",
             },
-            "dependency_manifests": ["locks/runtime.lock"],
+            "dependency_manifests": ["third_party/runtime.lock"],
             "extracted_licenses": [
                 {
                     "license_id": "LicenseRef-Synthetic-Widget",
                     "name": "Synthetic Widget License",
-                    "text_file": "deps/widget/LICENSE",
+                    "text_file": "third_party/widget/LICENSE",
                 }
             ],
             "components": [
@@ -167,9 +191,9 @@ class ReleaseEvidenceTests(unittest.TestCase):
                     "name": "widget",
                     "version": "7.0",
                     "distribution": "vendored",
-                    "paths": ["deps/widget"],
+                    "paths": ["third_party/widget"],
                     "license_declared": "LicenseRef-Synthetic-Widget",
-                    "license_files": ["deps/widget/LICENSE"],
+                    "license_files": ["third_party/widget/LICENSE"],
                     "download_location": "https://example.invalid/widget",
                 },
                 {
@@ -185,7 +209,7 @@ class ReleaseEvidenceTests(unittest.TestCase):
                         }
                     ],
                     "evidence_paths": [
-                        "scripts/fetch-runtime.sh",
+                        "viewer/fetch-assets.sh",
                         "docs/external-license.txt",
                     ],
                     "license_declared": "MIT",
@@ -207,7 +231,7 @@ class ReleaseEvidenceTests(unittest.TestCase):
             "update-index",
             "--chmod=+x",
             "scripts/build_release_evidence.py",
-            "scripts/fetch-runtime.sh",
+            "viewer/fetch-assets.sh",
         )
         sequence = len(self.git("rev-list", "--all").splitlines()) + 1
         timestamp = f"2026-01-{sequence:02d}T00:00:00Z"
@@ -288,11 +312,50 @@ class ReleaseEvidenceTests(unittest.TestCase):
         self.assertEqual(len(provenance["subject"]), 3)
         generator_digest = hashlib.sha256(TOOL.read_bytes()).hexdigest()
         self.assertEqual(
-            provenance["predicate"]["buildDefinition"]["internalParameters"][
-                "generatorSha256"
-            ],
+            provenance["predicate"]["buildDefinition"]["internalParameters"]["generatorSha256"],
             generator_digest,
         )
+        internal = provenance["predicate"]["buildDefinition"]["internalParameters"]
+        self.assertEqual(internal["sourcePolicyPath"], "tools/build_source_bundle.py")
+        self.assertEqual(
+            internal["sourcePolicySha256"], hashlib.sha256(SOURCE_POLICY.read_bytes()).hexdigest()
+        )
+        self.assertEqual(internal["publishToolPath"], "tools/atomic_publish.py")
+        self.assertEqual(
+            internal["publishToolSha256"], hashlib.sha256(PUBLISH_TOOL.read_bytes()).hexdigest()
+        )
+
+    def test_all_source_surfaces_apply_the_approved_boundary(self) -> None:
+        allowed = "src/fixture.cpp"
+        denied = {"src/private-model.PT", "private/internal.cpp"}
+        self.write(allowed, "approved source\n")
+        self.write("src/private-model.PT", "restricted model\n")
+        self.write("private/internal.cpp", "int private_api();\n")
+        self.commit("add source-boundary fixtures")
+
+        output = Path(self.tempdir.name) / "bounded-evidence"
+        result = self.build(output)
+        self.assertEqual(result.returncode, 0, result.stderr)
+
+        archive = next(output.glob("*.tar.gz"))
+        with tarfile.open(archive, "r:gz") as source:
+            archive_paths = {
+                member.name.split("/", 1)[1] for member in source.getmembers() if member.isfile()
+            }
+        module = load_evidence_module()
+        manifest_paths = set(
+            module.parse_source_manifest(next(output.glob("*.source-files.sha256")).read_bytes())
+        )
+        spdx = json.loads(next(output.glob("*.spdx.json")).read_text())
+        spdx_paths = {item["fileName"].removeprefix("./") for item in spdx["files"]}
+
+        self.assertEqual(archive_paths, manifest_paths)
+        self.assertEqual(archive_paths, spdx_paths)
+        self.assertIn(allowed, archive_paths)
+        self.assertTrue(denied.isdisjoint(archive_paths))
+        provenance = json.loads(next(output.glob("*.provenance.json")).read_text())
+        internal = provenance["predicate"]["buildDefinition"]["internalParameters"]
+        self.assertEqual(internal["excludedTrackedFileCount"], len(denied))
 
     def test_rejects_generator_that_differs_from_selected_tree(self) -> None:
         self.write(
@@ -305,9 +368,26 @@ class ReleaseEvidenceTests(unittest.TestCase):
         self.assertNotEqual(result.returncode, 0)
         self.assertIn("generator does not match the selected Git tree", result.stderr)
 
+    def test_rejects_policy_that_differs_from_selected_tree(self) -> None:
+        self.write(
+            "tools/build_source_bundle.py",
+            "def select_entries(entries):\n    return ([], entries)\n",
+        )
+        self.commit("replace the selected source policy")
+        result = self.build(Path(self.tempdir.name) / "wrong-policy")
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("policy does not match the selected Git tree", result.stderr)
+
+    def test_rejects_publisher_that_differs_from_selected_tree(self) -> None:
+        self.write("tools/atomic_publish.py", "def publish(*_args):\n    return None\n")
+        self.commit("replace the selected atomic publisher")
+        result = self.build(Path(self.tempdir.name) / "wrong-publisher")
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("publish tool does not match the selected Git tree", result.stderr)
+
     def test_rejects_unresolved_lfs_pointer(self) -> None:
         self.write(
-            "deps/widget/widget.cpp",
+            "third_party/widget/widget.cpp",
             "version https://git-lfs.github.com/spec/v1\n"
             "oid sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef\n"
             "size 1234\n",
@@ -322,12 +402,158 @@ class ReleaseEvidenceTests(unittest.TestCase):
         inventory = self.valid_inventory()
         components = inventory["components"]
         assert isinstance(components, list)
-        components[0]["license_files"] = ["deps/widget/MISSING"]
+        components[0]["license_files"] = ["third_party/widget/MISSING"]
         self.write_inventory(inventory)
         self.commit("break component license evidence")
         result = self.build(Path(self.tempdir.name) / "invalid-inventory")
         self.assertNotEqual(result.returncode, 0)
         self.assertIn("component license", result.stderr)
+
+    def test_inventory_rejects_ambiguous_https_urls(self) -> None:
+        module = load_evidence_module()
+        entries = module.read_git_tree(self.repo, self.git("rev-parse", "HEAD"))
+        inventory = self.valid_inventory()
+        inventory["project"]["download_location"] = "https://user@example.invalid/repo"
+
+        with self.assertRaisesRegex(module.EvidenceError, "without user information"):
+            module.validate_inventory(inventory, module.entry_map(entries))
+
+    def test_inventory_requires_the_external_url_in_its_evidence(self) -> None:
+        module = load_evidence_module()
+        entries = module.read_git_tree(self.repo, self.git("rev-parse", "HEAD"))
+        inventory = self.valid_inventory()
+        inventory["components"][1]["artifacts"][0]["url"] = (
+            "https://example.invalid/unbound-runtime.bin"
+        )
+
+        with self.assertRaisesRegex(module.EvidenceError, "URL is absent from its evidence"):
+            module.validate_inventory(inventory, module.entry_map(entries))
+
+    def test_inventory_rejects_nonstring_dependency_paths(self) -> None:
+        module = load_evidence_module()
+        entries = module.read_git_tree(self.repo, self.git("rev-parse", "HEAD"))
+        inventory = self.valid_inventory()
+        inventory["dependency_manifests"] = [{}]
+
+        with self.assertRaisesRegex(module.EvidenceError, "non-empty list"):
+            module.validate_inventory(inventory, module.entry_map(entries))
+
+    def test_git_object_ids_have_an_exact_supported_width(self) -> None:
+        module = load_evidence_module()
+        tree = b"100644 blob " + (b"a" * 41) + b"\tVERSION\0"
+        with mock.patch.object(module, "run_git", return_value=tree):
+            with self.assertRaisesRegex(module.EvidenceError, "object ID is invalid"):
+                module.read_git_tree_metadata(self.repo, "0" * 40)
+
+    def test_inventory_rejects_overlapping_vendored_components(self) -> None:
+        module = load_evidence_module()
+        entries = module.read_git_tree(self.repo, self.git("rev-parse", "HEAD"))
+        inventory = self.valid_inventory()
+        duplicate = dict(inventory["components"][0])
+        duplicate["spdx_id"] = "SPDXRef-Package-widget-copy"
+        duplicate["name"] = "widget-copy"
+        inventory["components"].append(duplicate)
+
+        with self.assertRaisesRegex(module.EvidenceError, "multiple components"):
+            module.validate_inventory(inventory, module.entry_map(entries))
+
+    def test_build_rejects_unowned_third_party_source(self) -> None:
+        self.write("third_party/unclaimed/code.cpp", "int unclaimed();\n")
+        self.commit("add unclaimed third-party source")
+
+        result = self.build(Path(self.tempdir.name) / "unowned-third-party")
+
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("no component or evidence owner", result.stderr)
+
+    def test_source_manifest_rejects_portable_path_collisions(self) -> None:
+        module = load_evidence_module()
+        digest = "0" * 64
+        manifest = (f"{digest}  100644  src/Cloud.cpp\n{digest}  100644  src/cloud.cpp\n").encode()
+
+        with self.assertRaisesRegex(module.EvidenceError, "portable path collision"):
+            module.parse_source_manifest(manifest)
+
+    def test_source_paths_reject_all_windows_device_name_forms(self) -> None:
+        module = load_evidence_module()
+
+        for path in (
+            "src/CONIN$.txt",
+            "src/CONOUT$.txt",
+            "src/CLOCK$.txt",
+            "src/COM¹.log",
+            "src/LPT³",
+        ):
+            with self.subTest(path=path):
+                with self.assertRaisesRegex(module.EvidenceError, "reserved Windows name"):
+                    module.safe_source_path(path)
+
+    def test_source_manifest_rejects_symbolic_links(self) -> None:
+        module = load_evidence_module()
+        digest = "0" * 64
+        manifest = f"{digest}  120000  docs/link\n".encode()
+
+        with self.assertRaisesRegex(module.EvidenceError, "invalid digest or Git mode"):
+            module.parse_source_manifest(manifest)
+
+    def test_rejects_duplicate_inventory_names(self) -> None:
+        inventory = json.dumps(self.valid_inventory(), indent=2, sort_keys=True)
+        inventory = inventory.replace(
+            '"schema_version": 1',
+            '"schema_version": 1,\n  "schema_version": 1',
+            1,
+        )
+        self.write("release/components.json", inventory + "\n")
+        self.commit("add a duplicate inventory name")
+
+        result = self.build(Path(self.tempdir.name) / "duplicate-inventory")
+
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("duplicate object name: schema_version", result.stderr)
+
+    def test_version_source_contains_only_one_version_line(self) -> None:
+        self.write("VERSION", "1.2.3\nignored\n")
+        self.commit("add invalid version source content")
+
+        result = self.build(Path(self.tempdir.name) / "invalid-version")
+
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("exactly one SemVer line", result.stderr)
+
+    def test_excluded_blob_contents_are_not_loaded(self) -> None:
+        self.write("private/large.txt", "x" * 200_000)
+        commit = self.commit("add an excluded large file")
+        module = load_evidence_module()
+        metadata = module.read_git_tree_metadata(self.repo, commit)
+        policy_metadata = [entry for entry in metadata if entry.path == module.SOURCE_POLICY_PATH]
+        policy = module.load_source_policy(module.read_git_blobs(self.repo, policy_metadata))
+        selected, excluded = module.select_source_entries(metadata, policy)
+
+        with mock.patch.object(module, "MAX_SOURCE_FILE_BYTES", 100_000):
+            entries = module.read_git_blobs(self.repo, selected)
+
+        self.assertNotIn("private/large.txt", {entry.path for entry in entries})
+        self.assertIn("private/large.txt", {path for path, _reason in excluded})
+
+    def test_build_accepts_a_linked_git_worktree(self) -> None:
+        linked = Path(self.tempdir.name) / "linked-worktree"
+        self.git("branch", "linked-worktree")
+        self.git("worktree", "add", "--quiet", str(linked), "linked-worktree")
+        self.assertTrue((linked / ".git").is_file())
+        output = Path(self.tempdir.name) / "worktree-evidence"
+
+        result = self.run_tool(
+            "build",
+            "--repo",
+            linked,
+            "--ref",
+            "HEAD",
+            "--output",
+            output,
+        )
+
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertTrue(output.is_dir())
 
     def test_release_tag_contract_requires_matching_annotated_tag(self) -> None:
         env = dict(os.environ)
@@ -362,6 +588,51 @@ class ReleaseEvidenceTests(unittest.TestCase):
         self.assertNotEqual(mismatch.returncode, 0)
         self.assertIn("does not match source version", mismatch.stderr)
 
+    def test_build_accepts_semver_prerelease_and_build_metadata(self) -> None:
+        self.write("VERSION", "1.2.3-rc.1+build.7\n")
+        self.commit("use complete SemVer syntax")
+        output = Path(self.tempdir.name) / "semver-evidence"
+
+        result = self.build(output)
+
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertTrue(any("1.2.3-rc.1+build.7" in path.name for path in output.iterdir()))
+        verified = self.run_tool("verify", output)
+        self.assertEqual(verified.returncode, 0, verified.stderr)
+
+    def test_verify_rejects_missing_vendored_component_relationship(self) -> None:
+        output = Path(self.tempdir.name) / "component-relationship-evidence"
+        built = self.build(output)
+        self.assertEqual(built.returncode, 0, built.stderr)
+        module = load_evidence_module()
+
+        spdx_path = next(output.glob("*.spdx.json"))
+        spdx = json.loads(spdx_path.read_text())
+        removed = next(
+            item
+            for item in spdx["relationships"]
+            if item["spdxElementId"] == "SPDXRef-Package-widget"
+            and item["relationshipType"] == "CONTAINS"
+            and item["relatedSpdxElement"].startswith("SPDXRef-File-")
+        )
+        spdx["relationships"].remove(removed)
+        spdx_path.write_bytes(module.canonical_json_bytes(spdx))
+        provenance_path = next(output.glob("*.provenance.json"))
+        provenance = json.loads(provenance_path.read_text())
+        for subject in provenance["subject"]:
+            if subject["name"] == spdx_path.name:
+                subject["digest"]["sha256"] = module.sha256_file(spdx_path)
+        provenance_path.write_bytes(module.canonical_json_bytes(provenance))
+        module.write_checksums(
+            output,
+            [path.name for path in output.iterdir() if path.name != "SHA256SUMS"],
+        )
+
+        verified = self.run_tool("verify", output)
+
+        self.assertNotEqual(verified.returncode, 0)
+        self.assertIn("relationships do not match", verified.stderr)
+
     def test_verify_detects_tampering(self) -> None:
         output = Path(self.tempdir.name) / "tamper-evidence"
         built = self.build(output)
@@ -371,6 +642,206 @@ class ReleaseEvidenceTests(unittest.TestCase):
         verified = self.run_tool("verify", output)
         self.assertNotEqual(verified.returncode, 0)
         self.assertIn("checksum mismatch", verified.stderr)
+
+    def test_verify_rejects_rehashed_noncanonical_metadata(self) -> None:
+        output = Path(self.tempdir.name) / "noncanonical-metadata-evidence"
+        built = self.build(output)
+        self.assertEqual(built.returncode, 0, built.stderr)
+        module = load_evidence_module()
+
+        provenance_path = next(output.glob("*.provenance.json"))
+        provenance = json.loads(provenance_path.read_text(encoding="utf-8"))
+        provenance_path.write_text(json.dumps(provenance) + "\n", encoding="utf-8")
+        module.write_checksums(
+            output,
+            [path.name for path in output.iterdir() if path.name != "SHA256SUMS"],
+        )
+
+        verified = self.run_tool("verify", output)
+
+        self.assertNotEqual(verified.returncode, 0)
+        self.assertIn("provenance is not canonical JSON", verified.stderr)
+
+    def test_verify_rejects_reordered_checksum_entries(self) -> None:
+        output = Path(self.tempdir.name) / "reordered-checksum-evidence"
+        built = self.build(output)
+        self.assertEqual(built.returncode, 0, built.stderr)
+
+        checksums_path = output / "SHA256SUMS"
+        lines = checksums_path.read_text(encoding="utf-8").splitlines()
+        checksums_path.write_text("\n".join(reversed(lines)) + "\n", encoding="utf-8")
+
+        verified = self.run_tool("verify", output)
+
+        self.assertNotEqual(verified.returncode, 0)
+        self.assertIn("canonical sorted form", verified.stderr)
+
+    def test_verify_rejects_rehashed_dependency_omission(self) -> None:
+        output = Path(self.tempdir.name) / "missing-dependency-evidence"
+        built = self.build(output)
+        self.assertEqual(built.returncode, 0, built.stderr)
+        module = load_evidence_module()
+
+        provenance_path = next(output.glob("*.provenance.json"))
+        provenance = json.loads(provenance_path.read_text(encoding="utf-8"))
+        dependencies = provenance["predicate"]["buildDefinition"]["resolvedDependencies"]
+        dependencies.pop()
+        provenance_path.write_bytes(module.canonical_json_bytes(provenance))
+        module.write_checksums(
+            output,
+            [path.name for path in output.iterdir() if path.name != "SHA256SUMS"],
+        )
+
+        verified = self.run_tool("verify", output)
+
+        self.assertNotEqual(verified.returncode, 0)
+        self.assertIn("resolvedDependencies do not match", verified.stderr)
+
+    def test_json_parser_rejects_nonstandard_numbers_and_deep_nesting(self) -> None:
+        module = load_evidence_module()
+
+        with self.assertRaisesRegex(module.EvidenceError, "non-JSON number"):
+            module.strict_json_loads('{"value": NaN}', "fixture")
+        with self.assertRaisesRegex(module.EvidenceError, "non-finite JSON number"):
+            module.strict_json_loads('{"value": 1e999}', "fixture")
+        nested = "[" * (module.MAX_JSON_DEPTH + 1) + "0" + "]" * (module.MAX_JSON_DEPTH + 1)
+        with self.assertRaisesRegex(module.EvidenceError, "JSON nesting limit"):
+            module.strict_json_loads(nested, "fixture")
+
+    def test_verify_rejects_a_rehashed_incomplete_sbom(self) -> None:
+        output = Path(self.tempdir.name) / "incomplete-sbom-evidence"
+        built = self.build(output)
+        self.assertEqual(built.returncode, 0, built.stderr)
+        module = load_evidence_module()
+
+        spdx_path = next(output.glob("*.spdx.json"))
+        spdx = json.loads(spdx_path.read_text())
+        spdx["files"].pop()
+        spdx_path.write_bytes(module.canonical_json_bytes(spdx))
+
+        provenance_path = next(output.glob("*.provenance.json"))
+        provenance = json.loads(provenance_path.read_text())
+        for subject in provenance["subject"]:
+            if subject["name"] == spdx_path.name:
+                subject["digest"]["sha256"] = module.sha256_file(spdx_path)
+        provenance_path.write_bytes(module.canonical_json_bytes(provenance))
+        artifact_names = [path.name for path in output.iterdir() if path.name != "SHA256SUMS"]
+        module.write_checksums(output, artifact_names)
+
+        verified = self.run_tool("verify", output)
+        self.assertNotEqual(verified.returncode, 0)
+        self.assertIn("SPDX file inventory does not match", verified.stderr)
+
+    def test_verify_rejects_a_rehashed_missing_project_relationship(self) -> None:
+        output = Path(self.tempdir.name) / "incomplete-relationships-evidence"
+        built = self.build(output)
+        self.assertEqual(built.returncode, 0, built.stderr)
+        module = load_evidence_module()
+
+        spdx_path = next(output.glob("*.spdx.json"))
+        spdx = json.loads(spdx_path.read_text())
+        project_id = next(
+            item["relatedSpdxElement"]
+            for item in spdx["relationships"]
+            if item["spdxElementId"] == "SPDXRef-DOCUMENT"
+            and item["relationshipType"] == "DESCRIBES"
+        )
+        removed = next(
+            item
+            for item in spdx["relationships"]
+            if item["spdxElementId"] == project_id
+            and item["relationshipType"] == "CONTAINS"
+            and item["relatedSpdxElement"].startswith("SPDXRef-File-")
+        )
+        spdx["relationships"].remove(removed)
+        spdx_path.write_bytes(module.canonical_json_bytes(spdx))
+
+        provenance_path = next(output.glob("*.provenance.json"))
+        provenance = json.loads(provenance_path.read_text())
+        for subject in provenance["subject"]:
+            if subject["name"] == spdx_path.name:
+                subject["digest"]["sha256"] = module.sha256_file(spdx_path)
+        provenance_path.write_bytes(module.canonical_json_bytes(provenance))
+        artifact_names = [path.name for path in output.iterdir() if path.name != "SHA256SUMS"]
+        module.write_checksums(output, artifact_names)
+
+        verified = self.run_tool("verify", output)
+        self.assertNotEqual(verified.returncode, 0)
+        self.assertIn("does not contain source file", verified.stderr)
+
+    def test_verify_rejects_rehashed_noncanonical_pax_data(self) -> None:
+        output = Path(self.tempdir.name) / "noncanonical-archive-evidence"
+        built = self.build(output)
+        self.assertEqual(built.returncode, 0, built.stderr)
+        module = load_evidence_module()
+
+        archive_path = next(output.glob("*.tar.gz"))
+        members: list[tuple[tarfile.TarInfo, bytes | None]] = []
+        with tarfile.open(archive_path, "r:gz") as source:
+            for member in source.getmembers():
+                extracted = source.extractfile(member) if member.isfile() else None
+                members.append((member, extracted.read() if extracted is not None else None))
+
+        expanded = io.BytesIO()
+        with tarfile.open(fileobj=expanded, mode="w", format=tarfile.PAX_FORMAT) as archive:
+            for index, (member, data) in enumerate(members):
+                replacement = tarfile.TarInfo(member.name)
+                replacement.mode = member.mode
+                replacement.uid = member.uid
+                replacement.gid = member.gid
+                replacement.mtime = member.mtime
+                replacement.uname = member.uname
+                replacement.gname = member.gname
+                replacement.type = member.type
+                replacement.size = member.size
+                replacement.linkname = member.linkname
+                replacement.pax_headers = {"comment": "hidden"} if index == 0 else {}
+                archive.addfile(replacement, io.BytesIO(data) if data is not None else None)
+
+        compressed = io.BytesIO()
+        with gzip.GzipFile(
+            filename="", mode="wb", compresslevel=9, fileobj=compressed, mtime=0
+        ) as handle:
+            handle.write(expanded.getvalue())
+        archive_path.write_bytes(compressed.getvalue())
+
+        provenance_path = next(output.glob("*.provenance.json"))
+        provenance = json.loads(provenance_path.read_text())
+        for subject in provenance["subject"]:
+            if subject["name"] == archive_path.name:
+                subject["digest"]["sha256"] = module.sha256_file(archive_path)
+        provenance_path.write_bytes(module.canonical_json_bytes(provenance))
+        artifact_names = [path.name for path in output.iterdir() if path.name != "SHA256SUMS"]
+        module.write_checksums(output, artifact_names)
+
+        verified = self.run_tool("verify", output)
+        self.assertNotEqual(verified.returncode, 0)
+        self.assertIn("canonical tar stream", verified.stderr)
+
+    def test_verify_rejects_a_rehashed_concatenated_gzip_stream(self) -> None:
+        output = Path(self.tempdir.name) / "concatenated-gzip-evidence"
+        built = self.build(output)
+        self.assertEqual(built.returncode, 0, built.stderr)
+        module = load_evidence_module()
+
+        archive_path = next(output.glob("*.tar.gz"))
+        extra_member = io.BytesIO()
+        with gzip.GzipFile(filename="", mode="wb", compresslevel=9, fileobj=extra_member, mtime=0):
+            pass
+        archive_path.write_bytes(archive_path.read_bytes() + extra_member.getvalue())
+
+        provenance_path = next(output.glob("*.provenance.json"))
+        provenance = json.loads(provenance_path.read_text())
+        for subject in provenance["subject"]:
+            if subject["name"] == archive_path.name:
+                subject["digest"]["sha256"] = module.sha256_file(archive_path)
+        provenance_path.write_bytes(module.canonical_json_bytes(provenance))
+        artifact_names = [path.name for path in output.iterdir() if path.name != "SHA256SUMS"]
+        module.write_checksums(output, artifact_names)
+
+        verified = self.run_tool("verify", output)
+        self.assertNotEqual(verified.returncode, 0)
+        self.assertIn("canonical gzip stream", verified.stderr)
 
     def test_verify_rejects_unlisted_nested_content(self) -> None:
         output = Path(self.tempdir.name) / "nested-evidence"

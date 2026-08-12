@@ -1,6 +1,6 @@
 #include "melkor/provenance.hpp"
 
-#include "json.hpp"
+#include <nlohmann/json.hpp>
 
 #include <cstdio>
 #include <limits>
@@ -62,8 +62,20 @@ void test_primitive_validates_metadata_against_data() {
     CHECK(valid.value().metadata().frame.id == "gltf-luf");
     CHECK(valid.value().metadata().scale_domain == ScaleDomain::linear);
     CHECK(valid.value().metadata().opacity_domain == OpacityDomain::linear);
+    CHECK(valid.value().metadata().color_space == ColorSpace::lin_rec709_display);
+    CHECK(!valid.value().metadata().antialiased.has_value());
+
+    metadata.color_space = ColorSpace::srgb_rec709_display;
+    auto display_color = SplatPrimitive::create(metadata, scene(1), provenance());
+    CHECK(display_color.has_value());
+
+    metadata.color_space = static_cast<ColorSpace>(99);
+    auto bad_color = SplatPrimitive::create(metadata, scene(1), provenance());
+    CHECK(!bad_color.has_value());
+    CHECK(bad_color.diagnostics()[0].code == "MK1529_METADATA_DOMAIN_INVALID");
 
     metadata.sh_degree = 0;
+    metadata.color_space = ColorSpace::lin_rec709_display;
     auto mismatch = SplatPrimitive::create(metadata, scene(1), provenance());
     CHECK(!mismatch.has_value());
     CHECK(mismatch.diagnostics()[0].code == "MK1524_METADATA_SH_DEGREE_MISMATCH");
@@ -73,6 +85,13 @@ void test_primitive_validates_metadata_against_data() {
     auto bad_domain = SplatPrimitive::create(metadata, scene(1), provenance());
     CHECK(!bad_domain.has_value());
     CHECK(bad_domain.diagnostics()[0].code == "MK1529_METADATA_DOMAIN_INVALID");
+
+    metadata.scale_domain = ScaleDomain::linear;
+    metadata.frame =
+        math::frame_from_basis("ply-rdf", math::Mat3{-1, 0, 0, 0, -1, 0, 0, 0, 1}, 1.0).value();
+    auto noncanonical_frame = SplatPrimitive::create(metadata, scene(1), provenance());
+    CHECK(!noncanonical_frame.has_value());
+    CHECK(noncanonical_frame.diagnostics()[0].code == "MK1531_METADATA_FRAME_NOT_CANONICAL");
 }
 
 void test_reproducible_json_is_deterministic_and_timestamp_free() {
@@ -93,8 +112,7 @@ void test_reproducible_json_is_deterministic_and_timestamp_free() {
 
     auto timestamped = provenance_to_json(provenance(), false);
     CHECK(timestamped.has_value());
-    CHECK(json::parse(timestamped.value())["operations"][0]["timestamp"] ==
-          "2026-07-15T12:00:00Z");
+    CHECK(json::parse(timestamped.value())["operations"][0]["timestamp"] == "2026-07-15T12:00:00Z");
 }
 
 void test_missing_or_invalid_source_identity_fails() {
@@ -123,10 +141,48 @@ void test_absolute_paths_and_nonfinite_parameters_fail_closed() {
     CHECK(!provenance_to_json(p).has_value());
 
     p = provenance();
+    p.operations[0].parameters["input_path"] = std::string("file:///Users/alice/secret/scene.ply");
+    CHECK(!provenance_to_json(p).has_value());
+
+    p = provenance();
+    p.operations[0].parameters["input_path"] = std::string("FILE:C:/Users/alice/scene.ply");
+    CHECK(!provenance_to_json(p).has_value());
+
+    p = provenance();
+    p.operations[0].parameters["input_path"] = std::string("~/secret/scene.ply");
+    CHECK(!provenance_to_json(p).has_value());
+
+    p = provenance();
     p.operations[0].parameters["value"] = std::numeric_limits<double>::infinity();
     auto nonfinite = provenance_to_json(p);
     CHECK(!nonfinite.has_value());
     CHECK(nonfinite.diagnostics()[0].code == "MK1526_PROVENANCE_PARAMETER_INVALID");
+}
+
+void test_timestamps_use_rfc3339() {
+    Provenance p = provenance();
+    p.operations[0].timestamp = "2024-02-29T23:59:59.125-07:30";
+    CHECK(provenance_to_json(p, false).has_value());
+
+    p.operations[0].timestamp = "2025-02-29T12:00:00Z";
+    auto invalid_day = provenance_to_json(p, false);
+    CHECK(!invalid_day.has_value());
+    CHECK(invalid_day.diagnostics()[0].code == "MK1532_PROVENANCE_TIMESTAMP_INVALID");
+
+    p.operations[0].timestamp = "2026-07-15T24:00:00Z";
+    CHECK(!provenance_to_json(p, false).has_value());
+
+    p.operations[0].timestamp = "2026-07-15 12:00:00";
+    CHECK(!provenance_to_json(p, false).has_value());
+
+    p.operations[0].timestamp = "2026-07-15T12:00:00.123+02:30";
+    CHECK(provenance_to_json(p, false).has_value());
+
+    p.operations[0].timestamp = "2016-12-31T23:59:60Z";
+    CHECK(provenance_to_json(p, false).has_value());
+
+    p.operations[0].timestamp = "2016-12-31T23:59:61Z";
+    CHECK(!provenance_to_json(p, false).has_value());
 }
 
 }  // namespace
@@ -136,6 +192,7 @@ int main() {
     test_reproducible_json_is_deterministic_and_timestamp_free();
     test_missing_or_invalid_source_identity_fails();
     test_absolute_paths_and_nonfinite_parameters_fail_closed();
+    test_timestamps_use_rfc3339();
 
     if (g_failures == 0) {
         std::printf("provenance: %d checks passed\n", g_checks);

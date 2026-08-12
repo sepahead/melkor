@@ -1,7 +1,7 @@
 // Activation-domain conversions.
 //
 // Training pipelines store opacity as a logit and scale as a natural log, because those are the
-// unconstrained domains an optimiser works in. Melkor's canonical scene stores linear opacity
+// unconstrained domains an optimizer works in. Melkor's canonical scene stores linear opacity
 // in [0,1] and positive linear scale. The conversion between them happens exactly once, at the
 // format-profile boundary, through these named functions -- never inline in an adapter, and
 // never twice.
@@ -18,7 +18,7 @@
 
 namespace melkor::math {
 
-// logit (unbounded) -> probability in (0,1), numerically stable for large-magnitude input.
+// Logit to probability. Float rounding can produce an endpoint for a large finite logit.
 Result<float> sigmoid_from_logit(float logit);
 
 // probability in the open interval (0,1) -> logit. A probability of exactly 0 or 1 has an
@@ -26,9 +26,7 @@ Result<float> sigmoid_from_logit(float logit);
 // endpoint should clamp with an explicit, recorded epsilon first).
 Result<float> logit_from_probability(float probability);
 
-// natural-log scale (unbounded) -> positive linear scale, via a bounded exp. The exponent range
-// is limited so that a hostile or corrupt log-scale cannot produce an overflowing or infinite
-// linear scale; an out-of-range input fails rather than returning inf.
+// Natural-log scale to positive linear scale. The result must fit a positive finite float.
 Result<float> linear_scale_from_log(float log_scale);
 
 // positive linear scale -> natural-log scale. The scale must be finite and strictly positive.

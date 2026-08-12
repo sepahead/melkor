@@ -1,29 +1,32 @@
 # Loss policy
 
-A format conversion is honest only when it says what it lost. Converting a degree-4 SPZ asset to
-the degree-3 glTF profile drops coefficients. Flattening a scene graph into a point cloud loses
-hierarchy. Quantizing into SPZ introduces measurable error. These changes are not failures. A
-successful conversion must still report them.
+A format conversion is honest only when it reports each lost feature. Converting degree-4 canonical
+PLY to the degree-3 glTF profile drops coefficients. Flattening a scene graph loses hierarchy.
+Quantizing data for SPZ introduces measurable error. These changes are not parse failures.
+A successful conversion must still report them.
 
-Every conversion therefore produces a **loss report** (`include/melkor/format/loss.hpp`,
-serialized per `schemas/loss-report-v1.schema.json`), including a zero-loss report, so automation
-never has to infer whether reporting was omitted.
+Every successful `melkor convert` command produces a **loss report**.
+This rule includes a zero-loss report.
+The report follows [`loss-report-v1`](../../schemas/loss-report-v1.schema.json).
 
-![Conversion loss policy. Info and warning losses continue. A severe loss gates on approval. A fatal loss always stops. A panel lists the 20 stable loss codes.](../../assets/diagrams/loss-policy.svg)
+`melkor convert` writes this JSON report after output staging and before the atomic commit.
+Use the report only when the command returns exit status zero.
+The command writes human-readable status text to stderr.
+
+![Explicit convert loss policy. Info and warning losses continue. A severe loss requires approval. A fatal loss stops with exit code 4.](../../assets/diagrams/loss-policy.svg)
 
 ## Severities and the policy
 
 | Severity | Meaning | Behavior |
 |---|---|---|
 | `info` | Representational change, no expected rendered difference | Recorded, passes. |
-| `warning` | Measurable but usually acceptable, e.g. quantization within a published bound | Recorded, passes. |
-| `severe` | Semantic data removed or guessed, e.g. SH degree 4 → 3 | **Blocks the commit** unless the caller approves this exact loss code. |
+| `warning` | Measurable but usually acceptable, such as quantization within a published bound | Recorded, passes. |
+| `severe` | Semantic data is removed or guessed, such as SH degree 4 → 3 | **Blocks the commit** unless the caller approves this exact loss code. |
 | `fatal` | The target cannot represent the asset without violating an invariant | **Always blocks. Cannot be approved.** |
 
-Approval is per **exact code**: `--allow-loss LOSS_SH_DEGREE_TRUNCATED`. The API takes exact
-codes, not a blanket flag, so a program cannot wave through a loss it did not name. A CLI-only
-`--allow-loss all` may exist for expert recovery, but it never covers a fatal or a safety
-condition and is recorded prominently.
+Approval uses an exact code: `--allow-loss LOSS_SH_DEGREE_TRUNCATED`.
+The API and CLI do not provide a blanket approval flag.
+A fatal loss or safety error cannot be approved.
 
 ## Losses are not errors
 
@@ -33,7 +36,8 @@ is an **error**, not a loss. The loss policy cannot approve it. The policy gover
 
 ## Stable codes
 
-The loss codes (`LOSS_SH_DEGREE_TRUNCATED`, `LOSS_SCENE_GRAPH_FLATTENED`, `LOSS_QUANTIZATION_APPLIED`,
-…) are stable machine identifiers. A consumer that special-cases one can rely on it meaning the
-same thing across the 2.x line. The committed report also records which codes were approved, so a
-reviewer can see which losses were deliberately accepted.
+The loss codes are stable machine identifiers. Examples include `LOSS_SH_DEGREE_TRUNCATED` and
+`LOSS_QUANTIZATION_APPLIED`. Each code keeps the same meaning throughout the 2.x line.
+The v1 schema lists every valid code. Add a schema version before you add a loss code.
+
+The report records each approved code. A reviewer can see which losses the caller accepted.

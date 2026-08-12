@@ -17,7 +17,7 @@ concurrency:
 jobs:
   secrets-scan:
     name: Full-history secret scan
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
@@ -32,7 +32,7 @@ jobs:
   dependency-review:
     name: Dependency review
     if: github.event_name == 'pull_request'
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
@@ -44,7 +44,7 @@ jobs:
           fail-on-severity: high
 
   build-macos:
-    runs-on: macos-14
+    runs-on: macos-15
     timeout-minutes: 45
     steps:
       - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
@@ -55,41 +55,36 @@ jobs:
           python-version: "3.11"
       - name: Install dependencies
         run: |
-          brew install cmake
-          python -m pip install --disable-pip-version-check --only-binary=:all: numpy==2.4.6
+          brew install cmake ninja
+          python -m pip install --disable-pip-version-check --only-binary=:all: \
+            jsonschema==4.26.0 numpy==2.4.6
           ./scripts/setup_deps.sh
       - name: Build
         run: |
-          cmake -B build -DMELKOR_WERROR=ON \
+          cmake --preset dev \
             -DPython3_EXECUTABLE="$(command -v python)"
-          cmake --build build -j$(sysctl -n hw.ncpu)
+          cmake --build --preset dev --parallel "$(sysctl -n hw.ncpu)"
       - name: Test
         run: |
           set -o pipefail
-          # Run the real correctness test suite (SPZ quaternion order + SH
-          # channel order, PLY parsing, PCA normals, provider parity, scene
-          # completion) plus the smoke checks.
-          ctest --test-dir build -N | grep -F 'gaussians_from_prediction_tests' >/dev/null
-          ctest --test-dir build --output-on-failure --no-tests=error
-          ./build/melkor --info
-          ./build/melkor --version
-          cmake --install build --prefix "$RUNNER_TEMP/melkor-install"
+          ctest --preset dev -N | grep -F 'gaussians_from_prediction_tests' >/dev/null
+          ctest --preset dev
+          ./build/dev/melkor --version
+          cmake --install build/dev --prefix "$RUNNER_TEMP/melkor-install"
           test -s "$RUNNER_TEMP/melkor-install/share/melkor/LICENSE"
           test -s "$RUNNER_TEMP/melkor-install/share/melkor/NOTICE"
           test -s "$RUNNER_TEMP/melkor-install/share/melkor/THIRD_PARTY_LICENSES.md"
-      - name: Build CPU-only topology
+      - name: Build without SPZ
         run: |
-          # This has the same link shape as Linux CPU builds.
-          # It catches accidental platform dependencies in neutral code.
-          cmake -B build-cpu -DMELKOR_USE_METAL=OFF -DMELKOR_WERROR=ON \
+          cmake --preset spz-off \
             -DPython3_EXECUTABLE="$(command -v python)"
-          cmake --build build-cpu -j$(sysctl -n hw.ncpu)
-          cd build-cpu && ctest --output-on-failure
+          cmake --build --preset spz-off --parallel "$(sysctl -n hw.ncpu)"
+          ctest --preset spz-off
       - name: Verify third-party dependency lock
         run: python3 tools/verify_third_party.py --check
 
   sanitize-macos:
-    runs-on: macos-14
+    runs-on: macos-15
     timeout-minutes: 45
     steps:
       - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
@@ -100,27 +95,24 @@ jobs:
           python-version: "3.11"
       - name: Install dependencies
         run: |
-          brew install cmake
-          python -m pip install --disable-pip-version-check --only-binary=:all: numpy==2.4.6
+          brew install cmake ninja
+          python -m pip install --disable-pip-version-check --only-binary=:all: \
+            jsonschema==4.26.0 numpy==2.4.6
           ./scripts/setup_deps.sh
       - name: Build with ASan+UBSan
         run: |
-          mkdir -p build && cd build
-          cmake .. \
-            -DCMAKE_CXX_FLAGS="-fsanitize=address,undefined -fno-omit-frame-pointer -g" \
-            -DCMAKE_EXE_LINKER_FLAGS="-fsanitize=address,undefined" \
+          cmake --preset asan-ubsan \
             -DCMAKE_OSX_DEPLOYMENT_TARGET="13.0" \
             -DPython3_EXECUTABLE="$(command -v python)"
-          make -j$(sysctl -n hw.ncpu)
+          cmake --build --preset asan-ubsan --parallel "$(sysctl -n hw.ncpu)"
       - name: Test under sanitizers
         run: |
           set -o pipefail
-          cd build
-          ctest -N | grep -F 'gaussians_from_prediction_tests' >/dev/null
-          ctest --output-on-failure
+          ctest --preset asan-ubsan -N | grep -F 'gaussians_from_prediction_tests' >/dev/null
+          ctest --preset asan-ubsan
 
   build-linux:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
@@ -137,56 +129,100 @@ jobs:
           sudo rm -f /etc/apt/sources.list.d/microsoft-prod.list \
                      /etc/apt/sources.list.d/azure-cli.list \
                      /etc/apt/sources.list.d/azure-cli.sources || true
-          sudo apt-get update && sudo apt-get install -y cmake build-essential
-          python -m pip install --disable-pip-version-check --only-binary=:all: numpy==2.4.6
+          sudo apt-get update
+          sudo apt-get install -y cmake build-essential ninja-build zlib1g-dev
+          python -m pip install --disable-pip-version-check --only-binary=:all: \
+            jsonschema==4.26.0 numpy==2.4.6
           ./scripts/setup_deps.sh
       - name: Build
         run: |
-          cmake -B build -DMELKOR_WERROR=ON \
+          cmake --preset dev \
             -DPython3_EXECUTABLE="$(command -v python)"
-          cmake --build build -j$(nproc)
+          cmake --build --preset dev --parallel "$(nproc)"
       - name: Test
         run: |
           set -o pipefail
-          cd build
-          ctest -N | grep -F 'gaussians_from_prediction_tests' >/dev/null
-          ctest --output-on-failure
-          ./melkor --info
-          ./melkor --version
+          ctest --preset dev -N | grep -F 'gaussians_from_prediction_tests' >/dev/null
+          ctest --preset dev
+          ./build/dev/melkor --version
       - name: SDK install and consumer test
-        run: bash scripts/test_sdk_install.sh
+        run: bash scripts/test_sdk_install.sh -DBUILD_SHARED_LIBS=ON
 
-  # Compile-only check for the CUDA backend. Hosted runners have no GPU, but
-  # nvcc compilation catches the entire class of CUDA build breakage
-  # (undefined kernels, signature drift, host/device qualifier errors) that a
-  # Metal-only development machine cannot see. Tests are skipped: no device.
-  build-linux-cuda:
-    runs-on: ubuntu-latest
-    timeout-minutes: 45
+  build-windows:
+    name: Windows 2025 / MSVC
+    runs-on: windows-2025
+    timeout-minutes: 35
     steps:
       - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
         with:
           persist-credentials: false
-      - name: Install dependencies
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6.3.0
+        with:
+          python-version: "3.11"
+      - name: Install test dependencies
         run: |
-          # Strip the preinstalled Microsoft/azure-cli apt sources that
-          # intermittently serve a bad InRelease ('NOSPLIT') and fail
-          # apt-get update. Melkor's CUDA dependencies need none of them.
-          sudo rm -f /etc/apt/sources.list.d/microsoft-prod.list \
-                     /etc/apt/sources.list.d/azure-cli.list \
-                     /etc/apt/sources.list.d/azure-cli.sources || true
-          sudo apt-get update
-          sudo apt-get install -y cmake build-essential nvidia-cuda-toolkit
-          ./scripts/setup_deps.sh
-      - name: Build with CUDA
+          python -m pip install --disable-pip-version-check --only-binary=:all: `
+            jsonschema==4.26.0 numpy==2.4.6
+      - name: Build without SPZ
         run: |
-          nvcc --version
-          cmake -B build -DMELKOR_USE_CUDA=ON
-          cmake --build build -j$(nproc)
+          cmake -S . -B build/windows -G Ninja `
+            -DCMAKE_BUILD_TYPE=RelWithDebInfo `
+            -DMELKOR_BUILD_SPZ=OFF `
+            -DMELKOR_WERROR=ON
+          cmake --build build/windows --parallel
+      - name: Test
+        run: ctest --test-dir build/windows --output-on-failure --no-tests=error
+      - name: Install and test the C ABI
+        run: |
+          $prefix = Join-Path $env:RUNNER_TEMP "melkor-install"
+          cmake --install build/windows --prefix $prefix
+          if (-not (Test-Path "$prefix/include/melkor/c/melkor.h")) {
+            throw "The installed C header is missing."
+          }
+          if (-not (Test-Path "$prefix/bin/melkor.dll")) {
+            throw "The installed shared library is missing."
+          }
+          $exports = & dumpbin /nologo /exports "$prefix/bin/melkor.dll" |
+            ForEach-Object {
+              if ($_ -match '^\s+\d+\s+[0-9A-Fa-f]+\s+[0-9A-Fa-f]+\s+(\S+)') {
+                $Matches[1]
+              }
+            } |
+            Sort-Object -Unique
+          $expectedExports = @(
+            "melkor_get_version",
+            "melkor_inspect_ply_file",
+            "melkor_status_string"
+          ) | Sort-Object
+          $exportDifference = Compare-Object $expectedExports $exports
+          if ($exportDifference) {
+            $exportDifference | Format-Table | Out-String | Write-Error
+            throw "The DLL export set does not match the C ABI."
+          }
+          foreach ($required in @(
+            "share/melkor/licenses/spz-LICENSE",
+            "share/melkor/licenses/nlohmann-json-LICENSE",
+            "share/melkor/profiles/spz/spz-v1-v3.json",
+            "share/melkor/schemas/loss-report-v1.schema.json"
+          )) {
+            if (-not (Test-Path (Join-Path $prefix $required) -PathType Leaf)) {
+              throw "The installed package is missing $required."
+            }
+          }
+          $env:PATH = "$prefix/bin;$env:PATH"
+          & "$prefix/bin/melkor.exe" --version
+          foreach ($consumer in @("consumer-c", "consumer-cpp")) {
+            $build = "build/$consumer-windows"
+            cmake -S "tests/install/$consumer" -B $build -G Ninja `
+              -DCMAKE_BUILD_TYPE=Release `
+              -DCMAKE_PREFIX_PATH=$prefix
+            cmake --build $build --parallel
+            ctest --test-dir $build --output-on-failure --no-tests=error
+          }
 
   lint-python:
     name: Python and shell checks
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
@@ -200,7 +236,7 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y shellcheck
           python -m pip install --disable-pip-version-check --only-binary=:all: \
-            numpy==2.4.6 ruff==0.15.18
+            jsonschema==4.26.0 numpy==2.4.6 ruff==0.15.18
       - name: Lint maintained Python
         run: |
           # Lint Melkor-authored Python only. The root pyproject.toml excludes the
@@ -235,7 +271,7 @@ jobs:
 
   viewer-tests:
     name: Viewer / Playwright (Chromium)
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 40
     steps:
       - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
@@ -260,7 +296,7 @@ jobs:
         run: bun run test -- --project=chromium
       - name: Upload viewer failure artifacts
         if: failure()
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: viewer-test-results-${{ github.run_id }}-${{ github.run_attempt }}
           path: viewer/test-results/
@@ -269,7 +305,7 @@ jobs:
 
   tauri-check:
     name: Tauri / Rust 1.88
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 60
     steps:
       - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
@@ -299,23 +335,25 @@ jobs:
         run: |
           rustup run 1.88.0 cargo fmt --check
           rustup run 1.88.0 cargo clippy --locked --all-targets -- -D warnings
+          rustup run 1.88.0 cargo test --locked
           rustup run 1.88.0 cargo check --locked
       - name: Audit Rust dependencies
         run: |
-          cargo install cargo-deny --version 0.19.9 --locked
-          cargo deny --manifest-path viewer/src-tauri/Cargo.toml check \
-            --config viewer/src-tauri/deny.toml advisories bans licenses sources
+          rustup run 1.88.0 cargo install cargo-deny --version 0.20.2 --locked
+          cargo deny --manifest-path viewer/src-tauri/Cargo.toml \
+            --config viewer/src-tauri/deny.toml --locked \
+            check advisories bans licenses sources
       - name: Verify generated Rust license inventory
         working-directory: viewer/src-tauri
         run: |
-          cargo install cargo-about --version 0.9.1 --locked --features cli
+          rustup run 1.88.0 cargo install cargo-about --version 0.9.1 --locked --features cli
           for target in \
             aarch64-apple-darwin \
             x86_64-apple-darwin \
             x86_64-unknown-linux-gnu \
             aarch64-unknown-linux-gnu \
             x86_64-pc-windows-msvc; do
-            cargo fetch --locked --target "$target"
+            rustup run 1.88.0 cargo fetch --locked --target "$target"
           done
           cargo about generate --frozen --fail \
             -o ../RUST_THIRD_PARTY_LICENSES.html about.hbs
@@ -323,12 +361,12 @@ jobs:
       - name: Build the staged desktop application
         working-directory: viewer
         run: |
-          cargo install tauri-cli --version 2.9.6 --locked
+          rustup run 1.88.0 cargo install tauri-cli --version 2.11.4 --locked
           rustup run 1.88.0 cargo tauri build --no-bundle
 
   fuzz-smoke:
     name: Fuzz smoke (libFuzzer)
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
@@ -340,7 +378,7 @@ jobs:
                      /etc/apt/sources.list.d/azure-cli.list \
                      /etc/apt/sources.list.d/azure-cli.sources || true
           sudo apt-get update
-          sudo apt-get install -y clang cmake ninja-build
+          sudo apt-get install -y clang cmake ninja-build zlib1g-dev
       - name: Build the coverage-guided fuzz targets
         env:
           CC: clang
@@ -348,7 +386,7 @@ jobs:
         run: |
           cmake -S . -B build/fuzz -G Ninja \
             -DCMAKE_BUILD_TYPE=Debug \
-            -DMELKOR_USE_METAL=OFF \
+            -DMELKOR_BUILD_SPZ=ON \
             -DMELKOR_BUILD_FUZZERS=ON
           cmake --build build/fuzz --parallel
       - name: Run a bounded fuzz session on each target
@@ -363,7 +401,7 @@ jobs:
           done
       - name: Replay the seed corpus as a regression (deterministic)
         run: |
-          cmake -S . -B build/replay -G Ninja -DMELKOR_USE_METAL=OFF
+          cmake -S . -B build/replay -G Ninja -DMELKOR_BUILD_SPZ=ON
           cmake --build build/replay --target \
             fuzz_ply_replay fuzz_spz_replay fuzz_glb_replay fuzz_gltf_khr_replay
           ctest --test-dir build/replay -R '_replay' --output-on-failure
@@ -384,33 +422,20 @@ jobs:
       - build-macos
       - sanitize-macos
       - build-linux
-      - build-linux-cuda
+      - build-windows
       - lint-python
       - viewer-tests
       - tauri-check
       - fuzz-smoke
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 5
     steps:
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+        with:
+          persist-credentials: false
       - name: Verify every required job succeeded
         env:
+          EVENT_NAME: ${{ github.event_name }}
           RESULTS: ${{ toJSON(needs) }}
         run: |
-          echo "Dependency job results:"
-          echo "$RESULTS" | python3 -c '
-          import json, sys
-          results = json.load(sys.stdin)
-          bad = []
-          for job, info in sorted(results.items()):
-              result = info.get("result")
-              print(f"  {job:<24} {result}")
-              # A skipped job is tolerated only when it was skipped by design (e.g.
-              # dependency-review runs on pull_request only). A failure, cancellation, or
-              # timeout is never tolerated.
-              if result not in ("success", "skipped"):
-                  bad.append(f"{job}={result}")
-          if bad:
-              print("\nCI Gate FAILED: " + ", ".join(bad), file=sys.stderr)
-              sys.exit(1)
-          print("\nCI Gate passed: all required jobs succeeded.")
-          '
+          printf '%s\n' "$RESULTS" | python3 tools/check_ci_results.py --event "$EVENT_NAME"

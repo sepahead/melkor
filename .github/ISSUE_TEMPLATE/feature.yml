@@ -1,40 +1,24 @@
 name: Feature request
-description: Propose a new capability, a new format profile, or a change to an existing contract
+description: Propose a capability, format profile, or contract change
 title: "[feature] "
-# Labels must already exist in the repository, or GitHub will not apply them.
+# GitHub applies only labels that exist in the repository.
 labels: ["enhancement"]
 body:
   - type: markdown
     attributes:
       value: |
-        Before writing, please read the product boundary in
-        [ROADMAP.md](https://github.com/sepahead/melkor/blob/main/ROADMAP.md) and
-        [GOVERNANCE.md](https://github.com/sepahead/melkor/blob/main/GOVERNANCE.md).
+        Read the product boundary in [ROADMAP.md](https://github.com/sepahead/melkor/blob/main/ROADMAP.md).
+        Read the decision process in [GOVERNANCE.md](https://github.com/sepahead/melkor/blob/main/GOVERNANCE.md).
 
-        Melkor is an **asset interoperability core**: it inspects, validates, normalizes, and converts
-        Gaussian-splat and mesh assets. It is deliberately **not** a reconstruction or training system,
-        and it will not become one. Training, depth estimation, and feedforward reconstruction are
-        reached through **external, pinned adapters** — Melkor describes how to obtain, verify, and
-        invoke those tools. It does not vendor them or claim their results as its own.
-
-        This matters for your proposal in a concrete way. A request to "add reconstruction method X" is
-        out of scope as a core feature, but "add an adapter for X, pinned and license-reviewed" may be
-        in scope. The distinction is not pedantry: vendoring a trainer would drag its license and its
-        hardware requirements into a permissively licensed core, and would make Melkor appear to support
-        something it cannot test, qualify, or maintain.
-
-        The project has one maintainer. A well-argued proposal that is declined is still useful. A
-        proposal that is accepted and then unmaintained is not. Please be honest about who will keep the
-        feature alive.
+        Melkor inspects and converts Gaussian-splat assets.
+        It is not a renderer, reconstruction system, or training system.
+        Development adapters can invoke pinned external tools.
 
   - type: textarea
     id: problem
     attributes:
       label: Problem
-      description: >-
-        What you are trying to accomplish, and where Melkor's current behavior prevents it. Describe the
-        problem before the solution — a problem statement can be solved several ways, and the first way
-        you thought of may not be the one that survives review.
+      description: Describe the user problem before you describe a solution.
     validations:
       required: true
 
@@ -43,26 +27,23 @@ body:
     attributes:
       label: Proposed behavior
       description: >-
-        What Melkor should do. Be concrete about the **contract**, not only the outcome: the exact flags
-        or API, the defaults, the machine-readable output, the failure modes, and the exit codes. A
-        proposal that does not say what happens when it fails is not yet a proposal.
+        Define the flags or API, defaults, output, failure modes, and exit codes.
+        State the complete user-visible contract.
     validations:
       required: true
 
   - type: dropdown
     id: surface
     attributes:
-      label: Which surface does this change?
-      description: Select every surface the proposal touches.
+      label: Affected surfaces
+      description: Select each surface that the proposal changes.
       multiple: true
       options:
         - CLI
-        - C ABI / C++ SDK
-        - Python package
-        - File format support or a new format profile
-        - Compute backend (Metal / CUDA / CPU)
+        - C SDK
+        - File format or format profile
         - Viewer or desktop application
-        - External adapter (trainer, depth, feedforward)
+        - External development adapter
         - Packaging, release, or provenance
         - Documentation only
     validations:
@@ -71,15 +52,13 @@ body:
   - type: dropdown
     id: boundary
     attributes:
-      label: Where does this sit relative to the product boundary?
-      description: >-
-        Your honest reading of it. Getting this wrong is not held against you — but a proposal that
-        ignores the boundary altogether is likely to be declined on scope, not on merit.
+      label: Product boundary
+      description: Select the best description of this proposal.
       options:
-        - Core interoperability — inspect, validate, normalize, convert, or initialize from mesh
-        - An external adapter (the tool stays external, pinned and verified)
-        - A change to the product boundary itself, argued explicitly
-        - I am not sure
+        - Native inspection or conversion
+        - External pinned adapter
+        - Explicit product-boundary change
+        - Unknown
     validations:
       required: true
 
@@ -88,11 +67,9 @@ body:
     attributes:
       label: Compatibility and migration
       description: >-
-        Does this change existing behavior for an input or a command that already works today? If it
-        alters the meaning of a format profile, note that a profile ID's meaning never changes silently:
-        a new profile ID and a migration note would be required. If it changes a default, say which
-        outputs would change bytes.
-      placeholder: "Purely additive. No existing command changes behavior. / Changes --foo from A to B. Existing assets would differ in ..."
+        Identify all changed commands, defaults, outputs, and assets.
+        If a format profile changes meaning, define a new profile ID.
+      placeholder: "Additive change. No existing behavior changes."
     validations:
       required: true
 
@@ -100,10 +77,7 @@ body:
     id: alternatives
     attributes:
       label: Alternatives and workarounds
-      description: >-
-        What you tried, what you can do today (however awkwardly), and why that is not sufficient. If an
-        existing tool already solves this well, say so — the right answer may be to document how to use
-        it with Melkor rather than to reimplement it inside Melkor.
+      description: Describe the tested alternatives and the current workaround.
     validations:
       required: true
 
@@ -112,22 +86,17 @@ body:
     attributes:
       label: Evidence and specification
       description: >-
-        For a format or profile proposal: the specification, the profile definition, or the producer
-        documentation that establishes what correct behavior is. For a quality or accuracy claim:
-        the measurement supporting it. Melkor does not adopt behavior on the strength of a single
-        implementation's convention without saying that is what it is doing.
+        Link the applicable specification or producer documentation.
+        Give measurements for each quality or performance claim.
 
   - type: textarea
     id: contribution
     attributes:
-      label: Are you willing to implement it?
+      label: Implementation offer
       description: >-
-        Entirely optional, and a "no" does not weaken the proposal. But with one maintainer, the realistic
-        alternative to "someone will contribute this" is often "this stays open for a long time", and it is
-        better to say so up front than to leave you waiting. If you are willing, note whether you can also
-        cover the backends (Metal, CUDA, CPU) and the tests, since backend-semantic changes must land in
-        all three together.
-      placeholder: "Yes, I can implement the CPU path and tests. I have no CUDA hardware. / No, reporting only."
+        State whether you can implement the proposal.
+        List the supported platforms and tests that you can cover.
+      placeholder: "I can implement and test this on macOS and Linux."
 
   - type: checkboxes
     id: acknowledgements
@@ -135,10 +104,8 @@ body:
       label: Before you submit
       options:
         - label: >-
-            I have read the scope section of ROADMAP.md, including the list of things deliberately
-            excluded from v2.0.0, and this proposal is not one of them (or it argues explicitly for
-            changing the boundary).
+            I read the product boundary in ROADMAP.md.
+            This proposal follows that boundary or requests a specific change.
           required: true
-        - label: >-
-            I have searched existing issues and discussions, and this is not a duplicate.
+        - label: I searched existing issues and discussions and found no duplicate.
           required: true

@@ -6,6 +6,7 @@ from __future__ import annotations
 import argparse
 import os
 import re
+import stat
 import subprocess
 import sys
 import unicodedata
@@ -15,6 +16,7 @@ from urllib.parse import unquote, urlsplit
 
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
+MAX_MARKDOWN_BYTES = 4 * 1024 * 1024
 INLINE_LINK = re.compile(r"!?\[[^\]]*\]\((?P<target><[^>]+>|[^\s)]+)")
 REFERENCE_LINK = re.compile(r"^\s*\[[^\]]+\]:\s*(?P<target><[^>]+>|\S+)")
 HTML_LINK = re.compile(r"(?:href|src)=[\"'](?P<target>[^\"']+)[\"']", re.IGNORECASE)
@@ -29,6 +31,34 @@ class Finding:
     message: str
 
 
+def read_markdown(path: Path) -> str:
+    """Read one bounded regular UTF-8 Markdown file."""
+    if path.is_symlink():
+        raise ValueError(f"Markdown input must not be a symbolic link: {path}")
+    flags = os.O_RDONLY | getattr(os, "O_BINARY", 0) | getattr(os, "O_CLOEXEC", 0)
+    flags |= getattr(os, "O_NOFOLLOW", 0)
+    descriptor = os.open(path, flags)
+    with os.fdopen(descriptor, "rb") as handle:
+        initial = os.fstat(handle.fileno())
+        if not stat.S_ISREG(initial.st_mode) or initial.st_size > MAX_MARKDOWN_BYTES:
+            raise ValueError(f"Markdown input must be a bounded regular file: {path}")
+        raw = handle.read(MAX_MARKDOWN_BYTES + 1)
+        final = os.fstat(handle.fileno())
+        if (
+            len(raw) != initial.st_size
+            or final.st_dev != initial.st_dev
+            or final.st_ino != initial.st_ino
+            or final.st_size != initial.st_size
+            or final.st_mtime_ns != initial.st_mtime_ns
+            or final.st_ctime_ns != initial.st_ctime_ns
+        ):
+            raise ValueError(f"Markdown input changed while it was read: {path}")
+    try:
+        return raw.decode("utf-8")
+    except UnicodeDecodeError as error:
+        raise ValueError(f"Markdown input is not UTF-8: {path}") from error
+
+
 def tracked_markdown(root: Path = REPO_ROOT) -> list[Path]:
     """Return each tracked or proposed Markdown file below ``root``."""
     result = subprocess.run(
@@ -37,7 +67,14 @@ def tracked_markdown(root: Path = REPO_ROOT) -> list[Path]:
         check=True,
         capture_output=True,
     )
-    return [root / name.decode() for name in result.stdout.split(b"\0") if name]
+    try:
+        paths = [root / name.decode("utf-8", "strict") for name in result.stdout.split(b"\0") if name]
+    except UnicodeDecodeError as error:
+        raise ValueError("Git returned a non-UTF-8 Markdown path") from error
+    links = [path for path in paths if path.is_symlink()]
+    if links:
+        raise ValueError(f"Markdown files must not be symbolic links: {links[0]}")
+    return [path for path in paths if path.is_file()]
 
 
 def github_slug(text: str) -> str:
@@ -55,7 +92,7 @@ def anchors(path: Path) -> set[str]:
     found: set[str] = set()
     duplicates: dict[str, int] = {}
     in_fence = False
-    for line in path.read_text(encoding="utf-8").splitlines():
+    for line in read_markdown(path).splitlines():
         if line.lstrip().startswith(("```", "~~~")):
             in_fence = not in_fence
             continue
@@ -100,7 +137,7 @@ def targets(path: Path) -> list[tuple[int, str]]:
     """Return local and remote link targets outside fenced code blocks."""
     result: list[tuple[int, str]] = []
     in_fence = False
-    for number, line in enumerate(path.read_text(encoding="utf-8").splitlines(), start=1):
+    for number, line in enumerate(read_markdown(path).splitlines(), start=1):
         if line.lstrip().startswith(("```", "~~~")):
             in_fence = not in_fence
             continue
@@ -120,7 +157,11 @@ def check_markdown(paths: list[Path], root: Path = REPO_ROOT) -> list[Finding]:
         for line, raw_target in targets(source):
             if not raw_target or SCHEME.match(raw_target) or raw_target.startswith(("//", "{")):
                 continue
-            parsed = urlsplit(raw_target)
+            try:
+                parsed = urlsplit(raw_target)
+            except ValueError:
+                findings.append(Finding(source, line, f"link target is invalid: {raw_target}"))
+                continue
             path_text = unquote(parsed.path)
             fragment = unquote(parsed.fragment)
             if not path_text:
@@ -143,7 +184,7 @@ def check_markdown(paths: list[Path], root: Path = REPO_ROOT) -> list[Finding]:
                 findings.append(Finding(source, line, f"local link target does not exist: {raw_target}"))
                 continue
             if fragment and destination.suffix.lower() == ".md":
-                expected = fragment.lower()
+                expected = unicodedata.normalize("NFKC", fragment).lower()
                 available = anchor_cache.setdefault(destination, anchors(destination))
                 if expected not in available:
                     findings.append(Finding(source, line, f"Markdown anchor does not exist: {raw_target}"))
@@ -153,8 +194,12 @@ def check_markdown(paths: list[Path], root: Path = REPO_ROOT) -> list[Finding]:
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.parse_args()
-    paths = tracked_markdown()
-    findings = check_markdown(paths)
+    try:
+        paths = tracked_markdown()
+        findings = check_markdown(paths)
+    except (OSError, subprocess.SubprocessError, ValueError) as error:
+        print(f"error: documentation link check failed: {error}", file=sys.stderr)
+        return 2
     for finding in findings:
         relative = finding.path.relative_to(REPO_ROOT)
         print(f"{relative}:{finding.line}: {finding.message}")

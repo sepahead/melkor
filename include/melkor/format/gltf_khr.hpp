@@ -20,6 +20,7 @@
 #ifndef MELKOR_FORMAT_GLTF_KHR_HPP
 #define MELKOR_FORMAT_GLTF_KHR_HPP
 
+#include "melkor/color_space.hpp"
 #include "melkor/math/quaternion.hpp"
 
 #include <cstddef>
@@ -34,8 +35,8 @@ namespace melkor::format::khr {
 
 inline constexpr const char* kExtensionName = "KHR_gaussian_splatting";
 inline constexpr const char* kKernelEllipse = "ellipse";
-inline constexpr const char* kProjectionPerspective = "perspective";      // spec default
-inline constexpr const char* kSortingCameraDistance = "cameraDistance";   // spec default
+inline constexpr const char* kProjectionPerspective = "perspective";     // spec default
+inline constexpr const char* kSortingCameraDistance = "cameraDistance";  // spec default
 
 // The mesh primitive MUST use POINTS mode, and the referenced material MUST be ignored for splat
 // rendering. These are the two hard glTF dependencies the extension imposes.
@@ -44,42 +45,37 @@ inline constexpr int kPrimitiveModePoints = 0;
 // This profile supports SH degrees 0..3 inclusive (COEF counts 1/3/5/7). The canonical scene
 // supports 0..4; the adapter converts a degree-4 source with LOSS_SH_DEGREE_TRUNCATED.
 inline constexpr std::uint32_t kMaxProfileShDegree = 3;
+inline constexpr std::uint32_t kMaxCanonicalShDegree = 4;
 
 // ---- Color space ---------------------------------------------------------------------------
 //
 // `colorSpace` is REQUIRED and refers only to the reconstructed splat color values. The two
-// values the base extension defines are display-referred BT.709 sRGB and linear. An unknown string
-// is allowed by the schema (the property is open) but is not one Melkor can interpret, so it is
-// surfaced as an assumption (LOSS_COLOR_SPACE_ASSUMED), never silently treated as sRGB.
+// values the base extension defines are display-referred BT.709 sRGB and linear. Another extension
+// can define more values. Melkor rejects such a value until it supports that extension.
 
-enum class ColorSpace : std::uint8_t {
-    srgb_rec709_display,  // "srgb_rec709_display": BT.709 sRGB, display-referred
-    lin_rec709_display,   // "lin_rec709_display": BT.709 linear, display-referred
-};
-
-const char* to_string(ColorSpace space) noexcept;
-
-// Parses one of the two defined color-space strings. Returns nullopt for any other string,
-// including the empty string; the caller decides the policy for an unknown-but-present value.
-std::optional<ColorSpace> color_space_from_string(std::string_view s) noexcept;
+using ::melkor::color_space_from_string;
+using ::melkor::ColorSpace;
+using ::melkor::to_string;
 
 // ---- Spherical-harmonic layout --------------------------------------------------------------
 //
 // The extension stores each SH coefficient as its own VEC3 float accessor named
 // `KHR_gaussian_splatting:SH_DEGREE_{l}_COEF_{n}`. For degree l there are exactly 2l+1 coefficients
-// (n in [0, 2l]), packed from the lowest order m=-l (COEF_0) to the highest m=+l (COEF_2l). Melkor's
-// canonical ShBuffer is coefficient-major over the (degree+1)^2 coefficients in the same order --
-// DC at flat index 0, then degree 1's three coefficients at 1..3, degree 2's five at 4..8, and so
-// on -- so the flat<->address mapping below is a pure index reshuffle with no reordering.
+// (n in [0, 2l]), packed from the lowest order m=-l (COEF_0) to the highest m=+l (COEF_2l).
+// The canonical ShBuffer stores the (degree+1)^2 coefficients in splat-major order. DC is flat
+// index 0. Degree 1 uses indices 1 through 3. Degree 2 uses indices 4 through 8. Thus, the mapping
+// below changes only the index representation. It does not change coefficient order.
 
 // Number of SH coefficients at exactly degree l: 2l+1.
 constexpr std::size_t sh_coefficients_at_degree(std::uint32_t l) noexcept {
-    return static_cast<std::size_t>(2u) * l + 1u;
+    return l <= kMaxCanonicalShDegree ? static_cast<std::size_t>(l) * 2u + 1u : 0u;
 }
 
 // Total SH coefficients through degree `degree` inclusive: (degree+1)^2.
 constexpr std::size_t sh_total_coefficients(std::uint32_t degree) noexcept {
-    const std::size_t d = degree + 1u;
+    if (degree > kMaxCanonicalShDegree)
+        return 0;
+    const std::size_t d = static_cast<std::size_t>(degree) + 1u;
     return d * d;
 }
 
@@ -90,6 +86,10 @@ struct ShAddress {
     std::uint32_t coef = 0;
 };
 
+constexpr bool operator==(ShAddress left, ShAddress right) noexcept {
+    return left.degree == right.degree && left.coef == right.coef;
+}
+
 // The glTF attribute semantic for one SH coefficient, e.g.
 // sh_attribute({0,0}) == "KHR_gaussian_splatting:SH_DEGREE_0_COEF_0".
 std::string sh_attribute(ShAddress address);
@@ -99,11 +99,10 @@ std::string sh_attribute(ShAddress address);
 // (n must be <= 2l), which a conforming asset never violates but an adversarial one might.
 std::optional<ShAddress> parse_sh_attribute(std::string_view semantic);
 
-// Maps a canonical flat SH coefficient index (coefficient-major over the pyramid) to its address,
-// and back. flat = degree^2 + coef; degree = floor(sqrt(flat)). Computed with an exact integer
-// method (degrees are tiny), never floating-point sqrt, so there is no rounding boundary bug.
-ShAddress sh_flat_to_address(std::size_t flat_coef) noexcept;
-std::size_t sh_address_to_flat(ShAddress address) noexcept;
+// Maps a canonical flat SH coefficient index to its address and back.
+// An index or address above canonical degree 4 returns no value.
+std::optional<ShAddress> sh_flat_to_address(std::size_t flat_coef) noexcept;
+std::optional<std::size_t> sh_address_to_flat(ShAddress address) noexcept;
 
 // The non-SH attribute semantics.
 inline constexpr const char* kAttrPosition = "POSITION";

@@ -4,12 +4,14 @@
  * Do not edit the generated melkor/version.h, and do not hand-copy a version string
  * anywhere else: tools/check_version_sync.py fails the build when a surface drifts.
  *
- * This header is part of the stable C ABI surface. It is valid C and C++, contains no
- * platform types, and has no dependencies.
+ * This header is part of the stable C ABI. It is valid C and C++.
+ * It uses only fixed-width types from the standard library.
  */
 
 #ifndef MELKOR_VERSION_H
 #define MELKOR_VERSION_H
+
+#include <stdint.h>
 
 /* ---------------------------------------------------------------------------
  * Software version (Semantic Versioning 2.0.0).
@@ -28,6 +30,9 @@
 /** Prerelease identifier without the leading '-', e.g. "rc.2". Empty for a stable release. */
 #define MELKOR_VERSION_PRERELEASE "@MELKOR_VERSION_PRERELEASE@"
 
+/** Build metadata without the leading '+'. Empty when the version has no build metadata. */
+#define MELKOR_VERSION_BUILD_METADATA "@MELKOR_VERSION_BUILD_METADATA@"
+
 /** 1 when this build is a development or release-candidate build, 0 for a stable release.
  *
  * Release automation gates on this. A build with a prerelease identifier must never be
@@ -40,8 +45,9 @@
  * Compares the numeric core only. It deliberately ignores the prerelease field,
  * because SemVer prerelease ordering cannot be expressed as a single integer.
  */
-#define MELKOR_VERSION_NUMBER \
-    ((MELKOR_VERSION_MAJOR * 10000) + (MELKOR_VERSION_MINOR * 100) + MELKOR_VERSION_PATCH)
+#define MELKOR_VERSION_NUMBER                                                                    \
+    (((uint64_t)MELKOR_VERSION_MAJOR * 10000U) +                                                  \
+     ((uint64_t)MELKOR_VERSION_MINOR * 100U) + (uint64_t)MELKOR_VERSION_PATCH)
 
 /* ---------------------------------------------------------------------------
  * Compatibility versions.

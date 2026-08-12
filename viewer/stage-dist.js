@@ -2,19 +2,26 @@
 // Stage a deterministic frontend for `tauri build`. Third-party scene captures
 // are developer/test fixtures only and are deliberately excluded; the desktop
 // app embeds project-owned generated demos plus MIT-licensed runtime code.
-import { cp, mkdir, readFile, rename, rm, stat } from "node:fs/promises";
-import { createHash } from "node:crypto";
-import { dirname, join } from "node:path";
+import { cp, lstat, mkdir, readFile, realpath, rename, rm, writeFile } from "node:fs/promises";
+import { createHash, randomUUID } from "node:crypto";
+import { dirname, join, resolve } from "node:path";
 
 const root = import.meta.dir;
+const canonicalRoot = await realpath(root);
 const dist = join(root, "dist");
-const staging = join(root, `.dist-stage-${process.pid}`);
+const staging = join(root, `.dist-stage-${randomUUID()}`);
 const copies = [
   ["../LICENSE", "LICENSE"],
+  ["bootstrap.js", "bootstrap.js"],
   ["index.html", "index.html"],
+  ["local-file-validator.js", "local-file-validator.js"],
+  ["local-file-validator-worker.js", "local-file-validator-worker.js"],
+  ["viewer.css", "viewer.css"],
+  ["viewer.js", "viewer.js"],
   ["THIRD_PARTY_NOTICES.md", "THIRD_PARTY_NOTICES.md"],
   ["RUST_THIRD_PARTY_LICENSES.html", "RUST_THIRD_PARTY_LICENSES.html"],
   ["ASSET_PROVENANCE.md", "ASSET_PROVENANCE.md"],
+  ["src-tauri/icons/32x32.png", "favicon.png"],
   ["vendor/three.module.js", "vendor/three.module.js"],
   ["vendor/three.core.js", "vendor/three.core.js"],
   ["vendor/addons/postprocessing/Pass.js", "vendor/addons/postprocessing/Pass.js"],
@@ -24,10 +31,16 @@ const copies = [
 ];
 const required = [
   "../LICENSE",
+  "bootstrap.js",
   "index.html",
+  "local-file-validator.js",
+  "local-file-validator-worker.js",
+  "viewer.css",
+  "viewer.js",
   "THIRD_PARTY_NOTICES.md",
   "RUST_THIRD_PARTY_LICENSES.html",
   "ASSET_PROVENANCE.md",
+  "src-tauri/icons/32x32.png",
   "vendor/three.module.js",
   "vendor/three.core.js",
   "vendor/addons/postprocessing/Pass.js",
@@ -45,47 +58,114 @@ const expectedHashes = new Map([
 ]);
 
 async function requireFile(relativePath) {
-  const info = await stat(join(root, relativePath));
+  const source = join(root, relativePath);
+  const canonicalSource = await realpath(source);
+  const expectedSource = resolve(canonicalRoot, relativePath);
+  if (canonicalSource !== expectedSource) {
+    throw new Error(`required viewer asset has a symbolic-link path: ${relativePath}`);
+  }
+  const info = await lstat(source);
+  if (info.isSymbolicLink()) {
+    throw new Error(`required viewer asset is a symbolic link: ${relativePath}`);
+  }
   if (!info.isFile() || info.size === 0) {
     throw new Error(`required viewer asset is empty: ${relativePath}`);
   }
 }
 
-for (const item of required) await requireFile(item);
-for (const [relativePath, expected] of expectedHashes) {
-  const bytes = await readFile(join(root, relativePath));
-  const actual = createHash("sha256").update(bytes).digest("hex");
-  if (actual !== expected) {
-    throw new Error(`viewer runtime digest mismatch: ${relativePath}`);
+try {
+  for (const item of required) await requireFile(item);
+  for (const [relativePath, expected] of expectedHashes) {
+    const bytes = await readFile(join(root, relativePath));
+    const actual = createHash("sha256").update(bytes).digest("hex");
+    if (actual !== expected) {
+      throw new Error(`viewer runtime digest mismatch: ${relativePath}`);
+    }
   }
-}
 
-// Validate every generated frame referenced by the manifest. A malformed or
-// partial sequence must fail the build rather than ship a viewer that stalls.
-const manifestPath = "public/splats/4d/wave/manifest.json";
-const manifest = JSON.parse(await readFile(join(root, manifestPath), "utf8"));
-if (!Number.isFinite(manifest.fps) || manifest.fps <= 0 ||
-    !Array.isArray(manifest.frames) || manifest.frames.length === 0) {
-  throw new Error("generated 4D manifest must contain positive fps and frames");
-}
-for (const frame of manifest.frames) {
-  if (typeof frame !== "string" || !/^[A-Za-z0-9._-]+\.ply$/.test(frame)) {
-    throw new Error(`unsafe generated frame name: ${String(frame)}`);
+  // Validate each generated frame. Reject a partial sequence.
+  const manifestPath = "public/splats/4d/wave/manifest.json";
+  const manifest = JSON.parse(await readFile(join(root, manifestPath), "utf8"));
+  if (!Number.isFinite(manifest.fps) || manifest.fps <= 0 ||
+      manifest.fps > 240 || !Array.isArray(manifest.frames) ||
+      manifest.frames.length === 0 || manifest.frames.length > 10_000) {
+    throw new Error("generated 4D manifest has an invalid frame rate or frame list");
   }
-  await requireFile(`public/splats/4d/wave/${frame}`);
-  copies.push([
-    `public/splats/4d/wave/${frame}`,
-    `public/splats/4d/wave/${frame}`,
-  ]);
-}
+  const frameNames = new Set();
+  for (const frame of manifest.frames) {
+    if (typeof frame !== "string" || !/^[A-Za-z0-9._-]+\.ply$/.test(frame)) {
+      throw new Error(`unsafe generated frame name: ${String(frame)}`);
+    }
+    const portableName = frame.toLowerCase();
+    if (frameNames.has(portableName)) {
+      throw new Error(`duplicate generated frame name: ${frame}`);
+    }
+    frameNames.add(portableName);
+    await requireFile(`public/splats/4d/wave/${frame}`);
+    const frameInfo = await lstat(join(root, `public/splats/4d/wave/${frame}`));
+    if (frameInfo.size > 256 * 1024 * 1024) {
+      throw new Error(`generated frame exceeds 256 MiB: ${frame}`);
+    }
+    copies.push([
+      `public/splats/4d/wave/${frame}`,
+      `public/splats/4d/wave/${frame}`,
+    ]);
+  }
 
-await rm(staging, { recursive: true, force: true });
-for (const [source, target] of copies) {
-  const destination = join(staging, target);
-  await mkdir(dirname(destination), { recursive: true });
-  await cp(join(root, source), destination);
-  console.log(`staged ${source}`);
+  await rm(staging, { recursive: true, force: true });
+  for (const [source, target] of copies) {
+    const destination = join(staging, target);
+    await mkdir(dirname(destination), { recursive: true });
+    await cp(join(root, source), destination);
+    console.log(`staged ${source}`);
+  }
+  const sceneIndex = {
+    version: 1,
+    scenes: ["wave-static", "wave-4d"],
+  };
+  await writeFile(
+    join(staging, "public/scene-index.json"),
+    JSON.stringify(sceneIndex, null, 2) + "\n",
+    "utf8",
+  );
+  let backup = null;
+  let distInfo = null;
+  try {
+    distInfo = await lstat(dist);
+  } catch (error) {
+    if (!error || typeof error !== "object" || error.code !== "ENOENT") throw error;
+  }
+  if (distInfo) {
+    if (!distInfo.isDirectory() || distInfo.isSymbolicLink()) {
+      throw new Error("dist must be a normal directory");
+    }
+    backup = join(root, `.dist-backup-${randomUUID()}`);
+    await rename(dist, backup);
+  }
+  try {
+    await rename(staging, dist);
+  } catch (error) {
+    if (backup) {
+      try {
+        await rename(backup, dist);
+      } catch (restoreError) {
+        throw new AggregateError(
+          [error, restoreError],
+          `publish failed and the old dist remains at ${backup}`,
+        );
+      }
+    }
+    throw error;
+  }
+  if (backup) {
+    try {
+      await rm(backup, { recursive: true, force: true });
+    } catch (error) {
+      console.warn(`warning: could not remove old dist at ${backup}: ${error.message}`);
+    }
+  }
+  console.log(`dist/ ready at ${dist} (external scene fixtures excluded)`);
+} catch (error) {
+  await rm(staging, { recursive: true, force: true });
+  throw error;
 }
-await rm(dist, { recursive: true, force: true });
-await rename(staging, dist);
-console.log(`dist/ ready at ${dist} (external scene fixtures excluded)`);

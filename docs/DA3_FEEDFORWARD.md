@@ -1,9 +1,9 @@
 # Depth Anything 3 integration
 
 Melkor's DA3 bridge converts one image or one jointly inferred multi-view scene
-to a standard 3DGS-layout PLY. This document describes the tested integration
-as of **2026-07-10**. The upstream project remains the authority for model
-architecture and benchmark results.
+to `ply:da3-gaussian-v1`. This document describes the tested integration as of
+**2026-08-12**. The upstream project remains the authority for model architecture
+and benchmark results.
 
 The tested path is:
 
@@ -38,8 +38,9 @@ The installer checks out official Depth Anything 3 commit
 `41736238f5bced4debf3f2a12375d2466874866d`. It installs the `gs` extra. Then,
 it downloads the selected Hugging Face snapshot at a reviewed immutable
 revision.
-Downloads are staged, checked for configuration and weight files, marked with
-their revision, and moved into place atomically.
+Downloads are staged and checked for regular configuration and weight files.
+The installer rejects symbolic links and special files.
+It writes the revision marker before it moves the snapshot into place atomically.
 
 The Python dependency set does not have a complete hash lock.
 The required flag acknowledges this remaining supply-chain risk.
@@ -58,7 +59,8 @@ cards declare CC-BY-NC-4.0 terms:
 Review the model card before accepting. Melkor's MIT license does not replace
 checkpoint terms.
 
-The setup writes two wrappers at the repository root:
+The setup writes two wrappers at the repository root.
+It does not replace a wrapper that has different content.
 
 - `./da3-infer` — run the reconstruction bridge in its pinned venv
 - `./da3-python` — run arbitrary Python in that venv
@@ -75,14 +77,35 @@ The setup writes two wrappers at the repository root:
   --input images/ \
   --output scene.ply
 
-# Compress and inspect
-./build/dev/melkor scene.ply scene.spz
+# Inspect after you replace both semantic placeholders with verified values
+SOURCE_UNIT_TO_METER='<positive meters per DA3 unit>'
+SOURCE_COLOR_SPACE='<srgb_rec709_display or lin_rec709_display>'
+./build/dev/melkor inspect scene.ply \
+  --input-profile ply:da3-gaussian-v1 \
+  --source-unit-to-meter "$SOURCE_UNIT_TO_METER" \
+  --source-color-space "$SOURCE_COLOR_SPACE"
 cd viewer && bun run serve
 ```
+
+The pinned model uses an OpenCV-style RDF camera frame for its normalized world.
+The model does not guarantee a physical unit or one color transfer function.
+Measure the unit scale and verify the color space before native conversion.
 
 Input directory discovery is non-recursive and accepts JPEG, PNG, WebP, TIFF,
 and BMP files. Lexicographic filename order becomes view order, so use
 zero-padded names for video frames.
+
+The bridge applies these input limits before model inference:
+
+- 256 views
+- 512 MiB for each compressed image file
+- 8 GiB for all compressed image files
+- 100 million pixels in each image
+- 1 billion pixels in all images
+
+The bridge copies each input to a private directory and verifies the copied container.
+The model reads only these private copies.
+Use DA3-Streaming when a sequence exceeds the view limit.
 
 ## Tested reconstruction checkpoints
 
@@ -102,8 +125,8 @@ them rather than fabricating geometry.
 For SMALL, BASE, and LARGE, the output is a camera-aware colored point-splat
 approximation derived from depth, intrinsics, extrinsics, confidence, and sky
 masks. It is not equivalent to the learned 3DGS head. GIANT and NESTED preserve
-the official predicted means, scale, rotation, DC spherical harmonics, and
-opacity.
+the official predicted means, scale, rotation, degree 0-4 spherical
+harmonics, and opacity.
 
 ## CLI reference
 
@@ -111,7 +134,7 @@ opacity.
 --input, -i PATH                 image or directory (required)
 --output, -o FILE                .ply, .npz, .json, or .glb (required)
 --model, -m NAME                 checkpoint; default DA3-BASE
---model-dir DIR                  verified local snapshots
+--model-dir DIR                  revision-marked local snapshots
 --device {cuda,cpu}              execution device; default cuda
 --scale FLOAT                    base point-splat scale; default 0.01
 --subsample INT                  keep each Nth pixel in both axes
@@ -120,20 +143,41 @@ opacity.
 --max-depth FLOAT                maximum accepted camera-Z depth; default 100
 --fp32                           diagnostic/full-precision execution
 --allow-fallback-depth           explicit preview-only intensity fallback
---verbose, -v                    extra diagnostics
+--allow-lossy-preview            permit GLB point-cloud output
+--force                          replace an existing regular output file
 ```
 
 Numeric arguments are validated for finite values and coherent ranges. `.spz`
 is deliberately not accepted directly. Write PLY, then use the canonical native
 encoder:
 
+The adapter declares the DA3 profile and its RDF frame.
+First verify the unit, color space, and antialiasing state.
+The DA3 PLY header does not declare these values.
+
+Use this command after you replace the semantic placeholders:
+
 ```bash
-./build/dev/melkor scene.ply scene.spz
+./build/dev/melkor convert scene.ply scene.spz \
+  --input-profile ply:da3-gaussian-v1 \
+  --source-unit-to-meter "$SOURCE_UNIT_TO_METER" \
+  --source-color-space "$SOURCE_COLOR_SPACE" \
+  --output-antialiased false \
+  --allow-loss LOSS_COLOR_SPACE_METADATA_DROPPED \
+  --allow-loss LOSS_COORDINATE_METADATA_DROPPED \
+  --allow-loss LOSS_SH_DEGREE_TRUNCATED
 ```
 
-JSON is a bounded debugging preview, NPZ preserves arrays for Python analysis,
-and GLB is a colored point-cloud visualization rather than a Gaussian-splat
-container. PLY and SPZ are the tested reconstruction interchange formats.
+The last approval applies when the learned Gaussian head produces degree-4 SH data.
+SPZ v1 through v3 and SparkJS support at most degree 3.
+The native converter reports the truncation before it writes the output.
+The viewer cannot load the degree-4 DA3 PLY directly.
+
+JSON is a bounded debugging preview.
+NPZ and PLY preserve supported model-direct SH data.
+GLB is a colored point-cloud visualization that drops Gaussian attributes.
+It requires `--allow-lossy-preview`.
+SPZ conversion occurs only through the native CLI.
 
 ## Geometry and filtering contract
 
@@ -149,10 +193,12 @@ Normalizing that vector would incorrectly treat camera-Z depth as Euclidean ray
 distance. Missing, malformed, singular, or non-finite camera matrices abort the
 reconstruction unless the user explicitly selected preview fallback.
 
-The learned Gaussian path follows the official exporter by trimming image
-borders and removing each view's farthest 10% of depths. The depth-derived path
-also rejects invalid depth, sky, and low-confidence pixels. `--subsample N`
-uses 2-D pixel-grid subsampling on both paths, retaining roughly `1/N²` pixels.
+The learned Gaussian path uses the upstream border trim.
+It keeps valid far-depth Gaussians and complete SH data.
+These choices avoid the upstream PLY exporter's lossy defaults.
+The depth-derived path rejects invalid depth, sky, and low-confidence pixels.
+`--subsample N` uses 2-D pixel-grid subsampling on both paths.
+It retains approximately `1/N²` pixels.
 
 ## Multi-GPU and long sequences
 
@@ -196,11 +242,12 @@ Use the CUDA bridge or a reviewed external tool.
 
 The repository's synthetic DA3 tests cover:
 
-- learned Gaussian extraction and official border/depth pruning
+- learned Gaussian extraction, border trimming, and far-depth preservation
 - camera translation and camera-Z unprojection
 - malformed-camera fail-closed behavior
 - confidence filtering and consistent 2-D subsampling
-- PLY field conventions for scale, opacity, rotation, and SH DC color.
+- PLY field conventions for scale, opacity, rotation, and SH data through degree 4
+- Rejection of non-finite values, invalid scales, invalid opacity, and zero quaternions
 
 Run them without a checkpoint download:
 

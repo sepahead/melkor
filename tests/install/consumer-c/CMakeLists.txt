@@ -1,18 +1,25 @@
-# A standalone C consumer of the installed Melkor SDK.
-#
-# This project is deliberately OUTSIDE the main build. It is configured against an installed
-# prefix, exactly as a real downstream user would, so it proves the thing P0-04 is about: that
-# `cmake --install` produces a package another project can actually find and link. A test that
-# builds inside the main tree would prove nothing, because it would see the source headers
-# directly.
+# Test the installed C ABI from a standalone C project.
+# The project can see only the installed prefix.
 
 cmake_minimum_required(VERSION 3.24)
 project(melkor_consumer_c LANGUAGES C)
 
-find_package(Melkor 2 CONFIG REQUIRED)
+if(DEFINED MELKOR_CONSUMER_FIND_VERSION)
+    find_package(Melkor ${MELKOR_CONSUMER_FIND_VERSION} CONFIG REQUIRED)
+else()
+    find_package(Melkor CONFIG REQUIRED)
+endif()
 
 add_executable(consumer_c main.c)
 target_link_libraries(consumer_c PRIVATE Melkor::melkor)
+set_target_properties(consumer_c PROPERTIES
+    C_STANDARD 99
+    C_STANDARD_REQUIRED ON
+    C_EXTENSIONS OFF)
+target_compile_options(consumer_c PRIVATE
+    $<$<C_COMPILER_ID:GNU,Clang,AppleClang>:-Wall -Wextra -Wpedantic -Werror>
+    $<$<C_COMPILER_ID:MSVC>:/W4>
+    $<$<C_COMPILER_ID:MSVC>:/WX>)
 
 enable_testing()
 add_test(NAME consumer_c_runs COMMAND consumer_c)

@@ -29,9 +29,9 @@ static void SpzLog(const char *fmt, Args &&...args) {
 #else
 template <class... Args>
 static void SpzLog(const char *fmt, Args &&...args) {
-  printf(fmt, std::forward<Args>(args)...);
-  printf("\n");
-  fflush(stdout);
+  fprintf(stderr, fmt, std::forward<Args>(args)...);
+  fprintf(stderr, "\n");
+  fflush(stderr);
 }
 #endif  // ANDROID
 
@@ -97,7 +97,7 @@ float invSigmoid(float x) {
 }
 
 template <typename T>
-size_t countBytes(std::vector<T> vec) {
+size_t countBytes(const std::vector<T>& vec) {
   return vec.size() * sizeof(vec[0]);
 }
 
@@ -196,7 +196,8 @@ bool decompressGzippedImpl(
       constexpr uint32_t maxPointsToRead = 10000000;
       if (header.magic != PackedGaussiansHeader().magic || header.version < 1 ||
           header.version > 3 || header.numPoints > maxPointsToRead || header.shDegree > 3 ||
-          !validFractionalBits(header.version, header.fractionalBits)) {
+          !validFractionalBits(header.version, header.fractionalBits) ||
+          (header.flags & ~FlagAntialiased) != 0 || header.reserved != 0) {
         break;
       }
       const size_t positionBytes = header.version == 1 ? 6 : 9;
@@ -215,7 +216,7 @@ bool decompressGzippedImpl(
       break;
     }
     if (res == Z_STREAM_END) {
-      success = headerChecked && out->size() == expectedBytes;
+      success = headerChecked && out->size() == expectedBytes && stream.avail_in == 0;
       break;
     }
   }
@@ -653,6 +654,10 @@ PackedGaussians deserializePackedGaussians(std::istream &in) {
   if (!validFractionalBits(header.version, header.fractionalBits)) {
     SpzLog("[SPZ ERROR] deserializePackedGaussians: Unsupported fractional bit count: %d",
            header.fractionalBits);
+    return {};
+  }
+  if ((header.flags & ~FlagAntialiased) != 0 || header.reserved != 0) {
+    SpzLog("[SPZ ERROR] deserializePackedGaussians: Unsupported flags or reserved byte");
     return {};
   }
   const int32_t numPoints = header.numPoints;

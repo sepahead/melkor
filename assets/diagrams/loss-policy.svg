@@ -1,6 +1,6 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 960 540" role="img" aria-labelledby="t d">
-  <title id="t">Melkor conversion loss policy</title>
-  <desc id="d">The four loss severities and what each one does to a conversion: info never blocks, warning reports but continues, severe blocks unless its exact code is approved with allow-loss, and fatal always blocks. Twenty stable loss codes form the machine contract.</desc>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 960 650" role="img" aria-labelledby="loss-title loss-description">
+  <title id="loss-title">Melkor conversion loss policy</title>
+  <desc id="loss-description">Four loss severities control conversion. Severe loss requires exact approval. Fatal loss stops with exit code 4. The registry has 31 stable codes.</desc>
   <style>
     text { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; fill: #c9d1d9; }
     .h1 { font-size: 14px; fill: #e6edf3; letter-spacing: 2.5px; }
@@ -8,13 +8,12 @@
     .sev { font-size: 13px; letter-spacing: 2px; }
     .node { font-size: 12px; fill: #e6edf3; }
     .sub { font-size: 10px; fill: #8b949e; }
-    .code { font-size: 10px; fill: #c9d1d9; }
+    .code { font-size: 8.5px; fill: #c9d1d9; }
   </style>
 
-  <rect x="0.5" y="0.5" width="959" height="539" rx="16" fill="#0d1117" stroke="#2b333d"/>
-
+  <rect x="0.5" y="0.5" width="959" height="649" rx="16" fill="#0d1117" stroke="#2b333d"/>
   <text class="h1" x="40" y="44">MELKOR &#183; CONVERSION LOSS POLICY</text>
-  <text class="h2" x="40" y="64">EVERY CONVERSION EMITS A LOSS REPORT, EVEN A LOSSLESS ONE</text>
+  <text class="h2" x="40" y="64">EACH SUCCESS INCLUDES A COMPLETE LOSS REPORT</text>
   <circle cx="906" cy="40" r="5" fill="#fb923c"/>
   <circle cx="888" cy="40" r="5" fill="#34d399"/>
   <circle cx="870" cy="40" r="5" fill="#a78bfa"/>
@@ -23,62 +22,73 @@
     <rect x="40" y="96" width="205" height="150" rx="10" fill="#161b22" stroke="#34d399" stroke-width="1.25"/>
     <rect x="40" y="96" width="205" height="6" rx="3" fill="#34d399"/>
     <text class="sev" x="64" y="132" fill="#34d399">INFO</text>
-    <text class="sub" x="64" y="158">recorded in the report</text>
-    <text class="sub" x="64" y="176">never blocks</text>
+    <text class="sub" x="64" y="158">records representation change</text>
+    <text class="sub" x="64" y="176">does not block</text>
     <text class="node" x="64" y="222">continue</text>
   </g>
   <g>
     <rect x="265" y="96" width="205" height="150" rx="10" fill="#161b22" stroke="#fbbf24" stroke-width="1.25"/>
     <rect x="265" y="96" width="205" height="6" rx="3" fill="#fbbf24"/>
     <text class="sev" x="289" y="132" fill="#fbbf24">WARNING</text>
-    <text class="sub" x="289" y="158">surfaced to the user</text>
-    <text class="sub" x="289" y="176">does not block by default</text>
+    <text class="sub" x="289" y="158">records bounded quality loss</text>
+    <text class="sub" x="289" y="176">does not block</text>
     <text class="node" x="289" y="222">continue</text>
   </g>
   <g>
     <rect x="490" y="96" width="205" height="150" rx="10" fill="#161b22" stroke="#fb923c" stroke-width="1.25"/>
     <rect x="490" y="96" width="205" height="6" rx="3" fill="#fb923c"/>
     <text class="sev" x="514" y="132" fill="#fb923c">SEVERE</text>
-    <text class="sub" x="514" y="158">blocks the conversion</text>
-    <text class="sub" x="514" y="176">unless the exact code is</text>
-    <text class="sub" x="514" y="192">approved: --allow-loss CODE</text>
-    <text class="node" x="514" y="222">gate</text>
+    <text class="sub" x="514" y="158">blocks by default</text>
+    <text class="sub" x="514" y="176">requires the exact code</text>
+    <text class="sub" x="514" y="194">--allow-loss LOSS_...</text>
+    <text class="node" x="514" y="222">approve or stop</text>
   </g>
   <g>
     <rect x="715" y="96" width="205" height="150" rx="10" fill="#161b22" stroke="#ef4444" stroke-width="1.25"/>
     <rect x="715" y="96" width="205" height="6" rx="3" fill="#ef4444"/>
     <text class="sev" x="739" y="132" fill="#ef4444">FATAL</text>
     <text class="sub" x="739" y="158">always blocks</text>
-    <text class="sub" x="739" y="176">cannot be approved</text>
-    <text class="node" x="739" y="222">stop &#183; exit 3</text>
+    <text class="sub" x="739" y="176">cannot receive approval</text>
+    <text class="node" x="739" y="222">stop &#183; exit 4</text>
   </g>
 
   <g>
-    <rect x="40" y="274" width="880" height="216" rx="12" fill="#10151b" stroke="#2b333d"/>
-    <text class="h2" x="64" y="304">20 STABLE LOSS CODES &#183; THE MACHINE CONTRACT, NEVER RECYCLED</text>
+    <rect x="40" y="274" width="880" height="324" rx="12" fill="#10151b" stroke="#2b333d"/>
+    <text class="h2" x="64" y="304">31 STABLE LOSS CODES &#183; MACHINE IDENTIFIERS ARE NEVER RECYCLED</text>
     <g class="code">
-      <text x="64"  y="334">SH_DEGREE_TRUNCATED</text>
-      <text x="360" y="334">SH_COEFFICIENTS_DROPPED</text>
-      <text x="656" y="334">SH_ROTATION_NOT_APPLIED</text>
-      <text x="64"  y="358">SCENE_GRAPH_FLATTENED</text>
-      <text x="360" y="358">NODE_NAME_DROPPED</text>
-      <text x="656" y="358">INSTANCE_EXPANDED</text>
-      <text x="64"  y="382">MATERIAL_APPROXIMATED</text>
-      <text x="360" y="382">TEXTURE_BAKED</text>
-      <text x="656" y="382">ANTIALIASING_METADATA_DROPPED</text>
-      <text x="64"  y="406">COLOR_SPACE_ASSUMED</text>
-      <text x="360" y="406">COORDINATE_METADATA_DROPPED</text>
-      <text x="656" y="406">PROVENANCE_DROPPED</text>
-      <text x="64"  y="430">QUANTIZATION_APPLIED</text>
-      <text x="360" y="430">OPACITY_CLAMPED</text>
-      <text x="656" y="430">SCALE_CLAMPED</text>
-      <text x="64"  y="454">NONFINITE_REPAIRED</text>
-      <text x="360" y="454">INVALID_SPLAT_DROPPED</text>
-      <text x="656" y="454">UNKNOWN_PROPERTY_DROPPED</text>
-      <text x="64"  y="478">EXTENSION_DROPPED</text>
-      <text x="360" y="478">PRECISION_REDUCED</text>
+      <text x="64" y="334">SH_DEGREE_TRUNCATED</text>
+      <text x="350" y="334">SH_COEFFICIENTS_DROPPED</text>
+      <text x="636" y="334">SH_COEFFICIENTS_CLAMPED</text>
+      <text x="64" y="356">SH_ROTATION_NOT_APPLIED</text>
+      <text x="350" y="356">SCENE_GRAPH_FLATTENED</text>
+      <text x="636" y="356">NODE_NAME_DROPPED</text>
+      <text x="64" y="378">INSTANCE_EXPANDED</text>
+      <text x="350" y="378">MATERIAL_APPROXIMATED</text>
+      <text x="636" y="378">TEXTURE_BAKED</text>
+      <text x="64" y="400">ANTIALIASING_METADATA_DROPPED</text>
+      <text x="350" y="400">COLOR_SPACE_ASSUMED</text>
+      <text x="636" y="400">COLOR_SPACES_CONFLICT</text>
+      <text x="64" y="422">COLOR_CLAMPED</text>
+      <text x="350" y="422">COLOR_SPACE_METADATA_DROPPED</text>
+      <text x="636" y="422">COORDINATE_METADATA_DROPPED</text>
+      <text x="64" y="444">PROVENANCE_DROPPED</text>
+      <text x="350" y="444">ATTRIBUTION_DROPPED</text>
+      <text x="636" y="444">QUANTIZATION_APPLIED</text>
+      <text x="64" y="466">OPACITY_CLAMPED</text>
+      <text x="350" y="466">SCALE_CLAMPED</text>
+      <text x="636" y="466">NONFINITE_REPAIRED</text>
+      <text x="64" y="488">INVALID_SPLAT_DROPPED</text>
+      <text x="350" y="488">UNKNOWN_PROPERTY_DROPPED</text>
+      <text x="636" y="488">METADATA_DROPPED</text>
+      <text x="64" y="510">VERTEX_NORMALS_DROPPED</text>
+      <text x="350" y="510">QUATERNION_NORMALIZED</text>
+      <text x="636" y="510">EXTENSION_DROPPED</text>
+      <text x="64" y="532">EXTENSION_DECLARATION_DROPPED</text>
+      <text x="350" y="532">GLTF_CONTENT_DROPPED</text>
+      <text x="636" y="532">PRECISION_REDUCED</text>
+      <text x="64" y="554">GAUSSIAN_ATTRIBUTES_GENERATED</text>
     </g>
   </g>
 
-  <text class="sub" x="40" y="522">codes shown without their LOSS_ prefix &#183; source: include/melkor/format/loss.hpp &#183; report schema v1</text>
+  <text class="sub" x="40" y="628">codes omit the LOSS_ prefix &#183; source: include/melkor/format/loss.hpp &#183; schema: loss-report-v1</text>
 </svg>

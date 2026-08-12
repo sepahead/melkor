@@ -10,11 +10,14 @@ Use ``python3 tools/check_claims.py [FILE ...]``.
 from __future__ import annotations
 
 import argparse
+import os
 import re
+import stat
 import sys
 from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
+MAX_PUBLIC_TEXT_BYTES = 4 * 1024 * 1024
 
 # These root files define the public project contract.
 LINTED_FILES = [
@@ -89,6 +92,34 @@ def linted_paths() -> list[Path]:
     return result
 
 
+def read_public_text(path: Path) -> str:
+    """Read one bounded regular UTF-8 public text file."""
+    if path.is_symlink():
+        raise ValueError(f"public text input must not be a symbolic link: {path}")
+    flags = os.O_RDONLY | getattr(os, "O_BINARY", 0) | getattr(os, "O_CLOEXEC", 0)
+    flags |= getattr(os, "O_NOFOLLOW", 0)
+    descriptor = os.open(path, flags)
+    with os.fdopen(descriptor, "rb") as handle:
+        initial = os.fstat(handle.fileno())
+        if not stat.S_ISREG(initial.st_mode) or initial.st_size > MAX_PUBLIC_TEXT_BYTES:
+            raise ValueError(f"public text input must be a bounded regular file: {path}")
+        raw = handle.read(MAX_PUBLIC_TEXT_BYTES + 1)
+        final = os.fstat(handle.fileno())
+        if (
+            len(raw) != initial.st_size
+            or final.st_dev != initial.st_dev
+            or final.st_ino != initial.st_ino
+            or final.st_size != initial.st_size
+            or final.st_mtime_ns != initial.st_mtime_ns
+            or final.st_ctime_ns != initial.st_ctime_ns
+        ):
+            raise ValueError(f"public text input changed while it was read: {path}")
+    try:
+        return raw.decode("utf-8")
+    except UnicodeDecodeError as error:
+        raise ValueError(f"public text input is not UTF-8: {path}") from error
+
+
 def line_is_allowed(line: str, match_start: int | None = None) -> bool:
     lower = line.lower()
     if CLAIM_OK.search(line):
@@ -102,7 +133,7 @@ def line_is_allowed(line: str, match_start: int | None = None) -> bool:
 
 def scan(path: Path) -> list[tuple[int, str, str]]:
     findings: list[tuple[int, str, str]] = []
-    for lineno, line in enumerate(path.read_text(encoding="utf-8").splitlines(), start=1):
+    for lineno, line in enumerate(read_public_text(path).splitlines(), start=1):
         for pattern in BANNED:
             m = re.search(pattern, line, re.IGNORECASE)
             if m and not line_is_allowed(line, m.start()):
@@ -119,21 +150,31 @@ def main() -> int:
     paths = []
     for path in args.files:
         candidate = path if path.is_absolute() else REPO_ROOT / path
+        if candidate.is_symlink():
+            parser.error(f"file must not be a symbolic link: {path}")
         if not candidate.is_file():
             parser.error(f"file does not exist: {path}")
-        paths.append(candidate.resolve())
+        paths.append(candidate.absolute())
     if not paths:
         paths = linted_paths()
 
     if args.list:
         print("Claim lint covers:")
         for p in paths:
-            print(f"  {p.relative_to(REPO_ROOT)}")
+            try:
+                display_path = p.relative_to(REPO_ROOT)
+            except ValueError:
+                display_path = p
+            print(f"  {display_path}")
         return 0
 
     total = 0
     for path in paths:
-        findings = scan(path)
+        try:
+            findings = scan(path)
+        except (OSError, ValueError) as error:
+            print(f"error: {error}", file=sys.stderr)
+            return 2
         for lineno, phrase, line in findings:
             total += 1
             try:

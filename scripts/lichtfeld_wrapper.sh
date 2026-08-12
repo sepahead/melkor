@@ -3,7 +3,14 @@ set -euo pipefail
 
 # Run a user-supplied LichtFeld-Studio binary without inventing upstream flags.
 
-VERSION="2.0.0"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+REPO_DIR="$(dirname "$SCRIPT_DIR")"
+[[ -f "$REPO_DIR/VERSION" ]] || { printf '[ERROR] VERSION is missing\n' >&2; exit 2; }
+VERSION="$(<"$REPO_DIR/VERSION")"
+[[ "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?(\+[0-9A-Za-z.-]+)?$ ]] || {
+    printf '[ERROR] VERSION is invalid\n' >&2
+    exit 2
+}
 PROJECT_DIR=""
 IMAGES_DIR=""
 OUTPUT_DIR="output"
@@ -11,12 +18,10 @@ GPU_ID=""
 LICHTFELD_BIN="${MELKOR_LICHTFELD_BIN:-}"
 DRY_RUN=false
 VERBOSE=false
-FORCE=false
 EXTRA_ARGS=()
 HAS_EXTRA_ARGS=false
 TEMP_DIR=""
 TEMP_OUTPUT_DIR=""
-BACKUP_DIR=""
 
 log() { printf '[INFO] %s\n' "$*" >&2; }
 fail() { printf '[ERROR] %s\n' "$*" >&2; exit 2; }
@@ -26,12 +31,6 @@ cleanup() {
     trap - EXIT
     if [[ -n "$TEMP_DIR" && -d "$TEMP_DIR" ]]; then
         rm -rf -- "$TEMP_DIR"
-    fi
-    if [[ -n "$BACKUP_DIR" && -d "$BACKUP_DIR" ]]; then
-        if [[ ! -e "$OUTPUT_DIR" && -e "$BACKUP_DIR/original" ]]; then
-            mv -- "$BACKUP_DIR/original" "$OUTPUT_DIR"
-        fi
-        rm -rf -- "$BACKUP_DIR"
     fi
     if [[ -n "$TEMP_OUTPUT_DIR" && -d "$TEMP_OUTPUT_DIR" ]]; then
         rm -rf -- "$TEMP_OUTPUT_DIR"
@@ -53,7 +52,6 @@ Options:
   -o, --output PATH     Use PATH as the output directory (default: output)
   --gpu ID              Set CUDA_VISIBLE_DEVICES for this process
   --lichtfeld PATH      Use this LichtFeld-Studio executable
-  --force               Permit use of an existing output directory
   --dry-run             Print the command without changing files
   --verbose, -v         Print the selected paths
   --help, -h            Show this help
@@ -92,8 +90,7 @@ while [[ $# -gt 0 ]]; do
             shift 2
             ;;
         --force)
-            FORCE=true
-            shift
+            fail "--force is retired because directories cannot be replaced atomically"
             ;;
         --dry-run)
             DRY_RUN=true
@@ -132,6 +129,16 @@ while [[ $# -gt 0 ]]; do
     esac
 done
 
+if [[ "$HAS_EXTRA_ARGS" == true ]]; then
+    for argument in "${EXTRA_ARGS[@]}"; do
+        case "$argument" in
+            -o|-o?*|--output|--output=*)
+                fail "Extra arguments must not replace the staged output path"
+                ;;
+        esac
+    done
+fi
+
 [[ -n "$PROJECT_DIR" ]] || fail "Missing COLMAP_PROJECT"
 [[ -d "$PROJECT_DIR" ]] || fail "COLMAP project does not exist: $PROJECT_DIR"
 [[ -z "$GPU_ID" || "$GPU_ID" =~ ^[0-9]+$ ]] || fail "GPU ID must be a nonnegative integer"
@@ -166,8 +173,48 @@ fi
     fail "LichtFeld-Studio is unavailable. Set MELKOR_LICHTFELD_BIN or use --lichtfeld PATH."
 LICHTFELD_BIN="$(cd "$(dirname "$LICHTFELD_BIN")" && pwd)/$(basename "$LICHTFELD_BIN")"
 
-if [[ -e "$OUTPUT_DIR" && "$FORCE" == false ]]; then
-    fail "Output directory already exists. Use --force to permit its use: $OUTPUT_DIR"
+output_parent="$(dirname "$OUTPUT_DIR")"
+output_name="$(basename "$OUTPUT_DIR")"
+[[ "$output_name" != "." && "$output_name" != ".." && "$output_name" != "/" ]] || \
+    fail "Invalid output directory name"
+if [[ "$DRY_RUN" == true ]]; then
+    [[ "$output_parent" == /* ]] || output_parent="$PWD/$output_parent"
+else
+    mkdir -p "$output_parent"
+    output_parent="$(cd "$output_parent" && pwd)"
+fi
+OUTPUT_DIR="$output_parent/$output_name"
+
+contains_path() {
+    local container="$1"
+    local item="$2"
+    [[ "$item" == "$container" || "$item" == "$container/"* ]]
+}
+protected_paths=("$REPO_DIR" "$PROJECT_DIR" "$MODEL_DIR" "$PROJECT_DIR/images" "$PWD")
+[[ -n "${HOME:-}" ]] && protected_paths+=("$HOME")
+for protected_path in "${protected_paths[@]}"; do
+    if contains_path "$OUTPUT_DIR" "$protected_path"; then
+        fail "The output directory cannot contain a protected project path: $OUTPUT_DIR"
+    fi
+done
+if contains_path "$PROJECT_DIR" "$OUTPUT_DIR"; then
+    fail "The output directory must stay outside the COLMAP project"
+fi
+if [[ -n "$IMAGES_DIR" ]] && contains_path "$OUTPUT_DIR" "$IMAGES_DIR"; then
+    fail "The output directory cannot contain the image directory: $OUTPUT_DIR"
+fi
+if [[ -n "$IMAGES_DIR" ]] && contains_path "$IMAGES_DIR" "$OUTPUT_DIR"; then
+    fail "The output directory must stay outside the image directory"
+fi
+
+if [[ -L "$OUTPUT_DIR" ]]; then
+    fail "The output path is a symbolic link: $OUTPUT_DIR"
+fi
+if [[ -e "$OUTPUT_DIR" && ! -d "$OUTPUT_DIR" ]]; then
+    fail "The output path is not a directory: $OUTPUT_DIR"
+fi
+if [[ -e "$OUTPUT_DIR" ]]; then
+    fail "Output directory already exists: $OUTPUT_DIR"
 fi
 
 WORK_DIR="$PROJECT_DIR"
@@ -205,23 +252,18 @@ fi
 
 if [[ "$DRY_RUN" == true ]]; then
     command=("$LICHTFELD_BIN" -d "$WORK_DIR" -o "<temporary-output-directory>")
-    if [[ "$HAS_EXTRA_ARGS" == true ]]; then
-        command+=("${EXTRA_ARGS[@]}")
-    fi
     printf 'DRY RUN:'
     if [[ -n "$GPU_ID" ]]; then
         printf ' CUDA_VISIBLE_DEVICES=%q' "$GPU_ID"
     fi
     printf ' %q' "${command[@]}"
+    if [[ "$HAS_EXTRA_ARGS" == true ]]; then
+        printf ' -- <%d upstream arguments withheld>' "${#EXTRA_ARGS[@]}"
+    fi
     printf '\n'
     exit 0
 fi
 
-output_parent="$(dirname "$OUTPUT_DIR")"
-mkdir -p "$output_parent"
-output_parent="$(cd "$output_parent" && pwd)"
-output_name="$(basename "$OUTPUT_DIR")"
-OUTPUT_DIR="$output_parent/$output_name"
 TEMP_OUTPUT_DIR="$(mktemp -d "$output_parent/.melkor-lichtfeld.XXXXXX")"
 command=("$LICHTFELD_BIN" -d "$WORK_DIR" -o "$TEMP_OUTPUT_DIR")
 if [[ "$HAS_EXTRA_ARGS" == true ]]; then
@@ -231,16 +273,16 @@ if [[ -n "$GPU_ID" ]]; then
     export CUDA_VISIBLE_DEVICES="$GPU_ID"
 fi
 "${command[@]}"
-find "$TEMP_OUTPUT_DIR" -mindepth 1 -print -quit | grep -q . || \
+[[ -n "$(find "$TEMP_OUTPUT_DIR" -mindepth 1 -print -quit)" ]] || \
     fail "LichtFeld-Studio did not create output files"
-if [[ -e "$OUTPUT_DIR" ]]; then
-    BACKUP_DIR="$(mktemp -d "$output_parent/.melkor-lichtfeld-backup.XXXXXX")"
-    mv -- "$OUTPUT_DIR" "$BACKUP_DIR/original"
+[[ -z "$(find "$TEMP_OUTPUT_DIR" \( -type l -o \( ! -type d ! -type f \) \) -print -quit)" ]] || \
+    fail "LichtFeld-Studio output contains a symbolic link or special file"
+if [[ -L "$OUTPUT_DIR" ]] || [[ -e "$OUTPUT_DIR" && ! -d "$OUTPUT_DIR" ]]; then
+    fail "The output path changed to an unsupported object during processing"
 fi
-mv -- "$TEMP_OUTPUT_DIR" "$OUTPUT_DIR"
+[[ ! -e "$OUTPUT_DIR" && ! -L "$OUTPUT_DIR" ]] || \
+    fail "Output directory appeared during processing: $OUTPUT_DIR"
+python3 "$REPO_DIR/tools/atomic_publish.py" "$TEMP_OUTPUT_DIR" "$OUTPUT_DIR" || \
+    fail "The output directory could not be published without replacement"
 TEMP_OUTPUT_DIR=""
-if [[ -n "$BACKUP_DIR" ]]; then
-    rm -rf -- "$BACKUP_DIR"
-    BACKUP_DIR=""
-fi
 log "LichtFeld-Studio completed: $OUTPUT_DIR"

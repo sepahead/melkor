@@ -1,4 +1,8 @@
-# Melkor v2.0.0 — Engineering Handoff
+# Historical Melkor v2.0.0 engineering handoff
+
+> This file records the repository state on 2026-07-16.
+> It is not the current plan or capability statement.
+> Use [`production-blockers.md`](production-blockers.md) and [`v2-progress.md`](v2-progress.md) for the current state.
 
 **As of:** 2026-07-16 · **A1 implementation through:** `32cd43f` on `main` · **CI:** exact-SHA
 green in run `29452688699` (`CI Gate` job `87481460909`). Confirm the exact current HEAD before
@@ -91,11 +95,11 @@ CI jobs (in `.github/workflows/ci.yml`): `build-macos`, `build-linux`, `build-li
   assumes near-unit), `covariance` (Σ=R diag(s²)Rᵀ, affine transform, Jacobi eigensolver,
   `rotation_from_linear` polar decomposition), `sh_rotation` (real-SH rotation degrees 0–3),
   `color`, `coordinate_frame`. This is the single semantic authority — never re-derive transforms.
-- **Scene model** (`src/core/scene.cpp`): `SplatData` is the validated canonical public and format
+- **Scene model** (`src/core/scene.cpp`): `SplatData` is the validated canonical internal and format
   representation —
   **linear** scale (strictly positive), **linear** opacity `[0,1]`, unit quaternion `xyzw`, SH as
   splat-major blocks `data[s*(coeffs*3)+k*3+c]`. Built only through `SplatData::create` (validates
-  every domain). `EditTransaction` is the only bulk-mutation workspace and revalidates atomically.
+  every domain). The model is immutable. Call `SplatData::create` to build a replacement value.
   The historical training-domain model (LOG scale, LOGIT opacity, WXYZ rotation) is excluded from
   the installed SDK and remains only inside explicitly deferred backend/densifier/mesh-init code.
 - **Format layer** (`src/formats/`): loss report + policy (`loss.cpp`, severities info/warning/
@@ -121,7 +125,7 @@ CI jobs (in `.github/workflows/ci.yml`): `build-macos`, `build-linux`, `build-li
 - **Two adversarial reviews** (glTF: 19 findings fixed; shipping surface: 18 findings, 13 fixed) —
   the whole codebase has now been reviewed across ~20 lenses.
 - **CI repaired** (was red on 4 jobs); the fuzz corpus is tracked and fail-closed.
-- **A1 / P0-06 scene migration completed at finding level:** validated edit transactions and
+- **A1 / P0-06 scene migration completed at finding level:** immutable validated scene values and
   reproducible provenance (`86ee365`); canonical inspection (`3026dcb`); PLY/SPZ/legacy mesh-GLB
   and positional CLI on `SplatData` with one-shot oracle domain conversions and round-trip tests
   (`025f51b`); curated installed SDK with no legacy mutable model (`32cd43f`). CPU, Metal, and full
@@ -139,7 +143,8 @@ CI jobs (in `.github/workflows/ci.yml`): `build-macos`, `build-linux`, `build-li
 ### A. Implementable now (no external resources) — do these first
 
 **A1 — P0-06 scene migration: COMPLETED at finding level (`86ee365`..`32cd43f`).**
-- `SplatData` is now the installed/model/inspection/PLY/SPZ/legacy-mesh-GLB/CLI representation.
+- `SplatData` is now the internal model for inspection, PLY, SPZ, legacy mesh GLB, and the CLI.
+- The installed SDK exposes only the C ABI.
 - Remaining `GaussianCloud` references are private implementation debt with named owners:
   Enhanced→A2/WP10, compute backends→WP12, densifier→WP14. They are not A1 reopeners unless they
   cross the installed SDK or a canonical format/CLI boundary again.

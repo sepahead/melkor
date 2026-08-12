@@ -16,6 +16,7 @@
 #include <cstdio>
 #include <cstring>
 #include <string>
+#include <utility>
 #include <vector>
 
 namespace {
@@ -36,7 +37,9 @@ void check(bool condition, const char* what, int line) {
 
 #define CHECK(cond) check((cond), #cond, __LINE__)
 
-bool approx(float a, float b, float eps = 1e-6f) { return std::fabs(a - b) <= eps; }
+bool approx(float a, float b, float eps = 1e-6f) {
+    return std::fabs(a - b) <= eps;
+}
 
 void put_f32(std::vector<std::uint8_t>& v, float f) {
     std::uint32_t bits;
@@ -47,13 +50,20 @@ void put_f32(std::vector<std::uint8_t>& v, float f) {
     v.push_back(static_cast<std::uint8_t>((bits >> 24) & 0xFF));
 }
 
+void put_u32(std::vector<std::uint8_t>& v, std::uint32_t value) {
+    for (unsigned shift = 0; shift < 32; shift += 8)
+        v.push_back(static_cast<std::uint8_t>((value >> shift) & 0xffU));
+}
+
 gltf::Document parse(const std::string& s) {
-    auto r = gltf::parse_gltf_json(reinterpret_cast<const std::uint8_t*>(s.data()), s.size());
+    const std::string document = "{\"asset\":{\"version\":\"2.0\"}," + s.substr(1);
+    auto r = gltf::parse_gltf_json(reinterpret_cast<const std::uint8_t*>(document.data()),
+                                   document.size());
     if (!r.has_value()) {
         std::fprintf(stderr, "unexpected parse failure in test setup\n");
         return gltf::Document{};
     }
-    return r.value();
+    return std::move(r).value();
 }
 
 std::vector<gltf::BufferSpan> one_buffer(const std::vector<std::uint8_t>& b) {
@@ -67,7 +77,8 @@ void test_resolves_vec3() {
       "accessors":[{"bufferView":0,"componentType":5126,"type":"VEC3","count":2}]
     })");
     std::vector<std::uint8_t> buf;
-    for (float f : {1.f, 2.f, 3.f, 4.f, 5.f, 6.f}) put_f32(buf, f);
+    for (float f : {1.f, 2.f, 3.f, 4.f, 5.f, 6.f})
+        put_f32(buf, f);
     auto r = gltf::resolve_and_decode_accessor(doc, 0, one_buffer(buf));
     CHECK(r.has_value());
     if (r.has_value()) {
@@ -87,7 +98,8 @@ void test_composes_offsets() {
     put_f32(buf, 42.5f);                  // the value lands at byte 8 (bufferView offset 4 + acc 4)
     auto r = gltf::resolve_and_decode_accessor(doc, 0, one_buffer(buf));
     CHECK(r.has_value());
-    if (r.has_value()) CHECK(r.value().size() == 1 && approx(r.value()[0], 42.5f));
+    if (r.has_value())
+        CHECK(r.value().size() == 1 && approx(r.value()[0], 42.5f));
 }
 
 void test_rejects_bufferview_past_buffer() {
@@ -97,6 +109,16 @@ void test_rejects_bufferview_past_buffer() {
       "accessors":[{"bufferView":0,"componentType":5126,"type":"VEC3","count":2}]
     })");
     std::vector<std::uint8_t> buf(24, 0);  // only 24 bytes actually present
+    CHECK(!gltf::resolve_and_decode_accessor(doc, 0, one_buffer(buf)).has_value());
+}
+
+void test_rejects_bufferview_past_declared_length() {
+    auto doc = parse(R"({
+      "buffers":[{"byteLength":12}],
+      "bufferViews":[{"buffer":0,"byteOffset":0,"byteLength":24}],
+      "accessors":[{"bufferView":0,"componentType":5126,"type":"VEC3","count":2}]
+    })");
+    std::vector<std::uint8_t> buf(24, 0);
     CHECK(!gltf::resolve_and_decode_accessor(doc, 0, one_buffer(buf)).has_value());
 }
 
@@ -128,10 +150,14 @@ void test_rejects_unavailable_buffer() {
       "accessors":[{"bufferView":0,"componentType":5126,"type":"VEC3","count":2}]
     })");
     // No buffers supplied at all.
-    CHECK(!gltf::resolve_and_decode_accessor(doc, 0, {}).has_value());
+    auto missing = gltf::resolve_and_decode_accessor(doc, 0, {});
+    CHECK(!missing.has_value());
+    CHECK(missing.error_code() == ErrorCode::unsupported_feature);
     // A null buffer span.
     std::vector<gltf::BufferSpan> null_span = {gltf::BufferSpan{nullptr, 0}};
-    CHECK(!gltf::resolve_and_decode_accessor(doc, 0, null_span).has_value());
+    auto unavailable = gltf::resolve_and_decode_accessor(doc, 0, null_span);
+    CHECK(!unavailable.has_value());
+    CHECK(unavailable.error_code() == ErrorCode::unsupported_feature);
 }
 
 void test_rejects_bad_index() {
@@ -155,12 +181,90 @@ void test_strided_interleave() {
     })");
     std::vector<std::uint8_t> buf;
     // element 0: pos(1,2,3) other(7,8,9); element 1: pos(4,5,6) other(10,11,12)
-    for (float f : {1.f, 2.f, 3.f, 7.f, 8.f, 9.f, 4.f, 5.f, 6.f, 10.f, 11.f, 12.f}) put_f32(buf, f);
+    for (float f : {1.f, 2.f, 3.f, 7.f, 8.f, 9.f, 4.f, 5.f, 6.f, 10.f, 11.f, 12.f})
+        put_f32(buf, f);
     auto pos = gltf::resolve_and_decode_accessor(doc, 0, one_buffer(buf));
     auto other = gltf::resolve_and_decode_accessor(doc, 1, one_buffer(buf));
     CHECK(pos.has_value() && other.has_value());
-    if (pos.has_value()) CHECK(approx(pos.value()[0], 1.f) && approx(pos.value()[3], 4.f));
-    if (other.has_value()) CHECK(approx(other.value()[0], 7.f) && approx(other.value()[3], 10.f));
+    if (pos.has_value())
+        CHECK(approx(pos.value()[0], 1.f) && approx(pos.value()[3], 4.f));
+    if (other.has_value())
+        CHECK(approx(other.value()[0], 7.f) && approx(other.value()[3], 10.f));
+}
+
+void test_rejects_vertex_attribute_misalignment() {
+    auto doc = parse(R"({
+      "buffers":[{"byteLength":8}],
+      "bufferViews":[{"buffer":0,"byteOffset":2,"byteLength":6}],
+      "accessors":[{"bufferView":0,"byteOffset":2,"componentType":5123,
+                    "type":"SCALAR","count":1}]
+    })");
+    std::vector<std::uint8_t> buf(8, 0);
+    CHECK(!gltf::resolve_and_decode_accessor(doc, 0, one_buffer(buf)).has_value());
+}
+
+void test_rejects_absolute_component_misalignment() {
+    auto doc = parse(R"({
+      "buffers":[{"byteLength":4}],
+      "bufferViews":[{"buffer":0,"byteOffset":1,"byteLength":3}],
+      "accessors":[{"bufferView":0,"componentType":5123,"type":"SCALAR","count":1}]
+    })");
+    std::vector<std::uint8_t> buf(4, 0);
+    auto result = gltf::resolve_and_decode_accessor(doc, 0, one_buffer(buf));
+    CHECK(!result.has_value());
+    if (!result.has_value() && !result.diagnostics().empty())
+        CHECK(result.diagnostics()[0].code == "MK2124_GLTF_ACCESSOR_MISALIGNED");
+}
+
+void test_validates_declared_float_bounds() {
+    auto doc = parse(R"({
+      "buffers":[{"byteLength":8}],
+      "bufferViews":[{"buffer":0,"byteLength":8}],
+      "accessors":[{"bufferView":0,"componentType":5126,"type":"SCALAR","count":2,
+                    "min":[-2.5],"max":[4.0]}]
+    })");
+    std::vector<std::uint8_t> buffer;
+    put_f32(buffer, -2.5f);
+    put_f32(buffer, 4.0f);
+    CHECK(gltf::resolve_and_decode_accessor(doc, 0, one_buffer(buffer)).has_value());
+
+    doc.accessors[0].maximum[0] = 5.0;
+    auto mismatch = gltf::resolve_and_decode_accessor(doc, 0, one_buffer(buffer));
+    CHECK(!mismatch.has_value());
+    if (!mismatch.has_value() && !mismatch.diagnostics().empty())
+        CHECK(mismatch.diagnostics()[0].code == "MK2207_GLTF_ACCESSOR_BOUNDS");
+}
+
+void test_normalized_bounds_use_stored_integer_values() {
+    auto doc = parse(R"({
+      "buffers":[{"byteLength":2}],
+      "bufferViews":[{"buffer":0,"byteLength":2}],
+      "accessors":[{"bufferView":0,"componentType":5121,"type":"SCALAR","count":2,
+                    "normalized":true,"min":[0],"max":[255]}]
+    })");
+    const std::vector<std::uint8_t> buffer{0, 255};
+    CHECK(gltf::resolve_and_decode_accessor(doc, 0, one_buffer(buffer)).has_value());
+
+    doc.accessors[0].maximum[0] = 1.0;
+    CHECK(!gltf::resolve_and_decode_accessor(doc, 0, one_buffer(buffer)).has_value());
+    doc.accessors[0].maximum[0] = 255.5;
+    CHECK(!gltf::resolve_and_decode_accessor(doc, 0, one_buffer(buffer)).has_value());
+}
+
+void test_unsigned_int_bounds_remain_exact() {
+    auto doc = parse(R"({
+      "buffers":[{"byteLength":8}],
+      "bufferViews":[{"buffer":0,"byteLength":8}],
+      "accessors":[{"bufferView":0,"componentType":5125,"type":"SCALAR","count":2,
+                    "min":[16777217],"max":[4294967295]}]
+    })");
+    std::vector<std::uint8_t> buffer;
+    put_u32(buffer, 16777217U);
+    put_u32(buffer, 4294967295U);
+    CHECK(gltf::resolve_and_decode_accessor(doc, 0, one_buffer(buffer)).has_value());
+
+    doc.accessors[0].minimum[0] = 16777216.0;
+    CHECK(!gltf::resolve_and_decode_accessor(doc, 0, one_buffer(buffer)).has_value());
 }
 
 }  // namespace
@@ -169,11 +273,17 @@ int main() {
     test_resolves_vec3();
     test_composes_offsets();
     test_rejects_bufferview_past_buffer();
+    test_rejects_bufferview_past_declared_length();
     test_rejects_accessor_past_bufferview();
     test_rejects_stride_smaller_than_element();
     test_rejects_unavailable_buffer();
     test_rejects_bad_index();
     test_strided_interleave();
+    test_rejects_vertex_attribute_misalignment();
+    test_rejects_absolute_component_misalignment();
+    test_validates_declared_float_bounds();
+    test_normalized_bounds_use_stored_integer_values();
+    test_unsigned_int_bounds_remain_exact();
 
     if (g_failures == 0) {
         std::printf("gltf resolve: %d checks passed\n", g_checks);

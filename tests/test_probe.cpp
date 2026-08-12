@@ -8,6 +8,7 @@
 // Self-contained (no external test framework).
 
 #include "melkor/format/probe.hpp"
+#include "melkor/format/profile.hpp"
 
 #include <cstdint>
 #include <cstdio>
@@ -51,6 +52,10 @@ void test_ply_is_high_confidence() {
     // Also accept CRLF headers.
     auto crlf = probe("ply\r\n");
     CHECK(crlf.format == FormatId::ply);
+
+    // A bare carriage return is not a complete PLY line ending.
+    auto incomplete = probe("ply\rx");
+    CHECK(incomplete.format == FormatId::unknown);
 }
 
 void test_gltf_json_is_low_confidence() {
@@ -106,6 +111,35 @@ void test_suffix_mismatch_detection() {
     CHECK(!suffix_matches(FormatId::unknown, ".ply"));
 }
 
+void test_profile_capabilities_are_profile_specific() {
+    CHECK(!is_known_format(FormatId::unknown));
+    CHECK(is_known_format(FormatId::ply));
+    CHECK(!is_known_format(static_cast<FormatId>(999)));
+
+    const auto canonical = format_profile(FormatProfileId::ply_melkor_canonical_v1);
+    const auto graphdeco = format_profile(FormatProfileId::ply_graphdeco_3dgs_v1);
+    const auto da3 = format_profile(FormatProfileId::ply_da3_gaussian_v1);
+    CHECK(canonical.supports_read_container(FormatId::ply));
+    CHECK(canonical.supports_write_container(FormatId::ply));
+    CHECK(canonical.max_sh_degree == 4);
+    CHECK(graphdeco.max_sh_degree == 3);
+    CHECK(da3.supports_read_container(FormatId::ply));
+    CHECK(da3.supports_write_container(FormatId::ply));
+    CHECK(da3.max_sh_degree == 4);
+    CHECK(format_profile_from_string("ply:da3-gaussian-v1") ==
+          FormatProfileId::ply_da3_gaussian_v1);
+
+    const auto khr = format_profile_from_string("khr-gaussian-splatting-rc-63770cc");
+    CHECK(khr == FormatProfileId::gltf_khr_gaussian_splatting_rc_63770cc);
+    CHECK(format_profile(*khr).supports_read_container(FormatId::gltf));
+    CHECK(format_profile(*khr).supports_read_container(FormatId::glb));
+    CHECK(!format_profile(*khr).supports_write_container(FormatId::gltf));
+    CHECK(format_profile(*khr).supports_write_container(FormatId::glb));
+    CHECK(!format_profile_from_string("graphdeco").has_value());
+    CHECK(default_write_profile(FormatId::ply) == FormatProfileId::ply_melkor_canonical_v1);
+    CHECK(!default_write_profile(FormatId::gltf).has_value());
+}
+
 }  // namespace
 
 int main() {
@@ -116,6 +150,7 @@ int main() {
     test_unknown_and_empty();
     test_short_input_does_not_over_read();
     test_suffix_mismatch_detection();
+    test_profile_capabilities_are_profile_specific();
 
     if (g_failures == 0) {
         std::printf("container probe: %d checks passed\n", g_checks);

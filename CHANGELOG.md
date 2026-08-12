@@ -2,8 +2,131 @@
 
 ## Unreleased
 
-Work toward `v2.0.0`, the first release that can honestly be called production-grade. The blocker
-register is in `docs/audit/production-blockers.md`.
+Melkor 2 narrows the product to bounded Gaussian-splat inspection, conversion, and local viewing.
+No production-supported release exists.
+See [`docs/audit/production-blockers.md`](docs/audit/production-blockers.md) for the open release gates.
+
+### Breaking
+
+- The CLI now accepts only the explicit `inspect` and `convert` commands.
+- The native product no longer includes GPU backends, training, mesh conversion, or scene completion.
+- The installed SDK now exposes only the stable C ABI and version constants.
+- Native SPZ support now stops at file-format version 3.
+- Format selection now uses five exact profiles instead of heuristic profile guesses.
+- The pipeline now uses COLMAP `global_mapper` through `--sfm global`.
+- Setup scripts no longer install mutable external dependencies.
+
+### Added
+
+- One immutable canonical model now holds validated positions, scales, rotations, opacity, and spherical harmonics.
+- The format registry now reads PLY, SPZ, glTF, and GLB into the canonical model.
+- The registry now writes PLY, SPZ version 3, and GLB from the canonical model.
+- The glTF codec now implements the pinned `KHR_gaussian_splatting` release-candidate subset.
+- The math layer now supplies shared frame, covariance, quaternion, color, activation, and SH operations.
+- `OperationContext` now carries one budget, cancellation state, deadline, and progress sink.
+- The inspect and loss-report schemas now define complete JSON contracts.
+- The C ABI now provides `melkor_inspect_ply_file` with fixed-width status and result types.
+- The local viewer now uses separate HTML, CSS, application, bootstrap, and validator modules.
+- The viewer now supports bounded local input and transactional 4D sequence packaging.
+- Deterministic source evidence now includes an archive, manifest, SPDX document, provenance, and checksums.
+- `CITATION.cff` now provides machine-readable project citation data.
+- The DA3 PLY profile preserves all degree-4 SH coefficients from the pinned Gaussian head.
+
+### Changed
+
+- Each conversion now uses one exact source profile, target profile, loss policy, and resource profile.
+- `melkor convert` now writes its loss report after staging and before the atomic commit.
+- Consumers must use that report only when the command returns exit status zero.
+- Inspect reports now use the input basename by default.
+- The root `VERSION` file now supplies every derived version surface.
+- The minimum CMake version is now 3.24.
+- Tauri now requires macOS 14.0 for the WebKit APIs used by the viewer.
+- CI now builds native code on macOS, Linux, and Windows.
+- CI now checks sanitizers, fuzz smoke, install relocation, the viewer, documentation, and release evidence.
+- Dependabot now checks GitHub Actions, viewer npm packages, and desktop Rust crates each week.
+- Dependency sources, patches, licenses, and notices now use checked manifests.
+- The developer preset now exports a compilation database for static analysis.
+
+### Fixed
+
+- PLY numeric conversion now follows each declared property type and profile domain.
+- PLY header scans, records, strings, counts, and output paths now use bounded validation.
+- SPZ now validates compressed structure, expanded size, ratio, finite values, and canonical encoding.
+- GLB now rejects malformed framing, invalid chunk order, hidden trailing bytes, and invalid accessors.
+- glTF now reports dropped optional content as a severe source-read loss.
+- Conversion blocks that loss unless the caller approves its exact code.
+- glTF now rejects cycles, shared scene nodes, invalid transforms, and unsafe resource paths.
+- SH rotation now uses the supported global transform rotation for degrees zero through three.
+- Covariance math now uses scale-invariant singularity and eigensolver tolerances.
+- CLI exit codes now preserve invalid-data, unsupported-feature, I/O, resource, and internal-error classes.
+- CLI help, version, inspect JSON, and loss-report output now detect standard-output failures.
+- Windows CLI arguments and diagnostics now preserve Unicode paths.
+- Prerelease CMake packages now report the complete SemVer and reject stable version requests.
+- Numeric text conversion now supports the declared macOS 13 deployment target.
+- CMake now sets that target before it enables the compiler.
+- The installed version header now stays warning-free with C++98 compilers.
+- SPZ-disabled builds now compile their budget test without SPZ headers.
+- Standalone fuzz replays now turn setup exceptions into deterministic test failures.
+- SPZ v1-v2 readers now accept valid quaternion quantization drift and reject values beyond the exact bound.
+- The viewer fixture conversion now writes Spark-compatible Graphdeco PLY in the source SPZ coordinate frame.
+- Local PLY validation now rejects Melkor canonical fields that Spark cannot decode.
+- Local SPZ validation now rejects invalid quaternion data before Spark decodes it.
+- Local KSPLAT validation now rejects count drift, multiple sections, and unsafe numeric data before Spark decodes it.
+- Development wrappers now preserve existing output until each complete operation succeeds.
+- Pipeline and wrapper publication now use atomic no-replace renames.
+- The LichtFeld wrapper now rejects directory replacement because supported filesystems cannot provide the required atomic behavior.
+- The pipeline now keeps each SPZ conversion loss report beside its output.
+- Viewer sequence tools now refuse non-atomic directory replacement.
+- Viewer fixture files now use atomic no-replace publication after validation.
+- Viewer directory tools now resolve symbolic-link ancestors before overlap and protected-path checks.
+- Viewer error dialogs now keep mandatory recovery states visible.
+- A failed 4D frame now lets the user keep the current frame and select another scene.
+- A fatal render error can now supersede local validation without leaving the viewer in a loading state.
+- Viewer framing now reads at most 100,000 evenly distributed splats from indexed sources.
+- After a fatal WebGL loss, new file and scene loads cannot replace the required recovery dialog.
+- The viewer camera toolbar now implements roving keyboard focus.
+- Desktop bundles and web tabs now use the Melkor massif icon.
+- Source evidence now verifies archive bytes, canonical metadata, ownership, and portable paths.
+- Source evidence now rejects noncanonical or concatenated gzip streams and Windows device paths.
+- Source-bundle publication now uses the shared atomic publisher.
+- The source-bundle policy no longer pre-authorizes absent directory trees.
+- Source archive tests now skip the Git-index-only policy check outside a checkout.
+- The DA3 adapter now rejects invalid numeric data and preserves valid far-depth Gaussians.
+- Source evidence now binds canonical JSON, sorted checksums, and each resolved dependency to the archived inventory.
+- Release evidence now executes verified selected Python bytes without using local bytecode caches.
+- Local SOG inspection now bounds metadata, image dimensions, pixel counts, and decoded RGBA memory before rendering.
+- Local file validation now uses a cancelable worker and rejects ambiguous JSON, numeric overflow, unsafe SH layouts, and SPZ expansion bombs.
+- Local validation now rejects scales that Spark would clamp outside its packed range.
+- Diagnostic identifiers now use one validated form and one unique numeric prefix.
+- Invalid `Result` diagnostics now become one valid internal-error diagnostic at each construction boundary.
+- Inspection reports now enforce each stable loss code's minimum severity in JSON Schema.
+- The loss registry now states that a new code requires a new closed report schema version.
+- glTF now rejects external and data-URI buffers whose size differs from `buffer.byteLength`.
+- The source-bundle tool now refuses to replace an existing artifact.
+
+### Security
+
+- All native readers and writers now share checked limits, memory accounting, cancellation, and deadlines.
+- `AtomicWriter` now uses bound directory handles, safe temporary files, no-overwrite commit, and explicit durability states.
+- Native glTF sidecars now stay below the asset directory and reject links, schemes, traversal, and device names.
+- The viewer now limits local files to 256 MiB and 5,000,000 splats.
+- ZIP and SOG validation now checks actual expansion, CRC-32, entry overlap, names, flags, methods, and ratios.
+- The viewer server now binds to loopback by default and serves an exact path allowlist.
+- The Tauri frontend now uses a strict CSP and grants no command IPC permission.
+- Source bundle and release tools now reject secret-like files, links, path collisions, and unowned dependency files.
+
+### Removed
+
+- Removed the former public C++ SDK model and compute headers.
+- Removed GPU backends, densification, enhanced mesh conversion, and their tests.
+- Removed unused mesh, image, and Python bridge dependencies from the native core.
+- Removed mutable clones and research snapshots from the release boundary.
+- Removed separate light and dark logos in favor of one accessible SVG mark.
+
+## Historical development record before the current product boundary
+
+This section records incremental development before the final Melkor 2 scope was set.
+Some statements describe code that this Unreleased change removes or replaces.
 
 ### Breaking
 
@@ -17,21 +140,49 @@ register is in `docs/audit/production-blockers.md`.
 - Development wrappers now use strict shell behavior, argument arrays, explicit outputs, and safe temporary directories.
 - The pipeline now fails when requested SPZ output is unavailable. It no longer reports partial output as success.
 - The 4D packer now validates arguments, protects existing output, and writes its manifest atomically.
+- Named resource profiles now validate before every native read.
+  The CLI rejects the unset `custom` profile.
+  `Budget` also rejects every zero resource limit.
+- `AtomicWriter` now preserves existing modes and creates new files with mode `0600`.
+  No-overwrite commit prevents late destination replacement.
+  Full durability reports file and directory synchronization failures.
+  Temporary-byte charges are released after commit or abort.
+- GLB parsing now rejects trailing bytes after the declared container length.
+  It also checks accessor indexes before use.
+- The glTF scene walk rejects cycles, shared nodes, and excessive depth.
+  JSON `.gltf` inspection now uses the JSON reader instead of GLB framing.
+- PLY output replaces control bytes in comments and reports the change.
+  ASCII float output uses `max_digits10` for exact float round trips.
+- Inspect reports now use the input basename.
+  They no longer expose an absolute source path by default.
+- Inspect and convert now preserve error classes through their exit codes.
+  Invalid data, unsupported features, I/O failures, and resource limits remain distinct.
+- Source release archives, file manifests, and SPDX inventories now use one allowlist decision.
+  Release evidence verifies each selected byte against the Git tree.
+- Format profile validation now fails when `jsonschema` or a required profile is missing.
+  It rejects unknown structural fields while allowing format-specific property extensions.
+- The CI gate now permits a skipped dependency review only for a push event.
+  It fails for other skipped, missing, failed, or unexpected jobs.
+- The Tauri bundle now sets macOS 14.0 as its minimum for the required Safari 17 WebKit APIs.
+  Its window minimum is 640 by 360 CSS pixels.
+- The camera toolbar now uses one roving Tab stop with arrow, Home, and End navigation.
+  Mandatory viewer error dialogs have no Dismiss action.
+  Escape cannot close them.
+- SVG checks now require an accessible title and description for every asset.
+  The verification diagram derives its 39-test and four-fuzzer totals from CMake.
+- Source bundle refs now resolve once to an immutable commit object ID.
+  Git receives only that object ID for tree and file reads.
+  Check output escapes control characters in refs and excluded paths.
+- The source bundle now includes the release evidence guide and `CODEOWNERS`.
+  Included documents link to both files.
 
-- Lower-severity polish from the shipping-surface review: `Budget::remaining()` now returns
-  UINT64_MAX for an unlimited (0) limit, matching `consume()`'s 0-means-unlimited convention
-  (it previously reported 0 headroom); the PLY reader's `readFromFile` screens the header against
-  the configured `max_ply_header_bytes` instead of a hardcoded 1 MiB (no longer false-rejecting a
-  valid within-policy header); the atomic writer clamps the embedded temp-filename base to NAME_MAX
-  so a long-but-legal destination name no longer fails with ENAMETOOLONG; and the C ABI's
-  `melkor_get_version` rejects a struct_size smaller than the struct_size field itself (a value of
-  1..sizeof(size_t)-1 could otherwise drive an out-of-bounds write-back).
+- `Budget::remaining()` now returns zero for an unset limit.
+  The PLY reader uses the configured header limit.
+  Atomic temporary names fit within `NAME_MAX`.
+  `melkor_get_version` rejects an invalid `struct_size` before any write.
 - Resource-safety fixes from the shipping-surface review:
-  - The `web` limits profile set `max_temp_bytes = 0` to mean "no temp", but the Budget reads a 0
-    limit as *unlimited* -- so the tightest, user-selectable profile actually granted an UNBOUNDED
-    temp-disk budget. web now sets a real 2 GiB temp bound, and `Limits::validate()` requires
-    max_temp_bytes positive like every other budget-backed limit, closing the 0-means-unlimited
-    footgun.
+  - The `web` profile now sets a 2 GiB temporary-file limit.
+    `Limits::validate()` requires every budget-backed limit to be positive.
   - The SPZ decoder accepted a non-finite decoded cloud: a crafted v3 "smallest-three" quaternion
     whose components sum to more than 1 makes the recovered component sqrt(negative) = NaN, which
     the size-only layout check passed as a successful decode. `validateSpzCloudLayout` now scans
@@ -90,6 +241,12 @@ register is in `docs/audit/production-blockers.md`.
 
 - CI now checks Markdown links, anchors, path case, style, claims, and shell warnings.
 - The documentation now distinguishes tested development paths from production support.
+- `schemas/inspect-v1.schema.json` defines the complete `melkor inspect --json` contract.
+  Inspect CLI tests validate successful and failed reports against this schema.
+- `melkor convert` now writes a schema-valid loss report to stdout after a successful commit.
+  Human-readable status remains on stderr.
+- The installed C ABI now provides `melkor_inspect_ply_file`.
+  It validates a PLY file and returns its splat count and SH degree.
 
 - `melkor convert IN.glb OUT.glb` reads a KHR_gaussian_splatting GLB into the canonical scene model
   and writes it back out, making the glTF writer reachable from the CLI. It enforces the loss policy
@@ -245,13 +402,11 @@ register is in `docs/audit/production-blockers.md`.
   is a defined operation, not an ambiguous "Y-up" label — and a reflecting or non-orthogonal
   basis is flagged or rejected rather than silently mirroring a scene. 107 checks total.
 
-- Installable SDK (P0-04). A shared `libmelkor` exposing a stable C ABI
-  (`include/melkor/c/melkor.h`), installed with `MelkorConfig.cmake`, an exported target set
-  (`Melkor::melkor`), a `SameMajorVersion` version file, the public headers, and the generated
-  `version.h`. `scripts/test_sdk_install.sh` proves the clean-room cycle: build, install to a
-  prefix, `find_package(Melkor 2 CONFIG REQUIRED)` and link from standalone C and C++ consumer
-  projects, run them, then relocate the install and consume again. The vendored SPZ dependency
-  is `EXCLUDE_FROM_ALL` so its CLIs and headers no longer pollute the SDK.
+- Installable SDK (P0-04). A shared `libmelkor` exposes the stable C ABI in
+  `include/melkor/c/melkor.h`. The install contains `version.h`, `MelkorConfig.cmake`, and
+  the `Melkor::melkor` target. It does not install C++ API declarations.
+  `scripts/test_sdk_install.sh` tests C and C++ consumers before and after relocation.
+  Both consumers call the C ABI. The vendored SPZ dependency does not install its tools or headers.
 
 - Root `VERSION` file as the single authoritative version source. CMake parses it before
   `project()` via `cmake/MelkorVersion.cmake` and generates `<melkor/version.h>` carrying the

@@ -9,9 +9,9 @@ claiming a review process that does not exist.
 
 ## 1. Scope and product boundary
 
-Governance decisions are bounded by what this project is. Melkor is an **asset
-interoperability core**: it inspects, validates, normalizes, and converts 3D Gaussian-splat and
-mesh assets, and it initializes degree-0 Gaussians from mesh geometry.
+Governance decisions are bounded by this product definition.
+Melkor is a Gaussian-splat asset interoperability core.
+It inspects, validates, normalizes, and converts supported PLY, SPZ, glTF, and GLB assets.
 
 Melkor is **not** a reconstruction or training system. It contains no learned
 scene-reconstruction model, and it does not vendor or redistribute one.
@@ -45,7 +45,7 @@ make no commitments. Contributions are accepted under the repository's license
 ### Reviewer
 
 A reviewer has no write access. A reviewer reads pull requests in a declared area of competence.
-Examples include a compute backend, a file format, the viewer, and the packaging pipeline. The
+Examples include a file format, the viewer, the C ABI, and the packaging pipeline. The
 reviewer gives a substantive verdict against the pull-request checklist.
 
 A reviewer's approval is advisory and cannot merge a change. The project expects a maintainer to
@@ -60,11 +60,11 @@ A maintainer has write access to the repository. A maintainer may merge pull req
 labels and milestones, cut branches, and change repository settings. A maintainer is expected
 to:
 
-- review changes against the ten-lens checklist and the correctness rules in
+- review changes against the twenty-lens checklist and the correctness rules in
   [`CONTRIBUTING.md`](CONTRIBUTING.md).
 - refuse changes that widen the public contract without documentation, tests, and a changelog
   entry.
-- refuse changes that break backend parity (Metal, CUDA, CPU) by landing in only one backend.
+- refuse changes that bypass canonical semantics, format profiles, or loss reporting.
 - keep the blocker register in [`docs/audit/production-blockers.md`](docs/audit/production-blockers.md)
   honest, including by adding blockers that are inconvenient.
 
@@ -197,8 +197,7 @@ This is how routine work proceeds. The project intends to continue this process.
 **Design-first changes.** The changes below require a written proposal in an issue or a design note
 under `docs/`, and explicit maintainer agreement, *before* implementation:
 
-- any change to the public contract: the C ABI, the C++ SDK headers, the CLI surface and its
-  machine-readable output, or the Python package surface.
+- any change to the public contract: the C ABI, CLI, JSON schemas, or profile identifiers.
 - any change to a format profile's meaning, or the addition of a new profile ID.
 - any change to a default that alters output bytes for an input that previously succeeded.
 - any change to the resource limits or the untrusted-input threat model.
@@ -225,13 +224,11 @@ A version may be tagged and published only when all conditions below hold:
 
 1. the blocker register in `docs/audit/production-blockers.md` has no open blocker for that
    version.
-2. CI is green on the exact commit being tagged, including the sanitizer build and the
-   CPU-only topology.
+2. CI is green on the exact commit being tagged, including sanitizers and the no-SPZ build.
 3. the evidence bundle builds and verifies from the tag (`scripts/build_release_evidence.py`),
    and the tag matches the version recorded in the build system.
-4. the release notes, `SUPPORT.md`, and the platform matrix describe what was actually built and
-   tested — a backend that is compiled but not hardware-qualified is labeled experimental, and a
-   compile-only CI job is never presented as qualification.
+4. the release notes and support matrix describe what was built and tested.
+   A compile-only CI job is never presented as platform qualification.
 5. the release manager approves.
 
 Each **production-supported** release has one additional requirement. This requirement applies to

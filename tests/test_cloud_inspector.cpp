@@ -64,7 +64,10 @@ int main() {
     {
         const auto cloud = canonicalData({{0.0f, 0.0f, 0.0f}}, {{1.0e20f, 1.0e-30f, 1.0f}});
         const auto result = melkor::inspectCloud(cloud);
-        check(!result.valid, "canonical covariance overflow and underflow are invalid");
+        check(result.valid,
+              "finite canonical scales stay valid when float32 covariance loses range");
+        check(result.error_count == 0 && result.warning_count == 2,
+              "float32 covariance range limits are warnings");
         check(hasIssue(result, "scale_covariance_overflow"),
               "canonical squared-scale overflow reported");
         check(hasIssue(result, "scale_covariance_underflow"),
@@ -77,6 +80,14 @@ int main() {
         check(result.valid, "canonical subnormal covariance is warning-only");
         check(hasIssue(result, "scale_covariance_subnormal"),
               "canonical subnormal covariance reported");
+    }
+
+    {
+        const auto cloud = canonicalData({{0.0f, 0.0f, 0.0f}}, {{0.0f, 1.0f, 1.0f}});
+        const auto result = melkor::inspectCloud(cloud);
+        check(result.valid, "an exact zero scale is a valid singular Gaussian");
+        check(!hasIssue(result, "scale_covariance_underflow"),
+              "an exact zero scale is not floating-point underflow");
     }
 
     if (failures == 0) {

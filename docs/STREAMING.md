@@ -16,7 +16,17 @@ The viewer accepts these local asset types:
 - KSPLAT
 - SOG or ZIP
 
-The local file limit is 2 GiB.
+The viewer applies these local limits:
+
+- Files are at most 256 MiB.
+- Scenes contain at most 5,000,000 splats.
+- PLY input uses binary records.
+- PLY headers are at most 64 KiB.
+- SOG and ZIP content expands to at most 512 MiB.
+- SOG metadata is at most 64 KiB.
+- Each SOG image contains at most 5,000,000 pixels.
+- All decoded SOG RGBA images use at most 256 MiB.
+
 Browser or device memory can impose a lower practical limit.
 
 The first bundled scene can render while its download continues.
@@ -123,10 +133,15 @@ Use `--spz` to convert each frame with a Melkor executable.
 node viewer/pack-4d.js /path/to/frames \
   --spz \
   --fps 24 \
+  --allow-loss LOSS_COLOR_SPACE_METADATA_DROPPED \
+  --allow-loss LOSS_COORDINATE_METADATA_DROPPED \
   --out viewer/public/splats/4d/my-scene
 ```
 
 SPZ conversion is lossy.
+These approvals permit the SPZ container to omit the source color-space and coordinate metadata.
+The packer stages the full sequence before it replaces an output directory.
+It stores each Melkor loss report in `loss-reports.ndjson`.
 Inspect representative output frames before you publish the sequence.
 
 ## Test temporal playback

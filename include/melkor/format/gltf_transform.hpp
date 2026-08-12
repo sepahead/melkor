@@ -34,12 +34,12 @@ NodeTransform identity_transform();
 // (converted from glTF's column-major storage to row-major) is the linear part and its fourth
 // column is the translation. Otherwise the transform is T·R·S: the linear part is R·diag(scale)
 // with R built from the node's (normalized) quaternion, and the translation is the node's
-// translation. A degenerate (zero-norm) node quaternion falls back to identity rotation.
-NodeTransform local_node_transform(const NodeDesc& node);
+// translation. The function rejects a quaternion that cannot define a rotation.
+Result<NodeTransform> local_node_transform(const NodeDesc& node);
 
 // Affine composition: the transform that applies `child` first and then `parent`, i.e. the global
-// transform of a child node given its parent's global transform. linear = parent.linear·child.linear;
-// translation = parent.linear·child.translation + parent.translation.
+// transform of a child node given its parent's global transform. linear =
+// parent.linear·child.linear; translation = parent.linear·child.translation + parent.translation.
 NodeTransform compose(const NodeTransform& parent, const NodeTransform& child);
 
 // Applies a transform to a point: linear·p + translation.

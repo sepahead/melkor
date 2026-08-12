@@ -1,91 +1,142 @@
 # Contributing to Melkor
 
-Thanks for considering a contribution. This document covers the development
-setup, the project's correctness rules, and what a pull request needs before
-review.
+Melkor accepts changes that preserve its narrow format and safety contract.
+Read [GOVERNANCE.md](GOVERNANCE.md) before you change the product boundary.
 
 ## Development setup
 
 ```bash
-# Fetch pinned third-party dependencies (tinygltf, stb, spz)
 ./scripts/setup_deps.sh
-
-# Configure and build (Metal is enabled automatically on macOS,
-# CUDA on Linux with -DMELKOR_USE_CUDA=ON)
-cmake -B build -DCMAKE_BUILD_TYPE=Release
-cmake --build build -j
-
-# Run the test suite
-cd build && ctest --output-on-failure
+cmake --preset dev
+cmake --build --preset dev --parallel
+ctest --preset dev
 ```
 
-The viewer is a separate workspace: `cd viewer && ./fetch-assets.sh &&
-bun run serve` (tests: `bun run test`). See [viewer/README.md](viewer/README.md).
-
-## Backend parity rules
-
-Melkor ships three implementations of its compute operations — Metal
-(`src/metal/`), CUDA (`src/cuda/`), and CPU (`src/cpu_compute_provider.cpp`,
-`src/spatial_grid.cpp`) — behind the `ComputeProvider` interface. They must
-stay **operation-for-operation consistent**:
-
-- Any semantic change to one backend (normalization behavior, coordinate
-  transforms, color/opacity conversion, neighbor-search order) must be made
-  to all three in the same pull request.
-- The neighbor-search kernels (`knn_stats_grid` / `filter_candidates_grid`
-  and their CUDA/CPU mirrors) walk a shared host-built uniform grid in
-  identical shell order. Keep the loop structure literally parallel across
-  the three implementations so results differ only by float rounding.
-- `tests/test_compute_provider.cpp` and `tests/test_densifier.cpp` enforce
-  parity where hardware allows. Extend them when you add operations.
-
-Primary development machines typically cannot compile CUDA. Verify backend
-changes against the CPU-only configuration too. This configuration has the
-same link topology as Linux CPU builds:
+Use the `spz-off` preset to test the optional adapter boundary:
 
 ```bash
-cmake -B build-cpu -DMELKOR_USE_METAL=OFF
-cmake --build build-cpu -j
-cd build-cpu && ctest --output-on-failure
+cmake --preset spz-off
+cmake --build --preset spz-off --parallel
+ctest --preset spz-off
 ```
 
-## Correctness conventions
+See [Quick Start](docs/QUICKSTART.md) for the Python test environment and install steps.
 
-- Parsers for external formats (GLB, PLY, SPZ) treat all input as untrusted.
-  Validate indices, strides, counts, and sizes before reading. Return
-  `{success=false, error_message}` instead of a crash or exception.
-- GPU entry points return empty/false on failure so callers can fall back to
-  the CPU path — never partially-initialized or zero-filled data with a
-  success status.
-- Functions whose stdout is captured by shell command substitution must log
-  to stderr only (see the `log_*` helpers in `scripts/pipeline.sh`).
-- Objective-C++ builds with `-fobjc-arc`. Do not add manual retain/release.
+## Architecture rules
+
+Apply these rules to every core change:
+
+- Treat every asset byte and count as untrusted.
+- Check arithmetic before allocation or range access.
+- Charge one operation budget before each controlled allocation.
+- Check cancellation and the deadline in long loops.
+- Preserve the canonical `SplatData` invariants.
+- Use an exact format profile.
+- Reject an ambiguous source semantic.
+- Report each representational loss before writing output.
+- Require an exact approval code for each severe loss.
+- Route file output through `AtomicWriter`.
+- Keep the installed surface limited to the C ABI.
+
+Do not add a fallback that changes data semantics.
+Do not turn a warning into an implicit default for ambiguous input.
+
+## Format changes
+
+A format change must include:
+
+- The exact specification or producer revision
+- A versioned profile change when semantics change
+- Positive, boundary, and malformed fixtures
+- Resource-limit tests
+- Round-trip or differential evidence when it applies
+- Loss-policy changes for each unrepresentable feature
+- Documentation and changelog updates
+
+Do not change an existing profile identifier to mean something new.
+Add a new identifier and a migration note.
+
+## Error handling
+
+Return `Result<T>` from a fallible core operation.
+Use a stable `MK####_*` diagnostic code for a new failure condition.
+
+Do not parse English error text for control flow.
+Do not let an exception cross the C ABI.
+Do not change a CLI exit-code class without a compatibility review.
 
 ## Code style
 
-- Use C++17 and four-space indentation. Match the surrounding file's
-  conventions.
-- Strict warnings are enabled on first-party code (`-Wall -Wextra
-  -Wpedantic`). New warnings fail review.
-- Python passes `ruff check` with the repository defaults.
-- Shell scripts use 2-space indentation and must pass `bash -n`.
-- Keep tests self-contained without a framework. Build an input in memory.
-  Run a core routine. Use `check()` on a geometric or encoding property.
+- Use C++17 and four-space indentation.
+- Run the repository `clang-format` version on changed C++ files.
+- Keep first-party C++ warnings clean under `MELKOR_WERROR=ON`.
+- Run Ruff on Python files.
+- Use two-space indentation in shell scripts.
+- Run `bash -n` and ShellCheck on shell changes.
+- Follow `AGENTS.md` for project-owned technical prose.
+
+Keep tests deterministic.
+Print a seed when a randomized property test fails.
+Use a focused regression for each fixed defect.
+
+The `dev` preset writes `build/dev/compile_commands.json`.
+Run the optional static analysis with `run-clang-tidy -p build/dev`.
+
+## Viewer changes
+
+The viewer is a separate JavaScript and Rust workspace.
+It must stay local-only by default.
+
+Run these checks after a viewer change:
+
+```bash
+cd viewer
+npm ci --ignore-scripts
+npm audit --audit-level=high
+bun run test -- --project=chromium
+
+cd src-tauri
+rustup run 1.88.0 cargo fmt --all -- --check
+rustup run 1.88.0 cargo clippy --locked --all-targets --all-features -- -D warnings
+rustup run 1.88.0 cargo test --locked --all-targets --all-features
+```
+
+Do not add Tauri IPC permission without a documented need and a security review.
+
+## Repository checks
+
+Run the policy tools from the repository root:
+
+```bash
+ruff check . --no-unsafe-fixes
+python3 tools/verify_third_party.py --check
+python3 tools/generate_notices.py --check
+python3 tools/check_version_sync.py --check
+python3 tools/build_source_bundle.py --check
+python3 tools/check_profiles.py
+python3 tools/check_claims.py
+python3 tools/check_docs_links.py
+python3 tools/check_docs_style.py
+python3 tests/test_tools.py
+```
 
 ## Pull request checklist
 
-- [ ] `ctest` passes in the default configuration
-- [ ] `ctest` passes with `-DMELKOR_USE_METAL=OFF` (CPU-only topology)
-- [ ] Backend-affecting changes applied to Metal, CUDA, and CPU together
-- [ ] No new compiler warnings
-- [ ] Python changes pass `ruff check`
-- [ ] Viewer changes pass `bun run test` in `viewer/`
-- [ ] `CHANGELOG.md` updated for user-visible changes
-- [ ] Documentation updated where behavior or flags changed
+- [ ] The strict `dev` build and complete CTest set pass.
+- [ ] The `spz-off` build and tests pass.
+- [ ] New parser paths have hostile-input and resource-limit tests.
+- [ ] Public behavior has stable diagnostics and documentation.
+- [ ] Format losses are complete and tested.
+- [ ] The installed C ABI remains source-compatible or changes through the ABI policy.
+- [ ] The viewer checks pass when viewer files change.
+- [ ] Repository policy tools pass.
+- [ ] `CHANGELOG.md` records each user-visible change.
+- [ ] `git diff --check` passes.
 
-## Reporting issues
+## Report an issue
 
-Use GitHub issues for bugs and feature requests. Include the platform, the
-active backend (`melkor --info`), exact commands, and a minimal input where
-possible. For security-sensitive reports, follow [SECURITY.md](SECURITY.md)
-instead of opening a public issue.
+Include the source version, commit SHA, build command, operating system, exact command, and complete output.
+Include `melkor inspect INPUT --json` when an asset triggers the issue.
+
+Share a minimal asset only when you have redistribution rights.
+Use [private vulnerability reporting](SECURITY.md#report-a-vulnerability-privately) for a security issue.

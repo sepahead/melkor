@@ -1,32 +1,23 @@
 name: Performance problem
-description: An operation is slower, or uses more memory, than it should — with a reproducible measurement
+description: Report a reproducible speed or memory problem
 title: "[perf] "
-# Labels must already exist in the repository, or GitHub will not apply them. Create a
-# `performance` label and add it here if you want these separated from ordinary bugs.
+# GitHub applies only labels that exist in the repository.
 labels: ["bug"]
 body:
   - type: markdown
     attributes:
       value: |
-        This form asks for more than a bug report does. **"Slow" is not a reproducible finding.**
-        Give the hardware, data, versions, and exact command.
-        This information makes the report reproducible and verifiable.
+        Give the hardware, input, versions, command, and measurements.
 
-        **Before you file:** if you can make Melkor consume unbounded memory, CPU, or disk from an
-        input — whether that input is malformed, or merely enormous but well-formed — that is a
-        **security report**, not a performance report. Resource exhaustion is in scope for the security
-        policy. Use
-        [private vulnerability reporting](https://github.com/sepahead/melkor/security/advisories/new)
-        instead.
+        Report unbounded resource use through
+        [private vulnerability reporting](https://github.com/sepahead/melkor/security/advisories/new).
+        Do not create a public issue for a suspected security defect.
 
   - type: textarea
     id: summary
     attributes:
-      label: What is slow
-      description: >-
-        Which operation, and how slow compared to what. State the baseline you are measuring against:
-        an earlier Melkor version, another tool, another machine, or a documented expectation. "Slower
-        than I expected" is a valid baseline only if you say what you expected and why.
+      label: Performance problem
+      description: Identify the slow operation and the comparison baseline.
     validations:
       required: true
 
@@ -34,11 +25,8 @@ body:
     id: measurement
     attributes:
       label: Measurement
-      description: >-
-        The numbers. Wall time, peak resident memory, or throughput, with the number of runs and the
-        variance if you have it. A single run of a cold-cache operation is a noisy number, and knowing
-        that it was a single run is part of the measurement.
-      placeholder: "convert PLY→SPZ, 2.1M Gaussians: 94 s wall, 11.2 GB peak RSS. Mean of 3 runs, ±4 s."
+      description: Give wall time, peak memory, or throughput. Include the run count and variance.
+      placeholder: "2.1 million splats: 94 seconds, 11.2 GiB peak RSS, three runs"
     validations:
       required: true
 
@@ -46,13 +34,10 @@ body:
     id: command
     attributes:
       label: Reproducible command
-      description: >-
-        The exact command, copy-pasted, together with how you timed it. If we cannot run this, we cannot
-        confirm a fix. Include the timing harness (`/usr/bin/time -l`, `hyperfine`, `perf stat`, or
-        whatever you used), because how a number was produced determines what it means.
+      description: Paste the exact command and the timing tool that you used.
       render: shell
       placeholder: |
-        $ /usr/bin/time -l melkor convert --input scene.ply --output scene.spz --profile inria-3dgs-v1
+        $ /usr/bin/time -l melkor convert scene.glb scene.ply
         ...
     validations:
       required: true
@@ -62,13 +47,9 @@ body:
     attributes:
       label: Input data
       description: >-
-        What was processed. Gaussian or vertex count, file size, format, spherical-harmonic degree, and
-        how the asset was produced. Performance in this codebase is dominated by spatial distribution
-        and SH degree, not by file size alone, so a size on its own does not characterize the workload.
-
-        Paste `melkor inspect --input <asset> --level structure --output-mode json` if you can — it is
-        safe to paste and it answers most of this. If the asset is shareable and small, attach it, but
-        **only if you have the right to redistribute it**.
+        Give the format, file size, splat count, SH degree, and production method.
+        Paste `melkor inspect <asset> --json` when possible.
+        Attach only assets that you can redistribute.
       render: json
     validations:
       required: true
@@ -77,13 +58,8 @@ body:
     id: hardware
     attributes:
       label: Hardware
-      description: >-
-        CPU model and core count, total RAM, GPU model and VRAM, and the storage type for the input and
-        output paths (NVMe, SATA SSD, spinning disk, network share). A conversion bound by a network
-        filesystem and one bound by a kernel look identical from the outside and have nothing in common.
-      placeholder: |
-        Apple M2 Pro, 10 cores, 32 GB unified memory, internal NVMe
-        or: AMD 7950X (16c/32t), 64 GB DDR5, NVIDIA RTX 4090 24 GB, NVMe
+      description: Give the CPU, memory, storage type, and applicable GPU details.
+      placeholder: "Apple M2 Pro, 10 cores, 32 GiB memory, internal NVMe"
     validations:
       required: true
 
@@ -92,9 +68,8 @@ body:
     attributes:
       label: Versions and environment
       description: >-
-        Give the Melkor version or commit, install method, operating system, and version.
-        Give the **build type** and compiler version. State whether you used a sanitizer build.
-        Include the selected compute backend from `melkor --info`.
+        Give the Melkor version or commit, installation method, operating system, build type,
+        compiler version, SPZ setting, and sanitizer setting.
       render: text
     validations:
       required: true
@@ -102,12 +77,12 @@ body:
   - type: dropdown
     id: regression
     attributes:
-      label: Is this a regression?
+      label: Regression status
       description: State whether an earlier Melkor version completed the same work faster.
       options:
-        - "Yes — it was faster in an earlier Melkor version (say which, below)"
-        - "No — it has always been this slow, but I believe it should be faster"
-        - "Unknown / first time using Melkor for this workload"
+        - Yes, an earlier version was faster
+        - No, all tested versions behave the same
+        - Unknown or first use
     validations:
       required: true
 
@@ -115,29 +90,20 @@ body:
     id: profile
     attributes:
       label: Profile or trace
-      description: >-
-        Optional, and very welcome. A `perf`, Instruments, Xcode GPU capture, or Nsight profile that
-        shows where the time actually goes. If you have one, name the top few symbols or the dominant
-        phase here rather than only attaching a binary trace.
+      description: Attach a `perf` or Instruments profile when available. Name the dominant phase.
 
   - type: checkboxes
     id: acknowledgements
     attributes:
       label: Before you submit
       options:
-        - label: >-
-            I measured a **Release** build (or I have said explicitly that I did not, and why).
+        - label: I measured a Release build or explained why I did not.
+          required: true
+        - label: Another person can reproduce the command with the supplied input description.
           required: true
         - label: >-
-            The command above is reproducible by someone else, given the data description or the
-            attached asset.
+            This report does not describe unbounded resource use.
+            I will report unbounded resource use through the private security channel.
           required: true
-        - label: >-
-            This is a performance problem, not unbounded resource consumption. I understand that making
-            Melkor exhaust memory, CPU, or disk from an input file is a **security** report and belongs
-            in [private vulnerability reporting](https://github.com/sepahead/melkor/security/advisories/new).
-          required: true
-        - label: >-
-            I will not attach any asset I do not have the right to redistribute, and nothing I attach
-            contains personal data.
+        - label: I can redistribute each attached asset. The attachments contain no personal data.
           required: true

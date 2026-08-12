@@ -1,5 +1,9 @@
 # Remaining work roadmap (scoped 2026-07-15; A1 disposition updated 2026-07-16)
 
+> This file is a historical planning record.
+> It describes removed APIs and completed work.
+> Use [`production-blockers.md`](production-blockers.md) for current release gates.
+
 Produced by a 10-agent parallel scoping pass over the v2 blueprint. Each entry is grounded in the
 actual code. Ranked: implementable-now by impact then effort; resource-gated listed with the exact
 maintainer steps. This is a planning artifact, not a completion claim.

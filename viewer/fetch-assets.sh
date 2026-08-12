@@ -25,10 +25,12 @@ for arg in "$@"; do
   esac
 done
 
-THREE_VER="0.180.0"
-SPARK_VER="2.1.0"
-JSDELIVR="https://cdn.jsdelivr.net/npm/three@${THREE_VER}"
-
+for directory in vendor vendor/addons vendor/addons/postprocessing public public/splats; do
+  if [ -L "$directory" ] || { [ -e "$directory" ] && [ ! -d "$directory" ]; }; then
+    echo "ERROR: $directory must be absent or a normal directory" >&2
+    exit 1
+  fi
+done
 mkdir -p vendor/addons/postprocessing public/splats
 
 # path|url|sha256  — relative to vendor/ or public/splats/. The pinned SHA-256
@@ -37,10 +39,10 @@ mkdir -p vendor/addons/postprocessing public/splats
 # from third-party CDNs and then EXECUTED in the browser. Verifying the digest
 # turns a tampered/re-pointed/corrupted response into a hard failure.
 vendor_files=(
-  "vendor/three.module.js|${JSDELIVR}/build/three.module.js|c8211c69345d2e9949dc7a8ac969380497aa0600a5a8ac6a459c8cd02dd9cb8a"
-  "vendor/three.core.js|${JSDELIVR}/build/three.core.js|eb077d2417f61d3e6d9264c317cabc4ea35769ed6b0ab533067292a550784c20"
-  "vendor/addons/postprocessing/Pass.js|${JSDELIVR}/examples/jsm/postprocessing/Pass.js|444b409c235ead986893c472e720da1b779a56985c7d10b279c7944b52bd61c5"
-  "vendor/spark.module.js|https://sparkjs.dev/releases/spark/${SPARK_VER}/spark.module.js|c0355a962f68a6de9b13df69f05b1aba3614d9aec43a4504975daeb349126a8a"
+  "vendor/three.module.js|https://cdn.jsdelivr.net/npm/three@0.180.0/build/three.module.js|c8211c69345d2e9949dc7a8ac969380497aa0600a5a8ac6a459c8cd02dd9cb8a"
+  "vendor/three.core.js|https://cdn.jsdelivr.net/npm/three@0.180.0/build/three.core.js|eb077d2417f61d3e6d9264c317cabc4ea35769ed6b0ab533067292a550784c20"
+  "vendor/addons/postprocessing/Pass.js|https://cdn.jsdelivr.net/npm/three@0.180.0/examples/jsm/postprocessing/Pass.js|444b409c235ead986893c472e720da1b779a56985c7d10b279c7944b52bd61c5"
+  "vendor/spark.module.js|https://sparkjs.dev/releases/spark/2.1.0/spark.module.js|c0355a962f68a6de9b13df69f05b1aba3614d9aec43a4504975daeb349126a8a"
 )
 
 # External Gaussian-splat scenes used only as opt-in developer/render-test
@@ -57,11 +59,11 @@ splat_files=(
 # SHA-256 helper, resolved once and fail-closed: prefer sha256sum (Linux/CI),
 # fall back to shasum (macOS). If NEITHER exists we abort rather than silently
 # skipping the integrity check — a skipped check is the same as no check.
-if command -v sha256sum >/dev/null 2>&1; then _SHA="sha256sum"
-elif command -v shasum >/dev/null 2>&1; then _SHA="shasum -a 256"
+if command -v sha256sum >/dev/null 2>&1; then SHA_COMMAND=(sha256sum)
+elif command -v shasum >/dev/null 2>&1; then SHA_COMMAND=(shasum -a 256)
 else echo "ERROR: need sha256sum or shasum to verify downloads; aborting" >&2; exit 1
 fi
-sha256() { $_SHA "$1" | cut -d' ' -f1; }
+sha256() { "${SHA_COMMAND[@]}" -- "$1" | cut -d' ' -f1; }
 
 # Fetch with mandatory integrity check: download to a temp file, verify the
 # pinned digest, then atomically move into place. A pre-existing file is
@@ -69,14 +71,33 @@ sha256() { $_SHA "$1" | cut -d' ' -f1; }
 fetch() {
   local entry="$1" path url want got tmp
   path="${entry%%|*}"; entry="${entry#*|}"; url="${entry%%|*}"; want="${entry##*|}"
+  if [ -L "$path" ]; then
+    echo "ERROR  $path is a symbolic link" >&2
+    exit 1
+  fi
+  if [ -e "$path" ] && [ ! -f "$path" ]; then
+    echo "ERROR  $path is not a regular file" >&2
+    exit 1
+  fi
   if [ -s "$path" ]; then
     got="$(sha256 "$path")"
     if [ "$got" = "$want" ]; then echo "ok     $path (verified)"; return; fi
-    echo "warn   $path checksum drift, re-fetching"; rm -f "$path"
+    echo "warn   $path checksum drift, fetching a replacement"
   fi
   echo "fetch  $path"
-  tmp="${path}.part"
-  curl -fSL --connect-timeout 20 --max-time 900 -o "$tmp" "$url"
+  tmp="$(mktemp "${path}.part.XXXXXX")"
+  if ! curl -fSL --proto '=https' --proto-redir '=https' --tlsv1.2 \
+      --retry 3 --retry-all-errors --connect-timeout 20 --max-time 900 \
+      --max-filesize 268435456 \
+      -o "$tmp" "$url"; then
+    rm -f "$tmp"
+    return 1
+  fi
+  if [ "$(wc -c < "$tmp")" -gt 268435456 ]; then
+    echo "ERROR  $path exceeds the 256 MiB download limit" >&2
+    rm -f "$tmp"
+    return 1
+  fi
   got="$(sha256 "$tmp")"
   if [ "$got" != "$want" ]; then
     echo "ERROR  $path SHA-256 mismatch — refusing tampered/changed asset" >&2
@@ -86,7 +107,10 @@ fetch() {
     rm -f "$tmp"
     exit 1
   fi
-  mv "$tmp" "$path"
+  if ! python3 ../tools/atomic_publish.py "$tmp" "$path" --replace; then
+    rm -f "$tmp"
+    return 1
+  fi
   echo "ok     $path (verified)"
 }
 
@@ -101,10 +125,11 @@ echo "== project-owned demo assets =="
 node make-static-demo.js
 node make-4d-demo.js
 
-# Optional: dogfood melkor to emit a standard 3DGS .ply from one scene, so the
-# viewer's PLY entry (the 4th SparkJS format) lights up. Needs melkor built once:
-#   (cd .. && mkdir -p build && cd build && cmake .. && make melkor -j)
+# Optional: use Melkor to emit a Spark-compatible PLY from the external SPZ fixture.
+# SPZ does not store its unit or color space. Require both values from the user.
 MELKOR_BIN="${MELKOR_BIN:-}"
+IGLOO_UNIT_TO_METER="${MELKOR_IGLOO_UNIT_TO_METER:-}"
+IGLOO_COLOR_SPACE="${MELKOR_IGLOO_COLOR_SPACE:-}"
 if [ -z "$MELKOR_BIN" ]; then
   for candidate in ../build/dev/melkor ../build/melkor; do
     if [ -x "$candidate" ]; then
@@ -114,12 +139,27 @@ if [ -z "$MELKOR_BIN" ]; then
   done
 fi
 PLY_OUT="public/splats/distant-igloo.ply"
-if [ -n "$MELKOR_BIN" ] && [ -s "public/splats/distant-igloo.spz" ] && [ ! -s "$PLY_OUT" ]; then
+if [ -L "$PLY_OUT" ] || { [ -e "$PLY_OUT" ] && [ ! -f "$PLY_OUT" ]; }; then
+  echo "ERROR  $PLY_OUT must be absent or a regular file" >&2
+  exit 1
+fi
+if [ -n "$MELKOR_BIN" ] && [ -n "$IGLOO_UNIT_TO_METER" ] \
+   && [ -n "$IGLOO_COLOR_SPACE" ] \
+   && [ -s "public/splats/distant-igloo.spz" ] && [ ! -s "$PLY_OUT" ]; then
   echo "== melkor SPZ->PLY =="
   echo "convert $PLY_OUT (via $MELKOR_BIN)"
-  "$MELKOR_BIN" public/splats/distant-igloo.spz "$PLY_OUT" >/dev/null && echo "ok     $PLY_OUT"
+  if ! "$MELKOR_BIN" convert public/splats/distant-igloo.spz "$PLY_OUT" \
+      --source-unit-to-meter "$IGLOO_UNIT_TO_METER" \
+      --source-color-space "$IGLOO_COLOR_SPACE" \
+      --output-profile ply:graphdeco-3dgs-v1 \
+      --target-frame spz-rub >/dev/null; then
+    echo "ERROR  Melkor could not create $PLY_OUT" >&2
+    exit 1
+  fi
+  echo "ok     $PLY_OUT"
 elif [ ! -s "$PLY_OUT" ]; then
-  echo "note: build melkor to generate $PLY_OUT and enable the PLY scene (optional)"
+  echo "note: the optional PLY scene needs Melkor plus verified SPZ semantics"
+  echo "      set MELKOR_IGLOO_UNIT_TO_METER and MELKOR_IGLOO_COLOR_SPACE"
 fi
 
 # Optional: generate the synthetic 4D (temporal) demo sequence so the viewer's
@@ -131,7 +171,12 @@ if command -v node >/dev/null 2>&1 && [ -n "$MELKOR_BIN" ] \
    && [ -s "public/splats/4d/wave/manifest.json" ] \
    && [ ! -s "public/splats/4d/wave-spz/manifest.json" ]; then
   echo "== 4D SPZ pack =="
-  node pack-4d.js public/splats/4d/wave --spz --out public/splats/4d/wave-spz --melkor "$MELKOR_BIN"
+  node pack-4d.js public/splats/4d/wave \
+    --spz \
+    --out public/splats/4d/wave-spz \
+    --melkor "$MELKOR_BIN" \
+    --allow-loss LOSS_COLOR_SPACE_METADATA_DROPPED \
+    --allow-loss LOSS_COORDINATE_METADATA_DROPPED
 fi
 
-echo "Done. Serve with:  python3 -m http.server 8771 --bind 127.0.0.1  (then open /index.html)"
+echo "Done. Serve with:  bun run serve"

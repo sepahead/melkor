@@ -1,0 +1,56 @@
+{
+  "schema_version": 1,
+  "profile_id": "ply:da3-gaussian-v1",
+  "container": "ply",
+  "read_containers": [
+    "ply"
+  ],
+  "write_containers": [
+    "ply"
+  ],
+  "status": "experimental",
+  "description": "The Melkor PLY layout for the pinned Depth Anything 3 Gaussian output. It preserves real SH data through degree 4.",
+  "coordinate_system": "ply-rdf",
+  "length_unit": "unspecified",
+  "quaternion_order": "wxyz",
+  "quaternion_normalized": false,
+  "scale_domain": "log",
+  "scale_constraint": "positive-after-decoding",
+  "opacity_domain": "logit",
+  "color_space": "unspecified-requires-explicit",
+  "sh": {
+    "basis": "real",
+    "max_degree": 4,
+    "order": "graphdeco-flattened",
+    "phase": "condon-shortley",
+    "coefficients_per_degree": [1, 3, 5, 7, 9],
+    "dc_property": "f_dc_[0-2]",
+    "rest_property": "f_rest_[0-N]",
+    "note": "The pinned DA3 Gaussian head uses 25 coefficients per channel. Melkor also accepts complete lower degrees."
+  },
+  "properties": {
+    "scalar_type": "float32",
+    "position": ["x", "y", "z"],
+    "normal_optional": ["nx", "ny", "nz"],
+    "normal_handling": "zero-accepted,nonzero-severe-loss",
+    "opacity": "opacity",
+    "scale": ["scale_0", "scale_1", "scale_2"],
+    "rotation": ["rot_0", "rot_1", "rot_2", "rot_3"]
+  },
+  "required_properties": ["x", "y", "z", "f_dc_0", "f_dc_1", "f_dc_2", "opacity", "scale_0", "scale_1", "scale_2", "rot_0", "rot_1", "rot_2", "rot_3"],
+  "header_markers": {
+    "melkor_profile": "da3-gaussian-v1",
+    "melkor_coordinate_system": "required-for-melkor-output",
+    "melkor_length_unit": "meter",
+    "melkor_quaternion_order": "wxyz",
+    "melkor_scale_domain": "log",
+    "melkor_opacity_domain": "logit",
+    "melkor_color_space": "required-for-melkor-output",
+    "melkor_sh_basis": "real_condon_shortley",
+    "melkor_sh_degree": "0-4",
+    "melkor_antialiased": "0-or-1"
+  },
+  "upstream": "https://github.com/ByteDance-Seed/Depth-Anything-3",
+  "upstream_revision": "41736238f5bced4debf3f2a12375d2466874866d",
+  "license": "Apache-2.0"
+}

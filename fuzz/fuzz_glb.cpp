@@ -8,7 +8,7 @@
 // Builds two ways, like the other fuzz targets: a libFuzzer entry point for CI, and a standalone
 // corpus-replay driver.
 
-#include "melkor/glb_reader.hpp"
+#include "melkor/format/gltf_reader.hpp"
 
 #include <cstddef>
 #include <cstdint>
@@ -16,17 +16,16 @@
 namespace {
 
 void exercise(const uint8_t* data, size_t size) {
-    melkor::GlbReader reader;
-    auto result = reader.loadFromMemory(data, size);
-    if (!result.success) {
+    auto result = melkor::format::gltf::read_glb(data, size);
+    if (!result.has_value()) {
         return;
     }
-    if (!result.data.has_value() || !result.data->validate().has_value()) {
+    if (!result.value().data.validate().has_value()) {
         __builtin_trap();
     }
     // Touch canonical positions so a sanitizer build observes any bad memory the reader set up.
     volatile float sink = 0.0f;
-    for (const auto& position : result.data->positions()) {
+    for (const auto& position : result.value().data.positions()) {
         sink += position.x + position.y + position.z;
     }
     (void)sink;
@@ -46,25 +45,24 @@ extern "C" int LLVMFuzzerTestOneInput(const uint8_t* data, size_t size) {
 #include <vector>
 
 int main(int argc, char** argv) {
-    int cases = 0;
-    if (!melkor::fuzzing::replay_requested_inputs(argc, argv, exercise, cases))
-        return 1;
+    return melkor::fuzzing::run_standalone_main([&] {
+        int cases = 0;
+        if (!melkor::fuzzing::replay_requested_inputs(argc, argv, exercise, cases))
+            return 1;
 
-    // Built-in adversarial GLB shapes: empty, wrong magic, valid magic with a lying chunk length.
-    const std::vector<std::vector<uint8_t>> builtins = {
-        {},
-        {'n', 'o', 'p', 'e'},
-        // "glTF" magic, version 2, total length 12 (header only, no chunks).
-        {0x67, 0x6c, 0x54, 0x46, 0x02, 0x00, 0x00, 0x00, 0x0c, 0x00, 0x00, 0x00},
-        // magic, version 2, total length lying as 0xffffffff.
-        {0x67, 0x6c, 0x54, 0x46, 0x02, 0x00, 0x00, 0x00, 0xff, 0xff, 0xff, 0xff},
-    };
-    for (const auto& b : builtins) {
-        exercise(b.data(), b.size());
-        ++cases;
-    }
+        const std::vector<std::vector<uint8_t>> builtins = {
+            {},
+            {'n', 'o', 'p', 'e'},
+            {0x67, 0x6c, 0x54, 0x46, 0x02, 0x00, 0x00, 0x00, 0x0c, 0x00, 0x00, 0x00},
+            {0x67, 0x6c, 0x54, 0x46, 0x02, 0x00, 0x00, 0x00, 0xff, 0xff, 0xff, 0xff},
+        };
+        for (const auto& bytes : builtins) {
+            exercise(bytes.data(), bytes.size());
+            ++cases;
+        }
 
-    std::printf("glb fuzz replay: %d input(s) exercised without crash\n", cases);
-    return 0;
+        std::printf("glb fuzz replay: %d input(s) exercised without crash\n", cases);
+        return 0;
+    });
 }
 #endif  // MELKOR_FUZZER_RUNTIME

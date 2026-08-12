@@ -1,16 +1,12 @@
 // glTF extension policy.
 //
-// glTF's extension model has a precise contract that a correct reader must honor: an extension in
-// `extensionsRequired` MUST be understood or the asset MUST be rejected, because ignoring a required
-// extension can silently produce wrong geometry (a required compression extension, for instance,
-// means the accessor bytes are not what they appear). An extension in `extensionsUsed` but not
-// required MAY be ignored.
+// glTF has a precise extension contract. A reader must understand each name in
+// `extensionsRequired`. Otherwise, it must reject the asset. Ignoring required compression can
+// make accessor bytes appear valid when they are not. An extension declared only in
+// `extensionsUsed` can be ignored.
 //
-// The pre-v2 behavior rejected required extensions too broadly (P0-10): it refused assets it could
-// in fact have read. This module makes the decision precisely -- reject only the required extensions
-// Melkor does not implement, and report (rather than silently drop) the used-but-ignored ones -- so
-// a conforming `KHR_gaussian_splatting` asset is accepted and an asset that genuinely needs
-// something Melkor cannot do is refused with a clear reason.
+// The pre-v2 behavior rejected some supported assets. This module applies the exact rule. It
+// rejects unsupported required names. It reports optional names that Melkor does not use.
 
 #ifndef MELKOR_FORMAT_GLTF_EXTENSIONS_HPP
 #define MELKOR_FORMAT_GLTF_EXTENSIONS_HPP

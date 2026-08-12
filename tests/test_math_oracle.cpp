@@ -22,6 +22,7 @@
 #include <array>
 #include <cmath>
 #include <cstdio>
+#include <limits>
 
 // MSVC does not define M_PI without _USE_MATH_DEFINES; provide it so the test is portable.
 #ifndef M_PI
@@ -46,7 +47,9 @@ void check(bool condition, const char* what, int line) {
 
 #define CHECK(cond) check((cond), #cond, __LINE__)
 
-bool approx(double a, double b, double tol = 1e-9) { return std::fabs(a - b) <= tol; }
+bool approx(double a, double b, double tol = 1e-9) {
+    return std::fabs(a - b) <= tol;
+}
 
 // Frobenius distance between two 3x3 matrices.
 double mat_distance(const Mat3& a, const Mat3& b) {
@@ -63,7 +66,8 @@ Mat3 matmul(const Mat3& a, const Mat3& b) {
     for (int i = 0; i < 3; ++i)
         for (int j = 0; j < 3; ++j) {
             double s = 0.0;
-            for (int k = 0; k < 3; ++k) s += a[i * 3 + k] * b[k * 3 + j];
+            for (int k = 0; k < 3; ++k)
+                s += a[i * 3 + k] * b[k * 3 + j];
             c[i * 3 + j] = s;
         }
     return c;
@@ -122,11 +126,11 @@ void test_quaternion_matrix_roundtrip() {
     // matrix->quaternion formula loses all precision.
     const Quat rotations[] = {
         identity_quat(),
-        Quat{0.0, 0.0, std::sin(M_PI / 4), std::cos(M_PI / 4)},   // 90 deg about z
-        Quat{std::sin(M_PI / 4), 0.0, 0.0, std::cos(M_PI / 4)},   // 90 deg about x
-        Quat{1.0, 0.0, 0.0, 0.0},                                 // 180 deg about x (w = 0)
-        Quat{0.0, 1.0, 0.0, 0.0},                                 // 180 deg about y
-        Quat{0.5, 0.5, 0.5, 0.5},                                 // 120 deg about (1,1,1)
+        Quat{0.0, 0.0, std::sin(M_PI / 4), std::cos(M_PI / 4)},  // 90 deg about z
+        Quat{std::sin(M_PI / 4), 0.0, 0.0, std::cos(M_PI / 4)},  // 90 deg about x
+        Quat{1.0, 0.0, 0.0, 0.0},                                // 180 deg about x (w = 0)
+        Quat{0.0, 1.0, 0.0, 0.0},                                // 180 deg about y
+        Quat{0.5, 0.5, 0.5, 0.5},                                // 120 deg about (1,1,1)
     };
 
     for (const Quat& q0 : rotations) {
@@ -203,6 +207,24 @@ void test_covariance_is_symmetric_and_decomposes() {
     CHECK(mat_distance(s, sigma2.value()) < 1e-9);
 }
 
+void test_covariance_normalizes_accepted_rotation() {
+    const Quat near_unit{0.0, 0.0, 0.7070, 0.7070};
+    CHECK(is_unit(near_unit));
+    auto sigma = covariance_from_rotation_scale(near_unit, Vec3{2.0, 1.0, 0.5});
+    CHECK(sigma.has_value());
+    if (!sigma.has_value())
+        return;
+
+    auto exact = normalize(near_unit);
+    CHECK(exact.has_value());
+    if (!exact.has_value())
+        return;
+    auto reference = covariance_from_rotation_scale(exact.value(), Vec3{2.0, 1.0, 0.5});
+    CHECK(reference.has_value());
+    if (reference.has_value())
+        CHECK(mat_distance(sigma.value(), reference.value()) < 1e-12);
+}
+
 void test_affine_transform_reshapes_covariance() {
     // THE headline. An anisotropic Gaussian, transformed by a rotation, must have its covariance
     // reshaped as A Σ Aᵀ. Prove both that the result equals A Σ Aᵀ, and -- crucially -- that it
@@ -215,9 +237,7 @@ void test_affine_transform_reshapes_covariance() {
     CHECK(sigma0.has_value());
 
     // A: 90-degree rotation about z. This should swap the long axis from x to y.
-    const Mat3 A{0.0, -1.0, 0.0,
-                 1.0, 0.0, 0.0,
-                 0.0, 0.0, 1.0};
+    const Mat3 A{0.0, -1.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 1.0};
 
     auto rs = affine_transform_gaussian(A, rot, scale);
     CHECK(rs.has_value());
@@ -247,9 +267,7 @@ void test_affine_transform_nonuniform_scale() {
     auto sigma0 = covariance_from_rotation_scale(rot, scale);
     CHECK(sigma0.has_value());
 
-    const Mat3 A{2.0, 0.0, 0.0,
-                 0.0, 3.0, 0.0,
-                 0.0, 0.0, 1.0};  // non-uniform scale
+    const Mat3 A{2.0, 0.0, 0.0, 0.0, 3.0, 0.0, 0.0, 0.0, 1.0};  // non-uniform scale
 
     auto rs = affine_transform_gaussian(A, rot, scale);
     CHECK(rs.has_value());
@@ -269,9 +287,7 @@ void test_affine_transform_reflection() {
     auto sigma0 = covariance_from_rotation_scale(rot, scale);
     CHECK(sigma0.has_value());
 
-    const Mat3 A{-1.0, 0.0, 0.0,
-                 0.0, 1.0, 0.0,
-                 0.0, 0.0, 1.0};  // reflect across x, determinant -1
+    const Mat3 A{-1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0};  // reflect across x, determinant -1
 
     auto rs = affine_transform_gaussian(A, rot, scale);
     CHECK(rs.has_value());
@@ -284,25 +300,36 @@ void test_affine_transform_reflection() {
     CHECK(mat_distance(sigma_out.value(), reference) < 1e-8);
 }
 
-void test_singular_transform_is_rejected() {
-    // A transform that collapses the Gaussian to a plane has no valid positive-scale
-    // decomposition and must fail rather than emit a degenerate scale.
-    const Mat3 A{1.0, 0.0, 0.0,
-                 0.0, 1.0, 0.0,
-                 0.0, 0.0, 0.0};  // determinant 0
+void test_singular_transform_preserves_degenerate_covariance() {
+    const Mat3 A{1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0};  // determinant 0
     auto rs = affine_transform_gaussian(A, identity_quat(), Vec3{1.0, 1.0, 1.0});
-    CHECK(!rs.has_value());
-    CHECK(rs.diagnostics()[0].code == "MK1306_SINGULAR_TRANSFORM");
+    CHECK(rs.has_value());
+    if (!rs.has_value())
+        return;
+    CHECK(rs.value().scale[2] == 0.0);
+    auto covariance = covariance_from_rotation_scale(rs.value().rotation, rs.value().scale);
+    CHECK(covariance.has_value());
+    if (covariance.has_value())
+        CHECK(mat_distance(covariance.value(), Mat3{1, 0, 0, 0, 1, 0, 0, 0, 0}) < 1e-12);
 }
 
 void test_non_covariance_is_rejected() {
     // A symmetric matrix with a substantial negative eigenvalue is not a covariance.
-    const Mat3 not_psd{-5.0, 0.0, 0.0,
-                       0.0, 1.0, 0.0,
-                       0.0, 0.0, 1.0};
+    const Mat3 not_psd{-5.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0};
     auto rs = rotation_scale_from_covariance(not_psd);
     CHECK(!rs.has_value());
-    CHECK(rs.diagnostics()[0].code == "MK1304_NOT_POSITIVE_SEMIDEFINITE");
+    CHECK(rs.diagnostics()[0].code == "MK1413_NOT_POSITIVE_SEMIDEFINITE");
+}
+
+void test_eigenvalue_overflow_is_rejected() {
+    const double maximum = std::numeric_limits<double>::max();
+    const Mat3 rank_one{maximum, maximum, maximum, maximum, maximum,
+                        maximum, maximum, maximum, maximum};
+    auto result = symmetric_eigen(rank_one);
+    CHECK(!result.has_value());
+    CHECK(result.error_code() == ErrorCode::invalid_data);
+    if (!result.diagnostics().empty())
+        CHECK(result.diagnostics()[0].code == "MK1419_EIGENVALUE_OVERFLOW");
 }
 
 // ---------------------------------------------------------------------------
@@ -321,7 +348,8 @@ void test_color_conversions() {
     CHECK(approx(srgb_to_linear(1.0f), 1.0, 1e-6));
     CHECK(srgb_to_linear(0.5f) < 0.25f && srgb_to_linear(0.5f) > 0.20f);
 
-    // DC <-> RGB are inverses, and DC is NOT a gamma conversion: middle gray linear 0.5 maps to DC 0.
+    // DC <-> RGB are inverses, and DC is NOT a gamma conversion: middle gray linear 0.5 maps to DC
+    // 0.
     CHECK(approx(sh_dc_to_rgb(rgb_to_sh_dc(0.7f)), 0.7, 1e-5));
     CHECK(approx(rgb_to_sh_dc(0.5f), 0.0, 1e-6));  // rgb 0.5 is the DC zero point
     // A DC term can legitimately be negative or exceed the input range -- it is not clamped.
@@ -347,12 +375,26 @@ void test_coordinate_frames() {
     CHECK(!frame.value().includes_reflection);
     const Vec3 swapped = position_to_canonical(frame.value(), Vec3{1.0, 0.0, 0.0});
     CHECK(approx(swapped[0], 0.0) && approx(swapped[1], 1.0));
+    const Vec3 restored = position_from_canonical(frame.value(), swapped);
+    CHECK(approx(restored[0], 1.0) && approx(restored[1], 0.0));
+
+    const Quat orientation = normalize(Quat{0.2, -0.3, 0.1, 0.9}).value();
+    auto canonical_orientation = rotation_to_canonical(frame.value(), orientation);
+    CHECK(canonical_orientation.has_value());
+    if (canonical_orientation.has_value()) {
+        auto restored_orientation =
+            rotation_from_canonical(frame.value(), canonical_orientation.value());
+        CHECK(restored_orientation.has_value());
+        if (restored_orientation.has_value())
+            CHECK(angular_distance(orientation, restored_orientation.value()) < 1e-12);
+    }
 
     // A reflecting frame is accepted but flagged, so it cannot be applied silently.
     const Mat3 reflect{-1, 0, 0, 0, 1, 0, 0, 0, 1};
     auto reflected = frame_from_basis("test-reflect", reflect, 1.0);
     CHECK(reflected.has_value());
     CHECK(reflected.value().includes_reflection);
+    CHECK(!rotation_to_canonical(reflected.value(), identity_quat()).has_value());
 
     // A non-orthogonal matrix is not a coordinate frame and is rejected.
     const Mat3 skew{1, 0.5, 0, 0, 1, 0, 0, 0, 1};
@@ -360,11 +402,27 @@ void test_coordinate_frames() {
     CHECK(!bad.has_value());
     CHECK(bad.diagnostics()[0].code == "MK1403_NON_ORTHOGONAL_FRAME");
 
-    // Unit scaling: a frame in centimetres converts to metres.
+    // Unit scaling: a frame in centimeters converts to meters.
     auto cm = frame_from_basis("test-cm", Mat3{1, 0, 0, 0, 1, 0, 0, 0, 1}, 0.01);
     CHECK(cm.has_value());
-    const Vec3 metres = position_to_canonical(cm.value(), Vec3{100.0, 0.0, 0.0});
-    CHECK(approx(metres[0], 1.0));  // 100 cm == 1 m
+    const Vec3 meters = position_to_canonical(cm.value(), Vec3{100.0, 0.0, 0.0});
+    CHECK(approx(meters[0], 1.0));  // 100 cm == 1 m
+
+    // The registered SPZ and typical PLY frames use exact two-axis flips.
+    auto rdf = frame_by_id("ply-rdf");
+    CHECK(rdf.has_value());
+    if (rdf.has_value()) {
+        const Vec3 converted = position_to_canonical(rdf.value(), Vec3{1.0, 2.0, 3.0});
+        CHECK((converted == Vec3{-1.0, -2.0, 3.0}));
+        CHECK(!rdf.value().includes_reflection);
+    }
+    auto rub = frame_by_id("spz-rub");
+    CHECK(rub.has_value());
+    if (rub.has_value()) {
+        const Vec3 converted = position_to_canonical(rub.value(), Vec3{1.0, 2.0, 3.0});
+        CHECK((converted == Vec3{-1.0, 2.0, -3.0}));
+        CHECK(!rub.value().includes_reflection);
+    }
 
     // An unknown frame ID is rejected rather than silently defaulted.
     CHECK(!frame_by_id("opengl").has_value());
@@ -380,10 +438,11 @@ void test_rotation_from_linear() {
     auto r1 = rotation_from_linear(R);
     CHECK(r1.has_value());
     if (r1.has_value())
-        for (std::size_t i = 0; i < 9; ++i) CHECK(approx(r1.value()[i], R[i], 1e-9));
+        for (std::size_t i = 0; i < 9; ++i)
+            CHECK(approx(r1.value()[i], R[i], 1e-9));
 
-    // Rotation composed with a non-uniform positive scale recovers the rotation. Build M = R diag(s)
-    // (scale each column of R), the same factorization the covariance transform uses.
+    // Rotation composed with a non-uniform positive scale recovers the rotation. Build M = R
+    // diag(s) (scale each column of R), the same factorization the covariance transform uses.
     const Vec3 s{2.0, 0.5, 1.3};
     Mat3 RS{};
     for (int row = 0; row < 3; ++row)
@@ -392,14 +451,16 @@ void test_rotation_from_linear() {
     auto r2 = rotation_from_linear(RS);
     CHECK(r2.has_value());
     if (r2.has_value())
-        for (std::size_t i = 0; i < 9; ++i) CHECK(approx(r2.value()[i], R[i], 1e-8));
+        for (std::size_t i = 0; i < 9; ++i)
+            CHECK(approx(r2.value()[i], R[i], 1e-8));
 
     // A pure positive scale has rotation component identity.
     auto r3 = rotation_from_linear(Mat3{3, 0, 0, 0, 1.5, 0, 0, 0, 0.7});
     CHECK(r3.has_value());
     if (r3.has_value()) {
         const Mat3 I{1, 0, 0, 0, 1, 0, 0, 0, 1};
-        for (std::size_t i = 0; i < 9; ++i) CHECK(approx(r3.value()[i], I[i], 1e-9));
+        for (std::size_t i = 0; i < 9; ++i)
+            CHECK(approx(r3.value()[i], I[i], 1e-9));
     }
 
     // The result is always a proper rotation: RᵀR = I and det = +1.
@@ -417,11 +478,13 @@ void test_rotation_from_linear() {
     // A rotation combined with a small UNIFORM scale must still be accepted: the determinant scales
     // as scale^3 (here 1e-3^3 = 1e-9), so an absolute determinant floor would wrongly reject it.
     Mat3 small{};
-    for (std::size_t i = 0; i < 9; ++i) small[i] = R[i] * 1e-3;
+    for (std::size_t i = 0; i < 9; ++i)
+        small[i] = R[i] * 1e-3;
     auto r_small = rotation_from_linear(small);
     CHECK(r_small.has_value());
     if (r_small.has_value())
-        for (std::size_t i = 0; i < 9; ++i) CHECK(approx(r_small.value()[i], R[i], 1e-7));
+        for (std::size_t i = 0; i < 9; ++i)
+            CHECK(approx(r_small.value()[i], R[i], 1e-7));
 }
 
 void test_small_scale_covariance_decomposition() {
@@ -433,13 +496,16 @@ void test_small_scale_covariance_decomposition() {
     const Vec3 s{4e-8, 2e-8, 1e-8};
     auto sigma = covariance_from_rotation_scale(q, s);
     CHECK(sigma.has_value());
-    if (!sigma.has_value()) return;
+    if (!sigma.has_value())
+        return;
     auto rs = rotation_scale_from_covariance(sigma.value());
     CHECK(rs.has_value());
-    if (!rs.has_value()) return;
+    if (!rs.has_value())
+        return;
     auto sigma2 = covariance_from_rotation_scale(rs.value().rotation, rs.value().scale);
     CHECK(sigma2.has_value());
-    if (!sigma2.has_value()) return;
+    if (!sigma2.has_value())
+        return;
     double num = 0.0, den = 0.0;
     for (int i = 0; i < 9; ++i) {
         const double diff = sigma.value()[i] - sigma2.value()[i];
@@ -452,7 +518,8 @@ void test_small_scale_covariance_decomposition() {
     std::array<double, 3> want{4e-8, 2e-8, 1e-8};
     std::sort(got.begin(), got.end());
     std::sort(want.begin(), want.end());
-    for (int i = 0; i < 3; ++i) CHECK(approx(got[i], want[i], 1e-10));
+    for (int i = 0; i < 3; ++i)
+        CHECK(approx(got[i], want[i], 1e-10));
 }
 
 int main() {
@@ -467,11 +534,13 @@ int main() {
     test_from_frame();
 
     test_covariance_is_symmetric_and_decomposes();
+    test_covariance_normalizes_accepted_rotation();
     test_affine_transform_reshapes_covariance();
     test_affine_transform_nonuniform_scale();
     test_affine_transform_reflection();
-    test_singular_transform_is_rejected();
+    test_singular_transform_preserves_degenerate_covariance();
     test_non_covariance_is_rejected();
+    test_eigenvalue_overflow_is_rejected();
     test_rotation_from_linear();
 
     if (g_failures == 0) {

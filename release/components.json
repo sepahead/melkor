@@ -9,81 +9,42 @@
       ],
       "name": "spz",
       "paths": [
-        "third_party/spz"
+        "third_party/spz",
+        "third_party/patches/spz"
       ],
       "spdx_id": "SPDXRef-Package-spz",
       "supplier": "Organization: Niantic Labs",
-      "version": "1.1.0"
-    },
-    {
-      "distribution": "vendored",
-      "download_location": "https://github.com/syoyo/tinygltf",
-      "license_declared": "MIT",
-      "license_files": [
-        "THIRD_PARTY_LICENSES.md"
-      ],
-      "name": "tinygltf",
-      "paths": [
-        "third_party/tinygltf/tiny_gltf.h"
-      ],
-      "spdx_id": "SPDXRef-Package-tinygltf",
-      "version": "NOASSERTION"
+      "version": "2.1.0"
     },
     {
       "distribution": "vendored",
       "download_location": "https://github.com/nlohmann/json",
       "license_declared": "MIT",
       "license_files": [
-        "THIRD_PARTY_LICENSES.md"
+        "third_party/nlohmann-json/LICENSE.MIT"
       ],
       "name": "nlohmann-json",
       "paths": [
-        "third_party/tinygltf/json.hpp"
+        "third_party/nlohmann-json"
       ],
       "spdx_id": "SPDXRef-Package-nlohmann-json",
-      "version": "3.10.4"
+      "supplier": "Person: Niels Lohmann",
+      "version": "3.12.0"
     },
     {
       "distribution": "vendored",
-      "download_location": "NOASSERTION",
-      "license_declared": "NOASSERTION",
+      "download_location": "https://github.com/KhronosGroup/glTF/tree/63770cc70a3709cf101a42cece0bdf602b37e2e7/extensions/2.0/Khronos/KHR_gaussian_splatting",
+      "license_declared": "CC-BY-4.0",
       "license_files": [
-        "THIRD_PARTY_LICENSES.md"
+        "third_party/specs/KHR_gaussian_splatting/63770cc70a37/README.md"
       ],
-      "name": "rene-nyffenegger-base64",
+      "name": "KHR_gaussian_splatting",
       "paths": [
-        "third_party/tinygltf/tiny_gltf.h"
+        "third_party/specs/KHR_gaussian_splatting/63770cc70a37"
       ],
-      "spdx_id": "SPDXRef-Package-rene-nyffenegger-base64",
-      "version": "NOASSERTION"
-    },
-    {
-      "distribution": "vendored",
-      "download_location": "https://github.com/davisking/dlib",
-      "license_declared": "BSL-1.0",
-      "license_files": [
-        "THIRD_PARTY_LICENSES.md"
-      ],
-      "name": "dlib-uri-decoder",
-      "paths": [
-        "third_party/tinygltf/tiny_gltf.h"
-      ],
-      "spdx_id": "SPDXRef-Package-dlib-uri-decoder",
-      "version": "NOASSERTION"
-    },
-    {
-      "distribution": "vendored",
-      "download_location": "https://github.com/nothings/stb",
-      "license_declared": "MIT",
-      "license_files": [
-        "THIRD_PARTY_LICENSES.md"
-      ],
-      "name": "stb-image",
-      "paths": [
-        "third_party/stb/stb_image.h"
-      ],
-      "spdx_id": "SPDXRef-Package-stb-image",
-      "version": "NOASSERTION"
+      "spdx_id": "SPDXRef-Package-KHR-gaussian-splatting",
+      "supplier": "Organization: The Khronos Group Inc.",
+      "version": "63770cc70a3709cf101a42cece0bdf602b37e2e7"
     },
     {
       "artifacts": [
@@ -143,6 +104,7 @@
   ],
   "dependency_manifests": [
     "third_party/manifest.lock.json",
+    "third_party/specifications.lock.json",
     "third_party/spz/pyproject.toml",
     "viewer/package-lock.json",
     "viewer/src-tauri/Cargo.lock"

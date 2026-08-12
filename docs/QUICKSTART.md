@@ -1,22 +1,20 @@
 # Quick Start
 
-This guide builds and tests the current development source.
-No supported production binary exists yet.
+This guide builds and tests the current Melkor development source.
+No supported production binary exists.
 
 ## Requirements
 
 Install these native build tools:
 
 - Git
-- CMake 3.25 or later for the included presets
+- CMake 3.24 or later
 - Ninja
 - A C++17 compiler
+- zlib for SPZ support
 
-Install Python 3.11 and NumPy 2.4.6 for the complete test set.
-The native CLI does not require Python at run time.
-
-On macOS, install the Xcode Command Line Tools.
-On Linux, install GCC or Clang.
+Install Python 3.11 for the complete CTest set.
+The native CLI does not need Python at run time.
 
 ## Get the source
 
@@ -25,158 +23,183 @@ git clone https://github.com/sepahead/melkor.git
 cd melkor
 ```
 
-Verify the vendored dependency lock:
+Verify the committed dependency snapshots:
 
 ```bash
 ./scripts/setup_deps.sh
 ```
 
-This script does not download live dependencies.
-It checks the committed snapshots and their recorded patches.
+The script verifies source digests and patch records.
+It does not download a live dependency.
 
 ## Create the test environment
-
-Create this environment when you need the complete CTest set:
 
 ```bash
 python3.11 -m venv .venv
 . .venv/bin/activate
 python -m pip install --disable-pip-version-check \
-  --only-binary=:all: numpy==2.4.6
+  --only-binary=:all: jsonschema==4.26.0 numpy==2.4.6
 ```
 
 ## Build and test
 
-Use the development preset:
-
 ```bash
-cmake --preset dev
+cmake --preset dev -DPython3_EXECUTABLE="$VIRTUAL_ENV/bin/python"
 cmake --build --preset dev --parallel
 ctest --preset dev
 ```
 
-The development executable is `build/dev/melkor`.
+The executable is `build/dev/melkor`.
 
-Confirm the source version and active backend:
+The `MELKOR_BUILD_SPZ` setting accepts `AUTO`, `ON`, or `OFF`.
+`AUTO` enables SPZ when CMake finds the vendored source and zlib.
+`ON` stops configuration when either requirement is absent.
+`OFF` removes SPZ support.
 
-```bash
-./build/dev/melkor --version
-./build/dev/melkor --info
-```
-
-Build the CPU-only topology separately:
+Test the no-SPZ build separately:
 
 ```bash
-cmake -S . -B build/review-cpu -G Ninja \
-  -DMELKOR_USE_METAL=OFF \
-  -DMELKOR_USE_CUDA=OFF \
-  -DMELKOR_WERROR=ON
-cmake --build build/review-cpu --parallel
-ctest --test-dir build/review-cpu --output-on-failure --no-tests=error
+cmake --preset spz-off
+cmake --build --preset spz-off --parallel
+ctest --preset spz-off
 ```
-
-## Convert a mesh
-
-The current mesh path creates one splat for each mesh vertex.
-It does not train a scene from photographs.
-
-```bash
-./build/dev/melkor model.glb scene.ply --basic
-```
-
-Write SPZ instead:
-
-```bash
-./build/dev/melkor model.glb scene.spz --basic
-```
-
-Use these basic conversion controls when necessary:
-
-```text
---scale FLOAT       Default splat scale
---opacity FLOAT     Default opacity in [0, 1]
---pos-scale FLOAT   Position scale
---no-coord-convert  Keep the input coordinate orientation
---ascii             Write ASCII PLY
-```
-
-`--enhanced` is unavailable.
-It fails until the canonical area-weighted mesh sampler is complete.
-
-## Convert PLY and SPZ
-
-Convert a 3DGS PLY file to SPZ:
-
-```bash
-./build/dev/melkor scene.ply scene.spz
-```
-
-Convert a supported SPZ file to PLY:
-
-```bash
-./build/dev/melkor scene.spz scene.ply
-```
-
-The current decoder reads SPZ file-format versions 1 through 3.
-The current encoder writes version 3.
-SPZ conversion is lossy.
-
-SPZ v4 support remains a release blocker.
-See [the production blocker register](audit/production-blockers.md).
 
 ## Inspect an asset
 
-Inspect a PLY, SPZ, GLB, or glTF file:
+Inspect a self-describing asset:
 
 ```bash
-./build/dev/melkor inspect scene.ply
-./build/dev/melkor inspect scene.spz --json
-./build/dev/melkor inspect model.glb --json --strict
+./build/dev/melkor inspect scene.glb
+./build/dev/melkor inspect scene.gltf --json --strict
+./build/dev/melkor inspect scene.ply --limits-profile desktop
 ```
 
-Use `--strict` to treat warnings as a failed validation.
-The command does not initialize a GPU.
+Use `--strict` to fail when the report contains a warning.
+Inspection does not modify the input.
 
-The exit codes are:
+PLY and SPZ omit some source semantics.
+Supply each missing value from trusted producer information.
 
-| Code | Meaning |
-|---:|---|
-| 0 | The asset has no blocking issue. |
-| 1 | The asset is invalid, or strict mode found a warning. |
-| 2 | The command use is invalid. |
-
-See [Asset inspection](INSPECT.md) for the JSON contract.
-
-## Convert a Gaussian GLB
-
-The explicit `convert` command currently supports GLB-to-GLB conversion.
-It applies the loss policy before it commits the output.
+For example, inspect a Graphdeco PLY file with verified source semantics:
 
 ```bash
-./build/dev/melkor convert input.glb output.glb
+./build/dev/melkor inspect trained.ply \
+  --input-profile ply:graphdeco-3dgs-v1 \
+  --source-frame gltf-luf \
+  --source-unit-to-meter 1 \
+  --source-color-space lin_rec709_display
 ```
 
-If a severe loss is present, approve only its exact code:
+Do not copy these semantic values without checking the producer.
+A Graphdeco PLY header does not define them.
+
+Inspect an SPZ file with its out-of-band unit and color space:
 
 ```bash
-./build/dev/melkor convert input.glb output.glb \
-  --allow-loss LOSS_CODE
+./build/dev/melkor inspect scene.spz \
+  --source-unit-to-meter 1 \
+  --source-color-space lin_rec709_display
 ```
 
-Do not approve a loss code until you review its effect.
-See [Loss policy](reference/loss-policy.md).
+See [Asset inspection](INSPECT.md) for the report schema and exit codes.
 
-## Scene completion status
+## Convert an asset
 
-`--fill-holes` currently fails closed.
-The internal densifier still uses the retired mutable model.
+Convert through the canonical model:
 
-See [Scene completion](SCENE_COMPLETION.md) for the internal algorithm and migration status.
+```bash
+./build/dev/melkor convert scene.glb scene.ply
+./build/dev/melkor convert scene.ply roundtrip.glb
+```
 
-## Run the viewer
+The command writes one JSON loss report to stdout.
+It commits the output only after validation and loss-policy checks pass.
+The command writes the report after output staging and before the atomic commit.
+Use the report only when the command returns exit status zero.
+
+An SPZ output omits coordinate and color-space metadata.
+Approve these losses only when the sidecar or workflow preserves that information:
+
+```bash
+./build/dev/melkor convert scene.ply scene.spz \
+  --allow-loss LOSS_COLOR_SPACE_METADATA_DROPPED \
+  --allow-loss LOSS_COORDINATE_METADATA_DROPPED
+```
+
+SPZ output also quantizes numeric values.
+The report records that warning without requiring approval.
+
+Convert SPZ back to a self-describing PLY file:
+
+```bash
+./build/dev/melkor convert scene.spz scene.ply \
+  --source-unit-to-meter 1 \
+  --source-color-space lin_rec709_display
+```
+
+Melkor reads SPZ file-format versions 1 through 3.
+It writes version 3.
+SPZ version 4 remains unsupported.
+
+## Select a format explicitly
+
+Melkor normally selects a container from its suffix and verified content.
+Use an explicit format for a suffixless path:
+
+```bash
+./build/dev/melkor inspect asset --input-format glb
+./build/dev/melkor convert input.glb output --output-format ply
+```
+
+Use `--` before a path that starts with a hyphen.
+
+## Use resource profiles
+
+Every command uses one bounded profile:
+
+- `web` for small browser-oriented assets
+- `desktop` for interactive workstation use
+- `server` for larger controlled jobs
+
+Select a profile explicitly when the default is unsuitable:
+
+```bash
+./build/dev/melkor inspect scene.glb --limits-profile server
+```
+
+There is no unlimited profile.
+See [Resource limits](reference/resource-limits.md) for exact ceilings.
+
+## Install the C SDK
+
+```bash
+cmake --preset release
+cmake --build --preset release --parallel
+cmake --install build/release --prefix "$PWD/build/install"
+```
+
+The installation contains:
+
+- The `melkor` executable
+- The `libmelkor` shared library
+- `melkor/c/melkor.h`
+- `melkor/version.h`
+- CMake package files
+- Format profiles and schemas
+- License files
+
+The installation does not expose an internal C++ ABI.
+C++ programs call the C ABI.
+
+Run the clean install and relocation test:
+
+```bash
+./scripts/test_sdk_install.sh -DMELKOR_BUILD_SPZ=ON
+```
+
+## Run the local viewer
 
 The viewer uses a separate JavaScript workspace.
-Fetch the digest-checked runtime assets:
 
 ```bash
 cd viewer
@@ -185,63 +208,24 @@ bun run serve
 ```
 
 Open `http://127.0.0.1:8771/`.
-The server binds to the loopback interface by default.
+The development server binds to the loopback interface.
 
-See [the viewer guide](../viewer/README.md) for controls and test commands.
+See the [Viewer guide](../viewer/README.md) for controls and desktop build steps.
 
-## External reconstruction pipeline
+## Use an external reconstruction adapter
 
-Photo reconstruction uses external tools.
-The current shell wrappers are development tools.
-They do not provide a pinned supply-chain boundary.
+Melkor does not train a scene from photographs.
+The shell scripts can call a user-supplied external trainer.
 
-Review [the pipeline guide](PIPELINE.md) before you run an external tool.
-Review [the adapter catalog](adapters/index.md) for licenses and model terms.
+Review these boundaries before you run one:
 
-The pipeline uses incremental COLMAP by default:
+- [Pipeline guide](PIPELINE.md)
+- [Adapter boundary](adapters/index.md)
+- [Third-party licenses](../THIRD_PARTY_LICENSES.md)
 
-```bash
-./scripts/pipeline.sh /path/to/images /path/to/output \
-  --sfm colmap \
-  --opensplat /reviewed/bin/opensplat
-```
-
-Use a compatible COLMAP global mapper explicitly:
-
-```bash
-./scripts/pipeline.sh /path/to/images /path/to/output \
-  --sfm global \
-  --opensplat /reviewed/bin/opensplat
-```
-
-The old `--sfm glomap` value is invalid.
-See [the migration guide](migrations/2.0-glomap-to-colmap-global.md).
-
-The retired setup scripts do not install external trainers.
-Use a reviewed external installation and an explicit executable path.
-
-## Install the SDK locally
-
-Configure an installable CPU build:
-
-```bash
-cmake --preset release-cpu
-cmake --build --preset release-cpu --parallel
-cmake --install build/release-cpu --prefix "$HOME/.local"
-```
-
-Confirm the installed command:
-
-```bash
-"$HOME/.local/bin/melkor" --version
-```
-
-The install also provides the C API, C++ headers, and CMake package files.
-Use `scripts/test_sdk_install.sh` to test a clean temporary prefix.
+External code and model weights keep their own license terms.
 
 ## Run repository checks
-
-Run the maintained Python and documentation checks:
 
 ```bash
 ruff check . --no-unsafe-fixes
@@ -267,10 +251,10 @@ git ls-files -z -- '*.sh' | xargs -0 shellcheck --severity=warning
 
 If CMake cannot find Ninja, install Ninja or select another generator.
 
-If Python-backed tests are absent, reconfigure with the virtual environment active.
+If Python tests are absent, reconfigure with the virtual environment active.
 You can also set `-DPython3_EXECUTABLE="$VIRTUAL_ENV/bin/python"`.
 
-If SPZ support is absent, verify the vendored dependencies first:
+If SPZ configuration fails, verify the vendored source and zlib:
 
 ```bash
 ./scripts/setup_deps.sh
@@ -278,5 +262,4 @@ cmake --preset dev --fresh
 cmake --build --preset dev --parallel
 ```
 
-If `colmap global_mapper` is absent, use a compatible COLMAP build.
-Do not install the retired standalone GLOMAP program.
+Use the `spz-off` preset when zlib is intentionally unavailable.

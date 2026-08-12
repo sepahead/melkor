@@ -10,22 +10,22 @@
 // halfway through would truncate your good `scene.spz` and then delete it. The user is left
 // with nothing: not the new file, and not the old one either. That is release blocker P0-08.
 //
-// Every output in Melkor -- PLY, SPZ, glTF, JSON reports, run manifests -- goes through this
-// one implementation. Format-specific copies of "open the file and hope" are exactly how the
-// bug happened once and would happen again.
+// Native CLI file writers use this implementation for committed output.
 //
 // The algorithm:
 //
-//   1. Validate the parent directory and the overwrite policy *before* touching anything.
+//   1. Open and validate the parent directory before creating output.
 //   2. Refuse a destination that is a directory.
 //   3. Refuse to follow a symlink at the destination, unless explicitly allowed. Otherwise a
 //      symlink planted at the output path redirects the write to somewhere the user never
 //      named.
 //   4. Create an unpredictably-named temporary in the *same directory*, with O_EXCL.
 //   5. Write, flush, and (for full durability) fsync it.
-//   6. Only then, atomically replace the destination.
-//   7. On any failure at any step, remove only the temporary. The destination is untouched
-//      because it was never opened.
+//   6. Atomically install the destination through the same directory object on POSIX.
+//   7. Remove only the temporary after a failure before installation.
+//
+// A directory-sync or temporary-cleanup failure can occur after installation.
+// In that case, commit() returns an error and committed() returns true.
 //
 // The temporary must be in the same directory as the destination, not in /tmp: `rename()` is
 // only atomic within a single filesystem, and /tmp is frequently a different one. A
@@ -43,6 +43,7 @@
 #include <filesystem>
 #include <memory>
 #include <ostream>
+#include <string>
 #include <vector>
 
 namespace melkor::io {
@@ -53,9 +54,8 @@ enum class Durability : std::uint8_t {
     // is expensive and most users are not writing a database.
     metadata,
 
-    // fsync the file before rename, and fsync the parent directory after. Survives power
-    // loss. Used by release artifacts and pipeline manifests, where losing the record of what
-    // happened is worse than the write being slow.
+    // Sync the file before rename. Sync the parent directory after rename when the platform
+    // supports it. This mode reduces the risk of data loss after a power failure.
     full,
 };
 
@@ -66,8 +66,8 @@ struct WriteOptions {
 
     Durability durability = Durability::metadata;
 
-    // Following a symlink at the output path means writing wherever it points, which may be
-    // somewhere the user never named and may not own. Off by default.
+    // Replacing a symlink path can surprise the caller. Require explicit API approval.
+    // The replacement leaves the symlink target unchanged.
     bool allow_output_symlink = false;
 };
 
@@ -77,7 +77,7 @@ struct WriteOptions {
 // exception unwound the stack -- the temporary is removed and the destination is left exactly
 // as it was. The safe outcome is the one you get by doing nothing.
 class AtomicWriter {
-  public:
+public:
     // Validates the destination and opens the temporary. Fails without side effects if the
     // destination exists and `overwrite` is false, if it is a directory, or if it is a symlink
     // and symlinks are not allowed.
@@ -85,7 +85,7 @@ class AtomicWriter {
                                                         const WriteOptions& options,
                                                         const OperationContext& context);
 
-    ~AtomicWriter();
+    ~AtomicWriter() noexcept;
 
     AtomicWriter(const AtomicWriter&) = delete;
     AtomicWriter& operator=(const AtomicWriter&) = delete;
@@ -94,10 +94,11 @@ class AtomicWriter {
     // bound is stopped rather than filling the disk.
     Result<void> write(const void* data, std::size_t size);
 
-    // Flushes, optionally fsyncs, closes, and atomically replaces the destination.
+    // Flushes, optionally fsyncs, closes, and atomically installs the destination.
     //
-    // After this returns success, the destination is the new file. If it returns failure, the
-    // destination is whatever it was before -- unchanged, not truncated, not removed.
+    // A failure before installation leaves the old destination unchanged.
+    // A durability or temporary-cleanup failure can occur after installation.
+    // Use committed() to distinguish these cases.
     Result<void> commit();
 
     // Explicitly discards. The destructor does this anyway; calling it makes intent obvious
@@ -105,15 +106,20 @@ class AtomicWriter {
     void abort() noexcept;
 
     std::uint64_t bytes_written() const noexcept { return bytes_written_; }
+    bool committed() const noexcept { return committed_; }
     const std::filesystem::path& destination() const noexcept { return destination_; }
 
     // Where the bytes are going right now. Some third-party encoders can only be handed a
     // filename, not a handle; they get this one, and the result is validated and adopted
     // before commit. Exposed for that case, and for tests.
+    // On POSIX, this path can become stale if another process renames the parent directory.
     const std::filesystem::path& temporary_path() const noexcept { return temporary_; }
 
-  private:
+private:
+    friend class AtomicOutputStream;
+
     AtomicWriter() = default;
+    void close_after_commit() noexcept;
 
     std::filesystem::path destination_;
     std::filesystem::path temporary_;
@@ -122,15 +128,25 @@ class AtomicWriter {
     // member is a warning under -Werror and because carrying a dead field invites someone to
     // eventually use the wrong one.
 #if defined(_WIN32)
+    // These handles bind the source file and target directory across commit.
+    void* directory_handle_ = nullptr;
     void* handle_ = nullptr;  // Windows HANDLE, as void* to keep this header platform-free.
+    std::wstring destination_name_;
 #else
+    // The directory descriptor binds validation, creation, commit, and cleanup to one directory.
+    int directory_fd_ = -1;
     int fd_ = -1;  // POSIX file descriptor; -1 when closed.
+    std::string destination_name_;
+    std::string temporary_name_;
+    std::uint32_t final_permissions_ = 0600;
 #endif
 
     bool committed_ = false;
+    bool write_failed_ = false;
     std::uint64_t bytes_written_ = 0;
+    std::uint64_t temp_bytes_reserved_ = 0;
     WriteOptions options_;
-    Budget* budget_ = nullptr;
+    OperationContext context_;
 };
 
 // A std::ostream that writes into an AtomicWriter.
@@ -144,17 +160,18 @@ class AtomicWriter {
 // work), and `last_error()` carries the real diagnostic, because a streambuf cannot return a
 // Result.
 class AtomicOutputStream : public std::ostream {
-  public:
+public:
     explicit AtomicOutputStream(AtomicWriter& writer);
-    ~AtomicOutputStream() override;
+    ~AtomicOutputStream() noexcept override;
 
     // The first write error, if any. Callers must check this before commit: an ostream
     // swallows failures by design, and committing after a silently failed write would install
     // a truncated file.
     const std::vector<Diagnostic>& diagnostics() const noexcept;
+    ErrorCode error_code() const noexcept;
     bool failed() const noexcept;
 
-  private:
+private:
     class Buffer;
     std::unique_ptr<Buffer> buffer_;
 };

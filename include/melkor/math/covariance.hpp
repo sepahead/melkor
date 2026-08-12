@@ -18,32 +18,32 @@
 
 namespace melkor::math {
 
-// A rotation (as a canonical quaternion) plus three positive linear scales. This is the
+// A rotation (as a canonical quaternion) plus three nonnegative linear scales. This is the
 // storage form; covariance is the derived form.
 struct RotationScale {
     Quat rotation;
-    Vec3 scale{1.0, 1.0, 1.0};  // per-axis linear standard-deviation-like scale, all > 0
+    Vec3 scale{1.0, 1.0, 1.0};
 };
 
-// Builds the symmetric covariance Σ = R diag(s²) Rᵀ from a rotation and positive scales.
-// Precondition: rotation is unit, scales are finite and positive. The result is symmetric by
+// Builds the symmetric covariance Σ = R diag(s²) Rᵀ from a rotation and nonnegative scales.
+// Precondition: rotation is unit and scales are finite and nonnegative. The result is symmetric by
 // construction.
 Result<Mat3> covariance_from_rotation_scale(const Quat& rotation, const Vec3& scale);
 
 // Applies a general affine linear map A to a Gaussian's shape: Σ' = A Σ Aᵀ, then recovers the
-// orientation and positive scales of the transformed Gaussian.
+// orientation and nonnegative scales of the transformed Gaussian.
 //
 // This handles rotation, non-uniform scale, shear, and reflection correctly, because it works
 // on the covariance rather than trying to compose the transform onto the quaternion directly
 // (which is only valid for a pure rotation). The returned rotation/scale reproduce Σ' within
 // tolerance.
 //
-// `linear` is the 3x3 linear part of the node transform (the translation is applied to the mean
-// separately). A near-singular or non-finite `linear` fails rather than producing garbage.
+// `linear` is the 3x3 linear part of the node transform. A singular map produces a valid
+// positive-semidefinite covariance with one or more zero scales. A non-finite map fails.
 Result<RotationScale> affine_transform_gaussian(const Mat3& linear, const Quat& rotation,
                                                 const Vec3& scale);
 
-// Decomposes a symmetric positive-semidefinite covariance back into a rotation and positive
+// Decomposes a symmetric positive-semidefinite covariance back into a rotation and nonnegative
 // scales via a symmetric eigendecomposition. Eigenvalues are the squared scales; eigenvectors
 // are the rotation columns.
 //
@@ -52,9 +52,8 @@ Result<RotationScale> affine_transform_gaussian(const Mat3& linear, const Quat& 
 //     is stable run to run.
 //   - The eigenvector basis is forced right-handed (a reflection is folded into the rotation by
 //     flipping one axis), because a quaternion can only represent a proper rotation.
-//   - A tiny negative eigenvalue from round-off is clamped to the minimum scale under a
-//     published tolerance; a substantial negative eigenvalue means the input was not a valid
-//     covariance and is an error.
+//   - A tiny negative eigenvalue from round-off is clamped to zero. A substantial negative
+//     eigenvalue means the input was not a valid covariance and is an error.
 Result<RotationScale> rotation_scale_from_covariance(const Mat3& sigma);
 
 // Symmetric 3x3 eigendecomposition, exposed for testing and reuse. Returns eigenvalues in

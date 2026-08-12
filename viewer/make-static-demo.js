@@ -5,10 +5,24 @@
 //
 // Common SPLAT layout: position float3, linear scale float3, RGBA u8, and
 // quaternion u8x4 mapped from [-1, 1] to [0, 255] (32 bytes per splat).
-import { mkdirSync, writeFileSync } from "node:fs";
-import { dirname } from "node:path";
+import {
+  existsSync,
+  lstatSync,
+  mkdirSync,
+  readFileSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
+import { randomUUID } from "node:crypto";
+import { basename, dirname, join, resolve } from "node:path";
+import { spawnSync } from "node:child_process";
+import { fileURLToPath } from "node:url";
 
-const output = process.argv[2] || "public/splats/generated/wave.splat";
+const viewerDir = dirname(fileURLToPath(import.meta.url));
+const publishTool = join(viewerDir, "..", "tools", "atomic_publish.py");
+const output = resolve(
+  process.argv[2] || join(viewerDir, "public", "splats", "generated", "wave.splat"),
+);
 const side = Number(process.argv[3] || 64);
 if (!Number.isInteger(side) || side < 2 || side > 1024) {
   throw new Error("side must be an integer in [2, 1024]");
@@ -50,5 +64,30 @@ for (let row = 0; row < side; row++) {
 }
 
 mkdirSync(dirname(output), { recursive: true });
-writeFileSync(output, bytes);
-console.log(`wrote ${count} splats to ${output}`);
+const temporary = join(dirname(output), `.${basename(output)}.${randomUUID()}.part`);
+let action = "wrote";
+try {
+  writeFileSync(temporary, bytes, { flag: "wx" });
+  if (existsSync(output)) {
+    if (!lstatSync(output).isFile()) {
+      throw new Error(`output path is not a regular file: ${output}`);
+    }
+    if (!readFileSync(output).equals(bytes)) {
+      throw new Error(`the output file exists with different content: ${output}`);
+    }
+    rmSync(temporary, { force: true });
+    action = "verified";
+  } else {
+    const published = spawnSync("python3", [publishTool, temporary, output], {
+      encoding: "utf8",
+      stdio: ["ignore", "ignore", "pipe"],
+    });
+    if (published.status !== 0) {
+      throw new Error(`could not publish the demo: ${published.stderr.trim()}`);
+    }
+  }
+} catch (error) {
+  rmSync(temporary, { force: true });
+  throw error;
+}
+console.log(`${action} ${count} splats at ${output}`);

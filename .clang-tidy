@@ -1,7 +1,8 @@
 # Advisory static-analysis profile for first-party code (run manually with
 # run-clang-tidy or via IDE integration; not enforced in CI).
 #
-#   clang-tidy -p build src/*.cpp
+#   cmake --preset dev
+#   run-clang-tidy -p build/dev
 #
 # Checks are chosen for signal on this codebase: correctness and memory
 # safety on, style churn off. The vendored tree (third_party/) is out of scope.
@@ -15,7 +16,8 @@ Checks: >
   readability-container-size-empty,
   readability-misleading-indentation,
   -bugprone-easily-swappable-parameters,
-  -bugprone-narrowing-conversions
+  -bugprone-narrowing-conversions,
+  -performance-enum-size
 WarningsAsErrors: ''
 HeaderFilterRegex: 'include/melkor/.*'
 FormatStyle: file

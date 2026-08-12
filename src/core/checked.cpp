@@ -5,10 +5,9 @@
 namespace melkor {
 namespace {
 
-Diagnostic overflow_diagnostic(const char* code, const char* what, std::uint64_t a,
-                               std::uint64_t b, const char* op) {
-    Diagnostic diagnostic(code, Severity::error,
-                          std::string("integer overflow computing ") + what);
+Diagnostic overflow_diagnostic(const char* code, const char* what, std::uint64_t a, std::uint64_t b,
+                               const char* op) {
+    Diagnostic diagnostic(code, Severity::error, std::string("integer overflow computing ") + what);
     diagnostic.with_context("operand_a", a);
     diagnostic.with_context("operand_b", b);
     diagnostic.with_context("operation", std::string(op));
@@ -18,9 +17,8 @@ Diagnostic overflow_diagnostic(const char* code, const char* what, std::uint64_t
 }  // namespace
 
 Result<std::uint64_t> checked_add(std::uint64_t a, std::uint64_t b, const char* what) {
-    // Rearranged to avoid computing the overflowing sum at all: `a + b < a` would already be
-    // the wrapped value, and relying on the wrap is only defined for unsigned types by luck
-    // of the standard rather than by intent.
+    // Rearrange the check to avoid computing the wrapped sum. Unsigned wrap is defined, but it
+    // cannot represent the intended result.
     if (a > std::numeric_limits<std::uint64_t>::max() - b) {
         return Result<std::uint64_t>::failure(
             ErrorCode::invalid_data,
@@ -58,9 +56,8 @@ Result<std::size_t> checked_size_cast(std::uint64_t value, const char* what) {
                                   std::string("value does not fit in size_t on this platform: ") +
                                       what);
             diagnostic.with_context("value", value);
-            diagnostic.with_context("size_t_max",
-                                    static_cast<std::uint64_t>(
-                                        std::numeric_limits<std::size_t>::max()));
+            diagnostic.with_context(
+                "size_t_max", static_cast<std::uint64_t>(std::numeric_limits<std::size_t>::max()));
             return Result<std::size_t>::failure(ErrorCode::resource_limit, std::move(diagnostic));
         }
     }
@@ -104,10 +101,7 @@ Result<ByteRange> checked_range(std::uint64_t offset, std::uint64_t length, std:
         return Result<ByteRange>::failure(ErrorCode::invalid_data, std::move(diagnostic));
     }
 
-    ByteRange range;
-    range.offset = offset;
-    range.length = length;
-    return Result<ByteRange>::success(range);
+    return Result<ByteRange>::success(ByteRange(offset, length));
 }
 
 Result<std::uint64_t> checked_array_bytes(std::uint64_t count, std::uint64_t stride,
@@ -116,9 +110,8 @@ Result<std::uint64_t> checked_array_bytes(std::uint64_t count, std::uint64_t str
 }
 
 Result<std::uint64_t> checked_sh_coefficient_count(std::uint32_t degree) {
-    // Melkor's canonical scene stores SH degrees 0..4. Degree 4 is needed because SPZ v4
-    // carries it; the pinned glTF profile stops at 3, and converting between them is a
-    // *reported loss*, not a silent truncation.
+    // Melkor's canonical scene stores SH degrees 0..4. The canonical PLY profile supports the
+    // full range. Other adapters report a loss when they cannot store the source degree.
     constexpr std::uint32_t kMaxDegree = 4;
     if (degree > kMaxDegree) {
         Diagnostic diagnostic("MK0106_SH_DEGREE_OUT_OF_RANGE", Severity::error,

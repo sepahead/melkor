@@ -27,22 +27,48 @@
 #include "melkor/scene.hpp"
 
 #include <cstdint>
+#include <filesystem>
+#include <utility>
 #include <vector>
 
 namespace melkor::format::gltf {
 
-// The result of reading one splat primitive: the local-space splats, the declared color space, and
-// the SH degree that was actually present in the source. `color_space_assumed` is true when the
-// primitive's `colorSpace` string was not one Melkor recognises and sRGB was assumed -- the caller
-// turns that into a LOSS_COLOR_SPACE_ASSUMED entry rather than the reader silently guessing.
+// Select the expected file encoding. Use automatic only when no container decision exists.
+enum class FileEncoding : std::uint8_t {
+    automatic = 0,
+    json = 1,
+    binary_glb = 2,
+};
+
+// The result contains the local-space splats, the declared color space, and the source SH degree.
 struct PrimitiveRead {
+private:
+    // Later members are destroyed first. Release the charge after the data is destroyed.
+    Budget::Charge retained_memory_;
+
+public:
+    PrimitiveRead(SplatData data_value, khr::ColorSpace color_space_value,
+                  std::uint32_t source_degree_value, Budget::Charge retained_memory) noexcept
+        : retained_memory_(std::move(retained_memory)), data(std::move(data_value)),
+          color_space(color_space_value), source_sh_degree(source_degree_value) {}
+
+    PrimitiveRead(const PrimitiveRead&) = delete;
+    PrimitiveRead& operator=(const PrimitiveRead&) = delete;
+    PrimitiveRead(PrimitiveRead&&) noexcept = default;
+    PrimitiveRead& operator=(PrimitiveRead&& other) noexcept {
+        if (this == &other)
+            return *this;
+        data = std::move(other.data);
+        color_space = other.color_space;
+        source_sh_degree = other.source_sh_degree;
+        retained_memory_ = std::move(other.retained_memory_);
+        return *this;
+    }
+
+    std::uint64_t retained_memory_bytes() const noexcept { return retained_memory_.amount(); }
+
     SplatData data;
     khr::ColorSpace color_space = khr::ColorSpace::srgb_rec709_display;
-    bool color_space_assumed = false;
-    // The colorSpace string exactly as declared. Retained so the scene reader can detect a genuine
-    // color-space conflict between primitives even when one or both strings are unrecognized (and
-    // therefore both coerced to the sRGB enum above).
-    std::string color_space_raw;
     std::uint32_t source_sh_degree = 0;
 };
 
@@ -51,42 +77,78 @@ struct PrimitiveRead {
 // ROTATION, SCALE, OPACITY, and the degree-0 SH coefficient) are present with the expected element
 // types and a consistent splat count, and that the spherical-harmonic degrees present are complete
 // and contiguous. Fails cleanly on any structural violation; the resulting SplatData is fully
-// validated by SplatData::create (finite, positive scale, [0,1] opacity, unit quaternion).
+// validated by SplatData::create (finite, nonnegative scale, [0,1] opacity, unit quaternion).
 //
-// `prim` must be a primitive whose `gaussian` extension is set; `buffers` supplies the bytes of each
-// glTF buffer (the GLB BIN chunk for buffer 0). `budget` bounds resource use: the splat count and
-// the spherical-harmonic allocation are charged against it before they are allocated, so a
+// `prim` must be a primitive whose `gaussian` extension is set; `buffers` supplies the bytes of
+// each glTF buffer (the GLB BIN chunk for buffer 0). `budget` bounds resource use: the splat count
+// and the spherical-harmonic allocation are charged against it before they are allocated, so a
 // primitive declaring an enormous count fails before it can exhaust memory.
 Result<PrimitiveRead> read_primitive_local(const Document& doc, const PrimitiveDesc& prim,
                                            const std::vector<BufferSpan>& buffers, Budget& budget);
 
+// Use one context across the complete read pipeline.
+Result<PrimitiveRead> read_primitive_local(const Document& doc, const PrimitiveDesc& prim,
+                                           const std::vector<BufferSpan>& buffers,
+                                           const OperationContext& context);
+
 // The result of reading a whole glTF scene into one merged splat cloud: the world-space splats and
 // the loss report describing what the conversion could not fully preserve.
 struct SceneRead {
+private:
+    // Later members are destroyed first. Release the charge after the data is destroyed.
+    Budget::Charge retained_memory_;
+
+public:
+    SceneRead(SplatData data_value, LossReport loss_value, khr::ColorSpace color_space_value,
+              std::uint32_t degree_value, Budget::Charge retained_memory) noexcept
+        : retained_memory_(std::move(retained_memory)), data(std::move(data_value)),
+          losses(std::move(loss_value)), color_space(color_space_value), sh_degree(degree_value) {}
+
+    SceneRead(const SceneRead&) = delete;
+    SceneRead& operator=(const SceneRead&) = delete;
+    SceneRead(SceneRead&&) noexcept = default;
+    SceneRead& operator=(SceneRead&& other) noexcept {
+        if (this == &other)
+            return *this;
+        data = std::move(other.data);
+        losses = std::move(other.losses);
+        color_space = other.color_space;
+        sh_degree = other.sh_degree;
+        retained_memory_ = std::move(other.retained_memory_);
+        return *this;
+    }
+
+    std::uint64_t retained_memory_bytes() const noexcept { return retained_memory_.amount(); }
+    Budget::Charge take_retained_memory() noexcept { return std::move(retained_memory_); }
+
     SplatData data;
     LossReport losses;
     khr::ColorSpace color_space = khr::ColorSpace::srgb_rec709_display;
     std::uint32_t sh_degree = 0;
+    std::uint64_t source_bytes = 0;
 };
 
 // Reads every KHR_gaussian_splatting primitive reachable from the default scene, applies each
 // instantiating node's global transform to the geometry (mean via `μ' = Mμ + t`, covariance via
 // `Σ' = M Σ Mᵀ` through the math oracle), and merges the results into one world-space SplatData.
 //
-// The reference graph is walked iteratively with a visited-set so a cyclic or shared-node document
-// cannot loop forever. Primitives of differing SH degree are padded to the maximum with zeros.
+// The reader rejects cycles and nodes with multiple parents. It also enforces the configured scene
+// depth. Primitives of differing SH degree are padded to the maximum with zeros.
 //
 // The reader reports each item that it cannot preserve. It rejects an unsupported required
-// extension. It rotates degree 0-3 SH for each proper node rotation. A reflection or singular
-// transform has no proper rotation, so the reader reports a severe loss. It also reports color-space
-// assumptions, hierarchy flattening, and dropped splats. The caller applies the loss policy.
+// extension. It rotates degree 0-3 SH for each proper node rotation. It rejects transforms whose
+// KHR rendering is undefined. It reports color-space conflicts and hierarchy flattening. The
+// caller applies the loss policy. The reader rejects a color space outside the selected profile.
 //
 // `limits` bounds resource use. Because a mesh shared by many nodes is instantiated once per node,
 // a small file can otherwise describe an enormous splat cloud; the walk charges each node and each
 // primitive's splats/memory against the limits and fails fast when they are exceeded.
-Result<SceneRead> read_gaussian_scene(
-    const Document& doc, const std::vector<BufferSpan>& buffers,
-    const Limits& limits = Limits::for_profile(LimitsProfile::desktop));
+Result<SceneRead>
+read_gaussian_scene(const Document& doc, const std::vector<BufferSpan>& buffers,
+                    const Limits& limits = Limits::for_profile(LimitsProfile::desktop));
+
+Result<SceneRead> read_gaussian_scene(const Document& doc, const std::vector<BufferSpan>& buffers,
+                                      const OperationContext& context);
 
 // Reads a complete GLB file: validates the container framing, parses the JSON chunk into a
 // document, feeds the binary chunk to the scene reader as glTF buffer 0, and returns the merged
@@ -97,6 +159,22 @@ Result<SceneRead> read_gaussian_scene(
 // fetch external resources. `limits` bounds resource use (see read_gaussian_scene).
 Result<SceneRead> read_glb(const std::uint8_t* data, std::size_t size,
                            const Limits& limits = Limits::for_profile(LimitsProfile::desktop));
+
+Result<SceneRead> read_glb(const std::uint8_t* data, std::size_t size,
+                           const OperationContext& context);
+
+// Read a GLB or JSON glTF asset from a local file. This overload resolves only data URIs and
+// relative local buffer URIs. It rejects network, absolute, escaping, and symbolic-link paths.
+Result<SceneRead> read_file(const std::filesystem::path& path,
+                            const Limits& limits = Limits::for_profile(LimitsProfile::desktop));
+
+Result<SceneRead> read_file(const std::filesystem::path& path, const OperationContext& context);
+
+Result<SceneRead> read_file(const std::filesystem::path& path, FileEncoding encoding,
+                            const Limits& limits = Limits::for_profile(LimitsProfile::desktop));
+
+Result<SceneRead> read_file(const std::filesystem::path& path, FileEncoding encoding,
+                            const OperationContext& context);
 
 }  // namespace melkor::format::gltf
 

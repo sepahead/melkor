@@ -2,7 +2,15 @@
   "schema_version": 1,
   "profile_id": "khr-gaussian-splatting-rc-63770cc",
   "container": "gltf",
+  "read_containers": [
+    "gltf",
+    "glb"
+  ],
+  "write_containers": [
+    "glb"
+  ],
   "status": "release-candidate",
+  "description": "The pinned release-candidate KHR_gaussian_splatting profile for glTF 2.0 JSON and GLB containers.",
   "spec": {
     "id": "KHR_gaussian_splatting",
     "commit": "63770cc70a3709cf101a42cece0bdf602b37e2e7",
@@ -19,6 +27,8 @@
   "sh": {
     "basis": "real",
     "max_degree": 3,
+    "order": "degree-major-m-ascending",
+    "phase": "condon-shortley",
     "coefficients_per_degree": [1, 3, 5, 7],
     "attribute_pattern": "KHR_gaussian_splatting:SH_DEGREE_{degree}_COEF_{index}",
     "accessor_type": "VEC3",
@@ -26,10 +36,18 @@
     "note": "Melkor's canonical scene stores degree 0-4; a degree-4 source into this profile is LOSS_SH_DEGREE_TRUNCATED and must be approved, never silently dropped."
   },
   "color_spaces": ["srgb_rec709_display", "lin_rec709_display"],
-  "required_properties": ["kernel", "colorSpace"],
+  "required_properties": [
+    "POSITION",
+    "KHR_gaussian_splatting:ROTATION",
+    "KHR_gaussian_splatting:SCALE",
+    "KHR_gaussian_splatting:OPACITY",
+    "KHR_gaussian_splatting:SH_DEGREE_0_COEF_0",
+    "kernel",
+    "colorSpace"
+  ],
   "kernel": "ellipse",
   "primitive_mode": "POINTS",
-  "material_handling": "ignored-for-splat-rendering",
+  "material_handling": "Materials are outside this profile. Melkor reports LOSS_UNKNOWN_PROPERTY_DROPPED before canonical conversion. The severe loss needs exact approval.",
   "representable_limits": {
     "note": "Counts are bounded by the active resource-limit profile, not by the format."
   }

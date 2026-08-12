@@ -1,0 +1,345 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://melkor.dev/schemas/inspect-v1.json",
+  "title": "Melkor inspection report v1",
+  "description": "A deterministic report from melkor inspect --json.",
+  "$defs": {
+    "lossCode": {
+      "type": "string",
+      "enum": [
+        "LOSS_SH_DEGREE_TRUNCATED",
+        "LOSS_SH_COEFFICIENTS_DROPPED",
+        "LOSS_SH_COEFFICIENTS_CLAMPED",
+        "LOSS_SH_ROTATION_NOT_APPLIED",
+        "LOSS_SCENE_GRAPH_FLATTENED",
+        "LOSS_NODE_NAME_DROPPED",
+        "LOSS_INSTANCE_EXPANDED",
+        "LOSS_MATERIAL_APPROXIMATED",
+        "LOSS_TEXTURE_BAKED",
+        "LOSS_ANTIALIASING_METADATA_DROPPED",
+        "LOSS_COLOR_SPACE_ASSUMED",
+        "LOSS_COLOR_SPACES_CONFLICT",
+        "LOSS_COLOR_CLAMPED",
+        "LOSS_COLOR_SPACE_METADATA_DROPPED",
+        "LOSS_COORDINATE_METADATA_DROPPED",
+        "LOSS_PROVENANCE_DROPPED",
+        "LOSS_ATTRIBUTION_DROPPED",
+        "LOSS_QUANTIZATION_APPLIED",
+        "LOSS_OPACITY_CLAMPED",
+        "LOSS_SCALE_CLAMPED",
+        "LOSS_NONFINITE_REPAIRED",
+        "LOSS_INVALID_SPLAT_DROPPED",
+        "LOSS_UNKNOWN_PROPERTY_DROPPED",
+        "LOSS_METADATA_DROPPED",
+        "LOSS_VERTEX_NORMALS_DROPPED",
+        "LOSS_QUATERNION_NORMALIZED",
+        "LOSS_EXTENSION_DROPPED",
+        "LOSS_EXTENSION_DECLARATION_DROPPED",
+        "LOSS_GLTF_CONTENT_DROPPED",
+        "LOSS_PRECISION_REDUCED",
+        "LOSS_GAUSSIAN_ATTRIBUTES_GENERATED"
+      ]
+    }
+  },
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema",
+    "valid",
+    "source",
+    "cloud",
+    "container",
+    "losses",
+    "validation"
+  ],
+  "properties": {
+    "schema": {
+      "const": "melkor.inspect.v1"
+    },
+    "valid": {
+      "type": "boolean"
+    },
+    "source": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["path", "format", "profile", "bytes"],
+      "properties": {
+        "path": { "type": "string", "minLength": 1 },
+        "format": { "type": "string", "minLength": 1 },
+        "profile": {
+          "type": ["string", "null"],
+          "minLength": 1
+        },
+        "bytes": {
+          "type": ["integer", "null"],
+          "minimum": 0
+        }
+      }
+    },
+    "cloud": {
+      "oneOf": [
+        { "type": "null" },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "splats",
+            "sh_degree",
+            "color_space",
+            "coordinate_frame",
+            "unit_to_meter",
+            "bounds",
+            "fields"
+          ],
+          "properties": {
+            "splats": { "type": "integer", "minimum": 0 },
+            "sh_degree": { "type": "integer", "minimum": 0 },
+            "color_space": { "type": "string", "minLength": 1 },
+            "coordinate_frame": { "const": "gltf-luf" },
+            "unit_to_meter": { "const": 1.0 },
+            "bounds": {
+              "oneOf": [
+                { "type": "null" },
+                {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": ["min", "max"],
+                  "properties": {
+                    "min": {
+                      "type": "array",
+                      "items": { "type": "number" },
+                      "minItems": 3,
+                      "maxItems": 3
+                    },
+                    "max": {
+                      "type": "array",
+                      "items": { "type": "number" },
+                      "minItems": 3,
+                      "maxItems": 3
+                    }
+                  }
+                }
+              ]
+            },
+            "fields": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "position",
+                "color",
+                "opacity",
+                "scale",
+                "rotation",
+                "sh_rest"
+              ],
+              "properties": {
+                "position": { "type": "string", "minLength": 1 },
+                "color": { "type": "string", "minLength": 1 },
+                "opacity": { "type": "string", "minLength": 1 },
+                "scale": { "type": "string", "minLength": 1 },
+                "rotation": { "type": "string", "minLength": 1 },
+                "sh_rest": { "type": "string", "minLength": 1 }
+              }
+            }
+          }
+        }
+      ]
+    },
+    "container": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["encoding", "declared_splats", "antialiased"],
+      "properties": {
+        "encoding": { "type": "string", "minLength": 1 },
+        "declared_splats": {
+          "type": ["integer", "null"],
+          "minimum": 0
+        },
+        "antialiased": {
+          "type": ["boolean", "null"]
+        }
+      }
+    },
+    "losses": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "code",
+          "severity",
+          "source_feature",
+          "target_constraint",
+          "affected_splats",
+          "remediation"
+        ],
+        "properties": {
+          "code": { "$ref": "#/$defs/lossCode" },
+          "severity": {
+            "type": "string",
+            "enum": ["info", "warning", "severe", "fatal"]
+          },
+          "source_feature": { "type": "string", "minLength": 1 },
+          "target_constraint": { "type": "string", "minLength": 1 },
+          "affected_splats": { "type": "integer", "minimum": 0 },
+          "remediation": { "type": "string", "minLength": 1 }
+        },
+        "allOf": [
+          {
+            "if": {
+              "properties": {
+                "code": {
+                  "enum": [
+                    "LOSS_COLOR_CLAMPED",
+                    "LOSS_QUANTIZATION_APPLIED",
+                    "LOSS_OPACITY_CLAMPED",
+                    "LOSS_PRECISION_REDUCED"
+                  ]
+                }
+              },
+              "required": ["code"]
+            },
+            "then": {
+              "properties": {
+                "severity": { "enum": ["warning", "severe", "fatal"] }
+              }
+            }
+          },
+          {
+            "if": {
+              "properties": {
+                "code": {
+                  "enum": [
+                    "LOSS_SH_DEGREE_TRUNCATED",
+                    "LOSS_SH_COEFFICIENTS_DROPPED",
+                    "LOSS_SH_COEFFICIENTS_CLAMPED",
+                    "LOSS_SH_ROTATION_NOT_APPLIED",
+                    "LOSS_MATERIAL_APPROXIMATED",
+                    "LOSS_TEXTURE_BAKED",
+                    "LOSS_ANTIALIASING_METADATA_DROPPED",
+                    "LOSS_COLOR_SPACE_ASSUMED",
+                    "LOSS_COLOR_SPACES_CONFLICT",
+                    "LOSS_COLOR_SPACE_METADATA_DROPPED",
+                    "LOSS_COORDINATE_METADATA_DROPPED",
+                    "LOSS_ATTRIBUTION_DROPPED",
+                    "LOSS_SCALE_CLAMPED",
+                    "LOSS_NONFINITE_REPAIRED",
+                    "LOSS_INVALID_SPLAT_DROPPED",
+                    "LOSS_UNKNOWN_PROPERTY_DROPPED",
+                    "LOSS_VERTEX_NORMALS_DROPPED",
+                    "LOSS_EXTENSION_DROPPED",
+                    "LOSS_GLTF_CONTENT_DROPPED",
+                    "LOSS_GAUSSIAN_ATTRIBUTES_GENERATED"
+                  ]
+                }
+              },
+              "required": ["code"]
+            },
+            "then": {
+              "properties": {
+                "severity": { "enum": ["severe", "fatal"] }
+              }
+            }
+          }
+        ]
+      }
+    },
+    "validation": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["error_code", "errors", "warnings", "issues"],
+      "properties": {
+        "error_code": {
+          "type": ["string", "null"],
+          "enum": [
+            null,
+            "invalid_argument",
+            "invalid_data",
+            "unsupported_feature",
+            "io_error",
+            "resource_limit",
+            "backend_unavailable",
+            "cancelled",
+            "internal_error"
+          ]
+        },
+        "errors": { "type": "integer", "minimum": 0 },
+        "warnings": { "type": "integer", "minimum": 0 },
+        "issues": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "severity",
+              "code",
+              "message",
+              "count",
+              "first_index",
+              "path",
+              "byte_offset",
+              "context"
+            ],
+            "properties": {
+              "severity": {
+                "type": "string",
+                "enum": ["error", "warning"]
+              },
+              "code": { "type": "string", "minLength": 1 },
+              "message": { "type": "string", "minLength": 1 },
+              "count": { "type": "integer", "minimum": 1 },
+              "first_index": {
+                "type": ["integer", "null"],
+                "minimum": 0
+              },
+              "path": {
+                "type": ["string", "null"],
+                "minLength": 1
+              },
+              "byte_offset": {
+                "type": ["integer", "null"],
+                "minimum": 0
+              },
+              "context": {
+                "type": "object",
+                "additionalProperties": {
+                  "type": ["null", "boolean", "integer", "number", "string"]
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "allOf": [
+    {
+      "if": {
+        "properties": { "valid": { "const": true } },
+        "required": ["valid"]
+      },
+      "then": {
+        "properties": {
+          "cloud": { "type": "object" },
+          "validation": {
+            "properties": {
+              "error_code": { "type": "null" },
+              "errors": { "const": 0 }
+            }
+          }
+        }
+      },
+      "else": {
+        "properties": {
+          "validation": {
+            "properties": {
+              "error_code": { "type": "string" },
+              "errors": { "type": "integer", "minimum": 1 },
+              "issues": { "type": "array", "minItems": 1 }
+            }
+          }
+        }
+      }
+    }
+  ]
+}

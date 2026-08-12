@@ -6,8 +6,8 @@
 // explicitly declared it out of scope -- means a single file can exhaust memory, fill a disk,
 // or wedge a machine, which is release blocker P0-12.
 //
-// Every limit here is enforced through a shared `Budget` (see budget.hpp), so that a new
-// parser cannot accidentally opt out of resource accounting by forgetting to check something.
+// Each native reader validates this structure before parsing. Each reader uses one shared
+// `Budget` for the complete operation.
 //
 // The numbers below are *safety defaults*, not scientific truths. They were chosen to let
 // realistic assets through while stopping runaway ones, and they must be revisited against
@@ -46,11 +46,11 @@ Result<LimitsProfile> limits_profile_from_string(const std::string& name);
 
 struct Limits {
     // ---- Input volume ----------------------------------------------------------------
-    std::uint64_t max_input_bytes = 0;      // Bytes read from the primary file.
-    std::uint64_t max_resource_bytes = 0;   // glTF external buffers, images, sidecars.
-    std::uint64_t max_decoded_bytes = 0;    // Cumulative bytes after decompression.
-    std::uint64_t max_memory_bytes = 0;     // Budgeted working allocations.
-    std::uint64_t max_temp_bytes = 0;       // Temporary files written during output.
+    std::uint64_t max_input_bytes = 0;     // Bytes read from the primary file.
+    std::uint64_t max_resource_bytes = 0;  // glTF external buffers and sidecars.
+    std::uint64_t max_decoded_bytes = 0;   // Cumulative bytes after decompression.
+    std::uint64_t max_memory_bytes = 0;    // Budgeted working allocations.
+    std::uint64_t max_temp_bytes = 0;      // Temporary files written during output.
 
     // ---- Decompression -----------------------------------------------------------------
     // A compression bomb is a small file that expands enormously. An absolute decoded-byte
@@ -64,26 +64,17 @@ struct Limits {
 
     // ---- Counts ------------------------------------------------------------------------
     std::uint64_t max_splats = 0;
-    std::uint64_t max_mesh_vertices = 0;
-    std::uint64_t max_mesh_triangles = 0;
     std::uint64_t max_gltf_nodes = 0;
-    std::uint64_t max_accessors = 0;       // Accessors + buffer views: structural objects.
+    std::uint64_t max_accessors = 0;           // Accessors + buffer views: structural objects.
     std::uint64_t max_external_resources = 0;  // Count of URIs/files, not their size.
 
     // ---- Structure ---------------------------------------------------------------------
     std::uint64_t max_ply_header_bytes = 0;
-    std::uint64_t max_metadata_string_bytes = 0;   // Any single comment/name/extra.
-    std::uint64_t max_metadata_total_bytes = 0;    // All of them together.
-    std::uint64_t max_scene_depth = 0;             // Guards unbounded recursion.
+    std::uint64_t max_metadata_string_bytes = 0;  // Any single comment/name/extra.
+    std::uint64_t max_metadata_total_bytes = 0;   // All of them together.
+    std::uint64_t max_scene_depth = 0;            // Guards unbounded recursion.
 
-    // ---- Images -------------------------------------------------------------------------
-    // Both a per-axis and a total-pixel cap. A 1 x 4,000,000,000 image passes a naive
-    // per-axis check while still decoding to an absurd buffer.
-    std::uint64_t max_image_dimension = 0;
-    std::uint64_t max_image_pixels = 0;
-
-    // ---- Execution -----------------------------------------------------------------------
-    std::uint32_t max_threads = 0;
+    // ---- Execution ---------------------------------------------------------------------
     std::uint64_t deadline_ms = 0;  // 0 == no deadline. The local CLI has none by default.
 
     // Builds one of the named profiles.
@@ -102,11 +93,8 @@ struct Limits {
 // protecting anything and the failure mode becomes an overflow rather than a clean refusal.
 namespace hard_ceiling {
 constexpr std::uint64_t kMaxSplats = 4'000'000'000ULL;
-constexpr std::uint64_t kMaxMeshVertices = 4'000'000'000ULL;
-constexpr std::uint64_t kMaxMeshTriangles = 8'000'000'000ULL;
-constexpr std::uint64_t kMaxImageDimension = 1ULL << 20;
+constexpr std::uint64_t kMaxStructuralObjects = 4'000'000'000ULL;
 constexpr std::uint64_t kMaxSceneDepth = 4096;
-constexpr std::uint32_t kMaxThreads = 1024;
 }  // namespace hard_ceiling
 
 }  // namespace melkor

@@ -1,10 +1,9 @@
 // Shared resource accounting, cancellation, and progress.
 //
 // A limit that each parser checks for itself is a limit that a new parser will forget. The
-// `Budget` exists so that resource accounting is something an operation *carries*, not
-// something it is trusted to remember: every reader, writer, and algorithm receives an
-// `OperationContext`, and consuming an unbudgeted byte is not possible without going around
-// the API deliberately.
+// `Budget` provides one resource counter for an operation.
+// Readers and writers use it for the resource classes that they currently account for.
+// `OperationContext` also provides cancellation and progress for APIs that accept it.
 //
 // This is also what makes the limits testable. A test can hand an operation a budget of 100
 // bytes and assert that it fails cleanly at exactly the right point, which is far more
@@ -19,9 +18,10 @@
 #include "melkor/error.hpp"
 #include "melkor/limits.hpp"
 
+#include <array>
 #include <atomic>
+#include <chrono>
 #include <cstdint>
-#include <functional>
 #include <memory>
 #include <mutex>
 #include <string>
@@ -37,28 +37,56 @@ enum class BudgetKind : std::uint8_t {
     memory_bytes,
     temp_bytes,
     splats,
-    mesh_vertices,
-    mesh_triangles,
     gltf_nodes,
     accessors,
     external_resources,
-    metadata_bytes,
-    image_pixels,
+    count,
 };
 
 const char* to_string(BudgetKind kind) noexcept;
 
-// The CLI flag that raises a given budget. Carried in the diagnostic so that a limit failure
-// tells the user how to proceed rather than merely that they may not.
-const char* override_flag_for(BudgetKind kind) noexcept;
+// Return a supported CLI hint when a larger named profile exists.
+std::string override_flag_for(BudgetKind kind, const Limits& current);
 
 // Thread-safe accounting against a `Limits`.
 //
 // `consume` is the gate. It must be called *before* the allocation it accounts for, not after
 // -- accounting for memory you already allocated does not prevent the OOM.
 class Budget {
-  public:
+private:
+    struct SharedState;
+
+public:
+    // Owns one previously consumed reclaimable charge.
+    // The charge can outlive the Budget object that created it.
+    class Charge {
+    public:
+        Charge() noexcept = default;
+        ~Charge();
+
+        Charge(const Charge&) = delete;
+        Charge& operator=(const Charge&) = delete;
+        Charge(Charge&& other) noexcept;
+        Charge& operator=(Charge&& other) noexcept;
+
+        void reset() noexcept;
+        void shrink_to(std::uint64_t amount) noexcept;
+        std::uint64_t amount() const noexcept { return amount_; }
+
+    private:
+        friend class Budget;
+        Charge(std::shared_ptr<SharedState> state, BudgetKind kind, std::uint64_t amount) noexcept;
+
+        std::shared_ptr<SharedState> state_;
+        BudgetKind kind_ = BudgetKind::count;
+        std::uint64_t amount_ = 0;
+    };
+
     explicit Budget(Limits limits);
+    Budget(const Budget&) = delete;
+    Budget& operator=(const Budget&) = delete;
+    Budget(Budget&&) = delete;
+    Budget& operator=(Budget&&) = delete;
 
     // Charges `amount` against `kind`. Fails with `resource_limit` if that would exceed the
     // configured limit, and the diagnostic names the limit, the observed value, and the flag
@@ -67,10 +95,22 @@ class Budget {
     // `operation` is a short label ("spz.decode", "ply.header") used only in the diagnostic.
     Result<void> consume(BudgetKind kind, std::uint64_t amount, std::string_view operation);
 
+    // Reserve reclaimable storage and return its owner in one atomic operation.
+    // Valid kinds are memory_bytes and temp_bytes.
+    Result<Charge> reserve(BudgetKind kind, std::uint64_t amount, std::string_view operation);
+
+    // Raise an asset-cardinality counter to at least `amount`.
+    // Valid kinds are splats, glTF nodes, and accessors.
+    Result<void> observe(BudgetKind kind, std::uint64_t amount, std::string_view operation);
+
     // Returns memory to the budget. Only meaningful for `memory_bytes` and `temp_bytes`,
     // which are genuinely reclaimable; consuming 10 million splats and then releasing them
     // does not un-read the file.
     void release(BudgetKind kind, std::uint64_t amount) noexcept;
+
+    // Claim responsibility for a reclaimable charge that consume() already accepted.
+    // The call fails if another owner already claimed the bytes.
+    Result<Charge> adopt_charge(BudgetKind kind, std::uint64_t amount, std::string_view operation);
 
     std::uint64_t used(BudgetKind kind) const noexcept;
     std::uint64_t remaining(BudgetKind kind) const noexcept;
@@ -84,12 +124,15 @@ class Budget {
                                            std::uint64_t declared_decoded_bytes,
                                            std::string_view operation) const;
 
-  private:
+private:
     std::uint64_t limit_for(BudgetKind kind) const noexcept;
+    static void release_shared(const std::shared_ptr<SharedState>& state, BudgetKind kind,
+                               std::uint64_t amount) noexcept;
+    static void release_unowned(const std::shared_ptr<SharedState>& state, BudgetKind kind,
+                                std::uint64_t amount) noexcept;
 
     Limits limits_;
-    mutable std::mutex mutex_;
-    std::uint64_t used_[16] = {};
+    std::shared_ptr<SharedState> state_;
 };
 
 // Cooperative cancellation.
@@ -98,10 +141,9 @@ class Budget {
 // would make Ctrl-C useless on exactly the inputs where a user most wants it. The target is a
 // cancellation latency under ~100 ms for CPU parsing and conversion.
 //
-// Shared state, because the token is observed on a worker thread and set from a signal
-// handler or another thread.
+// Shared state lets one thread request cancellation while another thread runs the operation.
 class CancellationToken {
-  public:
+public:
     CancellationToken() : flag_(std::make_shared<std::atomic<bool>>(false)) {}
 
     void cancel() noexcept { flag_->store(true, std::memory_order_relaxed); }
@@ -110,8 +152,34 @@ class CancellationToken {
     // Convenience for the inside of a loop: `MELKOR_TRY(context.cancellation.check());`
     Result<void> check() const;
 
-  private:
+private:
     std::shared_ptr<std::atomic<bool>> flag_;
+};
+
+// A monotonic deadline for one operation.
+//
+// A steady clock prevents wall-clock changes from extending or shortening the deadline.
+class Deadline {
+public:
+    using Clock = std::chrono::steady_clock;
+    using TimePoint = Clock::time_point;
+
+    Deadline() noexcept = default;
+
+    // Create a deadline relative to the current time. A zero timeout disables the deadline.
+    static Deadline after(std::uint64_t timeout_ms) noexcept;
+
+    // Create an absolute deadline. This function supports schedulers and deterministic tests.
+    static Deadline at(TimePoint expires_at) noexcept;
+
+    bool is_set() const noexcept { return is_set_; }
+    bool is_expired() const noexcept;
+    Result<void> check(std::string_view operation) const;
+
+private:
+    TimePoint expires_at_{};
+    std::uint64_t timeout_ms_ = 0;
+    bool is_set_ = false;
 };
 
 // A structured progress event.
@@ -127,31 +195,39 @@ struct ProgressEvent {
 };
 
 class ProgressSink {
-  public:
+public:
     virtual ~ProgressSink() = default;
     virtual void on_progress(const ProgressEvent& event) = 0;
 };
 
 // Everything a fallible, bounded, cancellable operation needs.
 //
-// Passed by reference to every reader, writer, and algorithm. An operation that does not take
-// one cannot participate in resource accounting or cancellation, which is the point: the type
-// system makes the safe thing the default thing.
+// Pass this structure to operations that support shared accounting, cancellation, and progress.
 struct OperationContext {
-    Budget* budget = nullptr;              // Never null in production. Tests may pass a tiny one.
+    Budget* budget = nullptr;  // Never null in production. Tests may pass a tiny one.
     CancellationToken cancellation;
-    ProgressSink* progress = nullptr;      // Optional.
+    Deadline deadline;
+    ProgressSink* progress = nullptr;  // Optional.
     DiagnosticPathPolicy path_policy = DiagnosticPathPolicy::basename;
-    std::string path_root;                 // For DiagnosticPathPolicy::relative.
+    std::string path_root;  // UTF-8 root for DiagnosticPathPolicy::relative.
 
     // Charges the budget, or fails. Shorthand so call sites stay readable.
     Result<void> consume(BudgetKind kind, std::uint64_t amount, std::string_view operation) const;
 
+    // Observe a supported asset cardinality, or fail if it exceeds the budget.
+    Result<void> observe(BudgetKind kind, std::uint64_t amount, std::string_view operation) const;
+
+    // Check cancellation and the deadline. Cancellation takes priority if both occurred.
+    Result<void> check(std::string_view operation) const;
+
     // Reports progress, if a sink is attached. Safe to call with no sink.
-    void report(const ProgressEvent& event) const;
+    void report(const ProgressEvent& event) const noexcept;
+
+    // Check the controls, report progress, and check again after the callback.
+    Result<void> checkpoint(const ProgressEvent& event) const;
 };
 
-// Builds a context with a `desktop` budget. For tests and simple callers.
+// Builds a context from the caller's budget. It also applies the budget's deadline.
 //
 // The budget is owned by the caller: an OperationContext holds a non-owning pointer, because
 // a long-running server wants one budget shared across the stages of one job.

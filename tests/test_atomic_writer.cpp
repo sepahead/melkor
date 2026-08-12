@@ -6,7 +6,7 @@
 // memory partway through would truncate your good scene.spz and then delete it, leaving you
 // with neither the new file nor the old one.
 //
-// The property under test is stated once and checked after every injected failure:
+// The pre-installation property is stated once and checked after each injected failure:
 //
 //     **After any failure, the pre-existing destination is byte-for-byte what it was.**
 //
@@ -20,6 +20,7 @@
 #include "melkor/limits.hpp"
 #include "melkor/ply_writer.hpp"
 
+#include <chrono>
 #include <cstdio>
 #include <filesystem>
 #include <fstream>
@@ -27,6 +28,7 @@
 #include <vector>
 
 #if !defined(_WIN32)
+#include <sys/stat.h>
 #include <unistd.h>
 #endif
 
@@ -59,12 +61,20 @@ SplatData make_ply_data(std::vector<Vec3f> positions = {}) {
     return SplatData::create(std::move(input)).value();
 }
 
+PlyWriteConfig ply_write_config() {
+    PlyWriteConfig config;
+    config.color_space = ColorSpace::lin_rec709_display;
+    config.antialiased = false;
+    return config;
+}
+
 // A scratch directory that cleans itself up.
 class TempDir {
 public:
     TempDir() {
-        path_ = fs::temp_directory_path() / ("melkor-atomic-test-" + std::to_string(::getpid()) +
-                                             "-" + std::to_string(counter_++));
+        const auto stamp = std::chrono::steady_clock::now().time_since_epoch().count();
+        path_ = fs::temp_directory_path() /
+                ("melkor-atomic-test-" + std::to_string(stamp) + "-" + std::to_string(counter_++));
         fs::create_directories(path_);
     }
     ~TempDir() {
@@ -124,6 +134,13 @@ Budget make_budget() {
     return Budget(Limits::for_profile(LimitsProfile::desktop));
 }
 
+class RecordingProgressSink final : public ProgressSink {
+public:
+    void on_progress(const ProgressEvent& event) override { events.push_back(event); }
+
+    std::vector<ProgressEvent> events;
+};
+
 // ---------------------------------------------------------------------------
 // The happy path
 // ---------------------------------------------------------------------------
@@ -147,9 +164,186 @@ void test_writes_new_file() {
     CHECK(!fs::exists(destination));
 
     CHECK(writer.value()->commit().has_value());
+    CHECK(writer.value()->committed());
     CHECK(fs::exists(destination));
     CHECK(read_file(destination) == "hello world");
+#if !defined(_WIN32)
+    struct stat destination_stat{};
+    CHECK(::stat(destination.c_str(), &destination_stat) == 0);
+    CHECK((destination_stat.st_mode & 0777u) == 0600u);
+#endif
     assert_no_temp_files(dir.path(), "writes_new_file");
+}
+
+void test_cancelled_create_has_no_side_effects() {
+    TempDir dir;
+    Budget budget = make_budget();
+    OperationContext context = make_default_context(budget);
+    context.cancellation.cancel();
+
+    const fs::path destination = dir.path() / "out.bin";
+    auto writer = AtomicWriter::create(destination, WriteOptions{}, context);
+    CHECK(!writer.has_value());
+    CHECK(writer.error_code() == ErrorCode::cancelled);
+    CHECK(!fs::exists(destination));
+    assert_no_temp_files(dir.path(), "cancelled_create");
+}
+
+void test_expired_deadline_has_no_side_effects() {
+    TempDir dir;
+    Budget budget = make_budget();
+    OperationContext context = make_default_context(budget);
+    context.deadline = Deadline::at(Deadline::TimePoint::min());
+
+    const fs::path destination = dir.path() / "out.bin";
+    auto writer = AtomicWriter::create(destination, WriteOptions{}, context);
+    CHECK(!writer.has_value());
+    CHECK(writer.error_code() == ErrorCode::resource_limit);
+    CHECK(writer.diagnostics()[0].code == "MK0304_DEADLINE_EXCEEDED");
+    CHECK(!fs::exists(destination));
+    assert_no_temp_files(dir.path(), "expired_deadline");
+}
+
+void test_empty_destination_fails_before_temp_creation() {
+    Budget budget = make_budget();
+    OperationContext context = make_default_context(budget);
+
+    auto writer = AtomicWriter::create(fs::path{}, WriteOptions{}, context);
+    CHECK(!writer.has_value());
+    CHECK(writer.error_code() == ErrorCode::invalid_argument);
+    CHECK(writer.diagnostics()[0].code == "MK0517_OUTPUT_PATH_EMPTY");
+}
+
+void test_destination_with_null_character_fails() {
+    TempDir dir;
+    Budget budget = make_budget();
+    OperationContext context = make_default_context(budget);
+
+    std::string invalid_name("out\0hidden.bin", 14);
+    auto writer =
+        AtomicWriter::create(dir.path() / fs::path(invalid_name), WriteOptions{}, context);
+    CHECK(!writer.has_value());
+    CHECK(writer.error_code() == ErrorCode::invalid_argument);
+    CHECK(writer.diagnostics()[0].code == "MK0527_OUTPUT_PATH_NUL");
+    assert_no_temp_files(dir.path(), "null_character");
+}
+
+void test_invalid_limits_fail_before_temp_creation() {
+    Limits limits = Limits::for_profile(LimitsProfile::custom);
+    Budget budget(limits);
+    OperationContext context = make_default_context(budget);
+
+    auto writer = AtomicWriter::create("out.bin", WriteOptions{}, context);
+    CHECK(!writer.has_value());
+    CHECK(writer.error_code() == ErrorCode::invalid_argument);
+}
+
+void test_output_stream_flush_accepts_eof() {
+    TempDir dir;
+    Budget budget = make_budget();
+    OperationContext context = make_default_context(budget);
+    auto writer = AtomicWriter::create(dir.path() / "stream.bin", WriteOptions{}, context);
+    CHECK(writer.has_value());
+
+    const std::string payload(64 * 1024, 'x');
+    {
+        AtomicOutputStream stream(*writer.value());
+        CHECK(budget.used(BudgetKind::memory_bytes) == 64 * 1024);
+        stream.write(payload.data(), static_cast<std::streamsize>(payload.size()));
+        stream.flush();
+        CHECK(stream.good());
+        CHECK(!stream.failed());
+    }
+    CHECK(budget.used(BudgetKind::memory_bytes) == 0);
+    CHECK(writer.value()->commit().has_value());
+    CHECK(read_file(dir.path() / "stream.bin") == payload);
+}
+
+void test_output_stream_respects_memory_limit() {
+    TempDir dir;
+    Limits limits = Limits::for_profile(LimitsProfile::desktop);
+    limits.max_memory_bytes = 1;
+    Budget budget(limits);
+    OperationContext context = make_default_context(budget);
+    const fs::path destination = dir.path() / "stream.bin";
+    auto writer = AtomicWriter::create(destination, WriteOptions{}, context);
+    CHECK(writer.has_value());
+
+    {
+        AtomicOutputStream stream(*writer.value());
+        CHECK(stream.failed());
+        CHECK(stream.error_code() == ErrorCode::resource_limit);
+        CHECK(!stream.diagnostics().empty());
+        CHECK(budget.used(BudgetKind::memory_bytes) == 0);
+    }
+    writer.value()->abort();
+    CHECK(!fs::exists(destination));
+    assert_no_temp_files(dir.path(), "stream_memory_limit");
+}
+
+void test_output_stream_destructor_does_not_throw() {
+    TempDir dir;
+    Limits limits = Limits::for_profile(LimitsProfile::desktop);
+    limits.max_temp_bytes = 4;
+    Budget budget(limits);
+    OperationContext context = make_default_context(budget);
+    const fs::path destination = dir.path() / "stream.bin";
+    auto writer = AtomicWriter::create(destination, WriteOptions{}, context);
+    CHECK(writer.has_value());
+
+    {
+        AtomicOutputStream stream(*writer.value());
+        stream.exceptions(std::ios::badbit);
+        stream.write("12345", 5);
+        // The destructor flush exceeds the budget. An ostream exception mask must not make the
+        // destructor throw or terminate the process.
+    }
+
+    CHECK(!writer.value()->commit().has_value());
+    CHECK(!fs::exists(destination));
+    assert_no_temp_files(dir.path(), "stream_destructor");
+}
+
+void test_cancelled_commit_preserves_destination() {
+    TempDir dir;
+    Budget budget = make_budget();
+    OperationContext context = make_default_context(budget);
+
+    const fs::path destination = dir.path() / "out.bin";
+    const std::string original = "original";
+    write_file(destination, original);
+    WriteOptions options;
+    options.overwrite = true;
+    auto writer = AtomicWriter::create(destination, options, context);
+    CHECK(writer.has_value());
+    CHECK(writer.value()->write("replacement", 11).has_value());
+
+    context.cancellation.cancel();
+    auto committed = writer.value()->commit();
+    CHECK(!committed.has_value());
+    CHECK(committed.error_code() == ErrorCode::cancelled);
+    assert_destination_intact(destination, original, "cancelled_commit");
+    assert_no_temp_files(dir.path(), "cancelled_commit");
+}
+
+void test_write_and_commit_report_progress() {
+    TempDir dir;
+    Budget budget = make_budget();
+    OperationContext context = make_default_context(budget);
+    RecordingProgressSink sink;
+    context.progress = &sink;
+
+    const fs::path destination = dir.path() / "out.bin";
+    auto writer = AtomicWriter::create(destination, WriteOptions{}, context);
+    CHECK(writer.has_value());
+    CHECK(writer.value()->write("abc", 3).has_value());
+    CHECK(writer.value()->commit().has_value());
+    CHECK(sink.events.size() >= 3);
+    CHECK(sink.events.front().operation == "atomic_writer.write");
+    CHECK(sink.events.front().completed == 0);
+    CHECK(sink.events[1].completed == 3);
+    CHECK(sink.events.back().operation == "atomic_writer.commit");
+    CHECK(sink.events.back().completed == 3);
 }
 
 // ---------------------------------------------------------------------------
@@ -200,6 +394,79 @@ void test_overwrites_with_force() {
     CHECK(writer.value()->commit().has_value());
     CHECK(read_file(destination) == "new contents");
     assert_no_temp_files(dir.path(), "overwrites_with_force");
+}
+
+void test_late_destination_is_not_overwritten_without_force() {
+    TempDir dir;
+    Budget budget = make_budget();
+    OperationContext context = make_default_context(budget);
+
+    const fs::path destination = dir.path() / "late.bin";
+    auto writer = AtomicWriter::create(destination, WriteOptions{}, context);
+    CHECK(writer.has_value());
+    CHECK(writer.value()->write("new data", 8).has_value());
+
+    const std::string late_contents = "LATE PRECIOUS DATA";
+    write_file(destination, late_contents);
+
+    const auto committed = writer.value()->commit();
+    CHECK(!committed.has_value());
+    CHECK(!writer.value()->committed());
+    assert_destination_intact(destination, late_contents, "late_destination");
+    assert_no_temp_files(dir.path(), "late_destination");
+}
+
+void test_temp_budget_is_released() {
+    TempDir dir;
+    Limits limits = Limits::for_profile(LimitsProfile::desktop);
+    limits.max_temp_bytes = 16;
+    Budget budget(limits);
+    OperationContext context = make_default_context(budget);
+
+    auto aborted = AtomicWriter::create(dir.path() / "aborted.bin", WriteOptions{}, context);
+    CHECK(aborted.has_value());
+    CHECK(aborted.value()->write("12345678", 8).has_value());
+    CHECK(budget.remaining(BudgetKind::temp_bytes) == 8);
+    aborted.value()->abort();
+    CHECK(budget.remaining(BudgetKind::temp_bytes) == 16);
+
+    auto committed = AtomicWriter::create(dir.path() / "committed.bin", WriteOptions{}, context);
+    CHECK(committed.has_value());
+    CHECK(committed.value()->write("12345678", 8).has_value());
+    CHECK(committed.value()->commit().has_value());
+    CHECK(budget.remaining(BudgetKind::temp_bytes) == 16);
+}
+
+void test_failed_write_cannot_commit_partial_output() {
+    TempDir dir;
+    Limits limits = Limits::for_profile(LimitsProfile::desktop);
+    limits.max_temp_bytes = 4;
+    Budget budget(limits);
+    OperationContext context = make_default_context(budget);
+
+    const fs::path destination = dir.path() / "partial.bin";
+    auto writer = AtomicWriter::create(destination, WriteOptions{}, context);
+    CHECK(writer.has_value());
+    CHECK(!writer.value()->write("12345678", 8).has_value());
+    CHECK(!writer.value()->commit().has_value());
+    CHECK(!writer.value()->committed());
+    CHECK(!fs::exists(destination));
+    CHECK(budget.remaining(BudgetKind::temp_bytes) == 4);
+    assert_no_temp_files(dir.path(), "failed_write_cannot_commit");
+}
+
+void test_null_write_buffer_fails_safely() {
+    TempDir dir;
+    Budget budget = make_budget();
+    OperationContext context = make_default_context(budget);
+
+    const fs::path destination = dir.path() / "null.bin";
+    auto writer = AtomicWriter::create(destination, WriteOptions{}, context);
+    CHECK(writer.has_value());
+    CHECK(!writer.value()->write(nullptr, 1).has_value());
+    CHECK(!writer.value()->commit().has_value());
+    CHECK(!fs::exists(destination));
+    assert_no_temp_files(dir.path(), "null_write_buffer");
 }
 
 // ---------------------------------------------------------------------------
@@ -316,7 +583,40 @@ void test_missing_parent_directory() {
     CHECK(writer.diagnostics()[0].code == "MK0501_OUTPUT_PARENT_MISSING");
 }
 
+void test_parent_is_not_a_directory() {
+    TempDir dir;
+    Budget budget = make_budget();
+    OperationContext context = make_default_context(budget);
+    const fs::path parent = dir.path() / "regular-file";
+    write_file(parent, "data");
+
+    auto writer = AtomicWriter::create(parent / "out.bin", WriteOptions{}, context);
+    CHECK(!writer.has_value());
+    CHECK(writer.diagnostics()[0].code == "MK0502_OUTPUT_PARENT_NOT_DIRECTORY");
+    CHECK(read_file(parent) == "data");
+}
+
 #if !defined(_WIN32)
+void test_refuses_to_replace_special_file() {
+    TempDir dir;
+    Budget budget = make_budget();
+    OperationContext context = make_default_context(budget);
+    const fs::path destination = dir.path() / "output.fifo";
+    CHECK(::mkfifo(destination.c_str(), 0600) == 0);
+
+    WriteOptions options;
+    options.overwrite = true;
+    auto writer = AtomicWriter::create(destination, options, context);
+    CHECK(!writer.has_value());
+    CHECK(writer.error_code() == ErrorCode::io_error);
+    CHECK(writer.diagnostics()[0].code == "MK0532_OUTPUT_NOT_REGULAR");
+
+    struct stat destination_stat{};
+    CHECK(::lstat(destination.c_str(), &destination_stat) == 0);
+    CHECK(S_ISFIFO(destination_stat.st_mode));
+    assert_no_temp_files(dir.path(), "special_file");
+}
+
 void test_refuses_to_follow_output_symlink() {
     TempDir dir;
     Budget budget = make_budget();
@@ -367,6 +667,108 @@ void test_allows_symlink_when_explicitly_requested() {
     // why allow_output_symlink is a niche escape hatch rather than a sensible default.
     CHECK(fs::exists(link));
     CHECK(!fs::is_symlink(fs::symlink_status(link)));
+}
+
+void run_parent_directory_swap_commit(bool overwrite, Durability durability, const char* scenario) {
+    TempDir dir;
+    Budget budget = make_budget();
+    OperationContext context = make_default_context(budget);
+
+    const fs::path live_directory = dir.path() / "live";
+    const fs::path original_directory = dir.path() / "original";
+    fs::create_directory(live_directory);
+
+    const fs::path destination = live_directory / "output.bin";
+    if (overwrite) {
+        write_file(destination, "original data");
+    }
+
+    WriteOptions options;
+    options.overwrite = overwrite;
+    options.durability = durability;
+    auto writer = AtomicWriter::create(destination, options, context);
+    CHECK(writer.has_value());
+    CHECK(writer.value()->write("trusted data", 12).has_value());
+    const fs::path temporary_name = writer.value()->temporary_path().filename();
+
+    fs::rename(live_directory, original_directory);
+    fs::create_directory(live_directory);
+    if (overwrite) {
+        write_file(live_directory / "output.bin", "decoy data");
+    }
+    write_file(live_directory / temporary_name, "attacker data");
+
+    const auto committed = writer.value()->commit();
+    CHECK(committed.has_value());
+    CHECK(writer.value()->committed());
+    CHECK(read_file(original_directory / "output.bin") == "trusted data");
+    if (overwrite) {
+        CHECK(read_file(live_directory / "output.bin") == "decoy data");
+    } else {
+        CHECK(!fs::exists(live_directory / "output.bin"));
+    }
+    CHECK(read_file(live_directory / temporary_name) == "attacker data");
+    assert_no_temp_files(original_directory, scenario);
+}
+
+void test_parent_directory_swap_cannot_redirect_replace() {
+    run_parent_directory_swap_commit(true, Durability::full, "directory_swap_replace");
+}
+
+void test_parent_directory_swap_cannot_redirect_no_overwrite() {
+    run_parent_directory_swap_commit(false, Durability::metadata, "directory_swap_no_overwrite");
+}
+
+void test_parent_directory_swap_cannot_redirect_abort() {
+    TempDir dir;
+    Budget budget = make_budget();
+    OperationContext context = make_default_context(budget);
+    const std::uint64_t initial_budget = budget.remaining(BudgetKind::temp_bytes);
+
+    const fs::path live_directory = dir.path() / "live";
+    const fs::path original_directory = dir.path() / "original";
+    fs::create_directory(live_directory);
+    const fs::path destination = live_directory / "output.bin";
+    write_file(destination, "original data");
+
+    WriteOptions options;
+    options.overwrite = true;
+    auto writer = AtomicWriter::create(destination, options, context);
+    CHECK(writer.has_value());
+    CHECK(writer.value()->write("partial data", 12).has_value());
+    const fs::path temporary_name = writer.value()->temporary_path().filename();
+
+    fs::rename(live_directory, original_directory);
+    fs::create_directory(live_directory);
+    write_file(live_directory / "output.bin", "decoy data");
+    write_file(live_directory / temporary_name, "attacker data");
+
+    writer.value()->abort();
+    CHECK(read_file(original_directory / "output.bin") == "original data");
+    CHECK(!fs::exists(original_directory / temporary_name));
+    CHECK(read_file(live_directory / "output.bin") == "decoy data");
+    CHECK(read_file(live_directory / temporary_name) == "attacker data");
+    CHECK(budget.remaining(BudgetKind::temp_bytes) == initial_budget);
+}
+
+void test_replace_preserves_permissions() {
+    TempDir dir;
+    Budget budget = make_budget();
+    OperationContext context = make_default_context(budget);
+    const fs::path destination = dir.path() / "mode.bin";
+    write_file(destination, "old");
+    CHECK(::chmod(destination.c_str(), 0640) == 0);
+
+    WriteOptions options;
+    options.overwrite = true;
+    auto writer = AtomicWriter::create(destination, options, context);
+    CHECK(writer.has_value());
+    CHECK(writer.value()->write("new", 3).has_value());
+    CHECK(writer.value()->commit().has_value());
+
+    struct stat destination_stat{};
+    CHECK(::stat(destination.c_str(), &destination_stat) == 0);
+    CHECK((destination_stat.st_mode & 0777u) == 0640u);
 }
 #endif
 
@@ -442,6 +844,11 @@ void test_same_file_detection() {
     // A destination that does not exist yet is certainly not the input.
     auto missing = is_same_file(file, dir.path() / "does-not-exist.ply");
     CHECK(missing.has_value() && !missing.value());
+
+    const fs::path too_long = dir.path() / std::string(4096, 'x');
+    auto failed = is_same_file(file, too_long);
+    CHECK(!failed.has_value());
+    CHECK(failed.error_code() == ErrorCode::io_error);
 }
 
 // ---------------------------------------------------------------------------
@@ -467,7 +874,7 @@ void test_ply_writer_does_not_truncate_on_open() {
     const SplatData data = make_ply_data();
     PlyWriter writer;
     const PlyWriteResult result = writer.writeToFile(
-        (dir.path() / "no-such-dir" / "out.ply").string(), data, PlyWriteConfig{});
+        (dir.path() / "no-such-dir" / "out.ply").string(), data, ply_write_config());
     CHECK(!result.success);
 
     // And the real file, elsewhere, is untouched.
@@ -477,7 +884,7 @@ void test_ply_writer_does_not_truncate_on_open() {
     const fs::path dir_destination = dir.path() / "a_dir";
     fs::create_directories(dir_destination);
     const PlyWriteResult to_dir =
-        writer.writeToFile(dir_destination.string(), data, PlyWriteConfig{});
+        writer.writeToFile(dir_destination.string(), data, ply_write_config());
     CHECK(!to_dir.success);
     CHECK(fs::is_directory(dir_destination));
 
@@ -493,7 +900,9 @@ void test_ply_writer_commits_atomically() {
     const SplatData data = make_ply_data({Vec3f{1.0f, 2.0f, 3.0f}});
 
     PlyWriter writer;
-    const PlyWriteResult result = writer.writeToFile(destination.string(), data, PlyWriteConfig{});
+    PlyWriteConfig config = ply_write_config();
+    config.overwrite = true;
+    const PlyWriteResult result = writer.writeToFile(destination.string(), data, config);
     CHECK(result.success);
     CHECK(result.bytes_written > 0);
 
@@ -510,19 +919,39 @@ void test_ply_writer_commits_atomically() {
 
 int main() {
     test_writes_new_file();
+    test_cancelled_create_has_no_side_effects();
+    test_expired_deadline_has_no_side_effects();
+    test_empty_destination_fails_before_temp_creation();
+    test_destination_with_null_character_fails();
+    test_invalid_limits_fail_before_temp_creation();
+    test_output_stream_flush_accepts_eof();
+    test_output_stream_respects_memory_limit();
+    test_output_stream_destructor_does_not_throw();
+    test_cancelled_commit_preserves_destination();
+    test_write_and_commit_report_progress();
 
     test_refuses_to_overwrite_without_force();
     test_overwrites_with_force();
+    test_late_destination_is_not_overwritten_without_force();
+    test_temp_budget_is_released();
+    test_failed_write_cannot_commit_partial_output();
+    test_null_write_buffer_fails_safely();
 
     test_abort_preserves_destination();
     test_dropped_without_commit_preserves_destination();
     test_budget_exhaustion_mid_write_preserves_destination();
     test_destination_is_a_directory();
     test_missing_parent_directory();
+    test_parent_is_not_a_directory();
 
 #if !defined(_WIN32)
+    test_refuses_to_replace_special_file();
     test_refuses_to_follow_output_symlink();
     test_allows_symlink_when_explicitly_requested();
+    test_parent_directory_swap_cannot_redirect_replace();
+    test_parent_directory_swap_cannot_redirect_no_overwrite();
+    test_parent_directory_swap_cannot_redirect_abort();
+    test_replace_preserves_permissions();
 #endif
 
     test_temporary_is_in_the_destination_directory();

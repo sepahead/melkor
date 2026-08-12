@@ -1,10 +1,8 @@
 #!/usr/bin/env python3
-"""Verify (or update) every version surface against the authoritative root VERSION file.
+"""Verify or update each version surface from the root VERSION file.
 
-The root ``VERSION`` file is the only place a Melkor version is written by hand. Every
-other surface — the CMake project version, the viewer's ``package.json``, the Tauri
-config, the Cargo manifest, the Python distribution, the changelog heading, the citation
-metadata — is derived from it.
+The root ``VERSION`` file is the only manual version source. This tool checks each
+package, application, lockfile, and citation surface. It also checks release structure.
 
 Without an enforced check this decays immediately: someone bumps CMake, forgets
 ``package.json``, and the CLI, the desktop app, and the release asset now disagree about
@@ -21,9 +19,8 @@ not touch ``VERSION`` itself, because the whole point is that a human decides th
 deliberately.
 
 Version mapping across ecosystems
---------------------------------
-The same release is spelled differently by different packaging ecosystems, and the mapping
-must be deliberate rather than accidental:
+---------------------------------
+Each package system uses a different version syntax. This tool applies the following map:
 
 ===============  =================  ==================  ==============
 VERSION          SemVer / npm       PEP 440 (Python)    Cargo
@@ -33,21 +30,26 @@ VERSION          SemVer / npm       PEP 440 (Python)    Cargo
 ``2.0.0``        ``2.0.0``          ``2.0.0``           ``2.0.0``
 ===============  =================  ==================  ==============
 
-Python is the awkward one: PEP 440 does not accept ``-rc.2``, so it must be normalized, or
-``pip`` will silently treat the distribution as a different version than the tag claims.
+PEP 440 does not accept ``-rc.2``. The tool changes this form to ``rc2``.
 """
 
 from __future__ import annotations
 
 import argparse
 import json
+import math
+import os
 import re
+import stat
 import sys
+import tempfile
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Any, Callable
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 VERSION_FILE = REPO_ROOT / "VERSION"
+MAX_TEXT_BYTES = 4 * 1024 * 1024
 
 # SemVer 2.0.0, restricted to the forms this project actually releases.
 SEMVER_RE = re.compile(
@@ -63,6 +65,131 @@ class VersionError(Exception):
     """A version is malformed, or a surface cannot be represented."""
 
 
+Writer = Callable[[], None]
+
+
+def read_text(path: Path) -> str:
+    """Read a bounded regular UTF-8 file."""
+
+    if path.is_symlink():
+        raise VersionError(f"{path}: version surfaces must not be symbolic links.")
+    flags = os.O_RDONLY | getattr(os, "O_BINARY", 0) | getattr(os, "O_CLOEXEC", 0)
+    flags |= getattr(os, "O_NOFOLLOW", 0)
+    try:
+        descriptor = os.open(path, flags)
+        with os.fdopen(descriptor, "rb") as handle:
+            initial = os.fstat(handle.fileno())
+            if not stat.S_ISREG(initial.st_mode):
+                raise VersionError(f"{path}: the version surface must be a regular file.")
+            if initial.st_size > MAX_TEXT_BYTES:
+                raise VersionError(f"{path}: the version surface exceeds {MAX_TEXT_BYTES} bytes.")
+            raw = handle.read(MAX_TEXT_BYTES + 1)
+            final = os.fstat(handle.fileno())
+            if (
+                len(raw) != initial.st_size
+                or final.st_dev != initial.st_dev
+                or final.st_ino != initial.st_ino
+                or final.st_size != initial.st_size
+                or final.st_mtime_ns != initial.st_mtime_ns
+                or final.st_ctime_ns != initial.st_ctime_ns
+            ):
+                raise VersionError(f"{path}: the version surface changed while it was read.")
+    except OSError as exc:
+        raise VersionError(f"{path}: cannot read the version surface: {exc}") from exc
+    if len(raw) > MAX_TEXT_BYTES:
+        raise VersionError(f"{path}: the version surface exceeds {MAX_TEXT_BYTES} bytes.")
+    try:
+        return raw.decode("utf-8")
+    except UnicodeDecodeError as exc:
+        raise VersionError(f"{path}: the version surface is not valid UTF-8: {exc}") from exc
+
+
+def parse_json_object(text: str, path: Path) -> dict[str, Any]:
+    """Parse one JSON object and reject duplicate object names."""
+
+    def object_without_duplicates(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
+        value: dict[str, Any] = {}
+        for name, item in pairs:
+            if name in value:
+                raise VersionError(f"{path}: duplicate JSON object name {name!r}.")
+            value[name] = item
+        return value
+
+    def reject_constant(value: str) -> None:
+        raise VersionError(f"{path}: non-JSON number {value!r}.")
+
+    def finite_float(value: str) -> float:
+        parsed = float(value)
+        if not math.isfinite(parsed):
+            raise VersionError(f"{path}: non-finite JSON number {value!r}.")
+        return parsed
+
+    try:
+        value = json.loads(
+            text,
+            object_pairs_hook=object_without_duplicates,
+            parse_constant=reject_constant,
+            parse_float=finite_float,
+        )
+    except json.JSONDecodeError as exc:
+        raise VersionError(f"{path}: cannot read valid JSON: {exc}") from exc
+    except RecursionError as exc:
+        raise VersionError(f"{path}: JSON nesting is too deep.") from exc
+    if not isinstance(value, dict):
+        raise VersionError(f"{path}: the JSON root must be an object.")
+    return value
+
+
+def read_json_object(path: Path) -> dict[str, Any]:
+    """Read a bounded JSON object and reject duplicate object names."""
+
+    return parse_json_object(read_text(path), path)
+
+
+def replace_top_level_json_string(path: Path, key: str, expected: str) -> str:
+    """Replace one top-level JSON string without changing other formatting."""
+
+    text = read_text(path)
+    escaped_key = re.escape(json.dumps(key))
+    pattern = re.compile(
+        rf'({escaped_key}\s*:\s*")((?:\\.|[^"\\])*)(")'
+    )
+    replacement_value = json.dumps(expected, ensure_ascii=False)[1:-1]
+    candidates: list[str] = []
+    for match in pattern.finditer(text):
+        candidate = text[: match.start(2)] + replacement_value + text[match.end(2) :]
+        try:
+            parsed = parse_json_object(candidate, path)
+        except VersionError:
+            continue
+        if parsed.get(key) == expected:
+            candidates.append(candidate)
+    if len(candidates) != 1:
+        raise VersionError(
+            f"{path}: cannot locate exactly one top-level string field {key!r}."
+        )
+    return candidates[0]
+
+
+def atomic_write_text(path: Path, text: str) -> None:
+    """Replace one text file only after the complete write succeeds."""
+    descriptor, temporary_name = tempfile.mkstemp(
+        prefix=f".{path.name}.", suffix=".tmp", dir=path.parent
+    )
+    temporary = Path(temporary_name)
+    try:
+        with os.fdopen(descriptor, "w", encoding="utf-8", newline="") as handle:
+            handle.write(text)
+            handle.flush()
+            os.fsync(handle.fileno())
+        temporary.chmod(path.stat().st_mode & 0o777)
+        os.replace(temporary, path)
+    except OSError as exc:
+        raise VersionError(f"{path}: cannot replace the version surface: {exc}") from exc
+    finally:
+        temporary.unlink(missing_ok=True)
+
+
 @dataclass(frozen=True)
 class Version:
     """A parsed project version, with the per-ecosystem spellings it maps to."""
@@ -72,6 +199,7 @@ class Version:
     minor: int
     patch: int
     prerelease: str  # "" for a stable release
+    build: str  # "" when the version has no build metadata
 
     @property
     def core(self) -> str:
@@ -96,25 +224,34 @@ class Version:
         rather than a best-effort guess.
         """
         if not self.prerelease:
-            return self.core
+            mapped = self.core
 
-        # 2.0.0-dev / 2.0.0-dev.3  ->  2.0.0.dev0 / 2.0.0.dev3
-        match = re.fullmatch(r"dev(?:\.(\d+))?", self.prerelease)
-        if match:
-            return f"{self.core}.dev{match.group(1) or '0'}"
+        else:
+            # 2.0.0-dev / 2.0.0-dev.3  ->  2.0.0.dev0 / 2.0.0.dev3
+            match = re.fullmatch(r"dev(?:\.(\d+))?", self.prerelease)
+            if match:
+                mapped = f"{self.core}.dev{match.group(1) or '0'}"
 
-        # 2.0.0-rc.2 / 2.0.0-rc2  ->  2.0.0rc2
-        match = re.fullmatch(r"(a|b|rc|alpha|beta)\.?(\d+)", self.prerelease)
-        if match:
-            phase = {"alpha": "a", "beta": "b"}.get(match.group(1), match.group(1))
-            return f"{self.core}{phase}{match.group(2)}"
+            else:
+                # 2.0.0-rc.2 / 2.0.0-rc2  ->  2.0.0rc2
+                match = re.fullmatch(r"(a|b|rc|alpha|beta)\.?(\d+)", self.prerelease)
+                if match:
+                    phase = {"alpha": "a", "beta": "b"}.get(
+                        match.group(1), match.group(1)
+                    )
+                    mapped = f"{self.core}{phase}{match.group(2)}"
+                else:
+                    raise VersionError(
+                        f"prerelease {self.prerelease!r} has no defined PEP 440 mapping.\n"
+                        f"Use a form this project supports: 'dev', 'dev.N', 'a.N', 'b.N', or "
+                        f"'rc.N'.\nDo not invent a mapping here. The wheel must map to its "
+                        f"source tag."
+                    )
 
-        raise VersionError(
-            f"prerelease {self.prerelease!r} has no defined PEP 440 mapping.\n"
-            f"Use a form this project supports: 'dev', 'dev.N', 'a.N', 'b.N', or 'rc.N'.\n"
-            f"Do not invent a mapping here — pip would accept a version that disagrees "
-            f"with the git tag, and the wheel would then be untraceable to its source."
-        )
+        if self.build:
+            local = self.build.lower().replace("-", ".")
+            mapped += f"+{local}"
+        return mapped
 
 
 def parse_version(text: str) -> Version:
@@ -125,12 +262,27 @@ def parse_version(text: str) -> Version:
             f"invalid version {text!r}.\n"
             f"Expected SemVer, for example 2.0.0, 2.0.0-dev, or 2.0.0-rc.2."
         )
+    prerelease = match.group("prerelease") or ""
+    build = match.group("build") or ""
+    for label, value in (("prerelease", prerelease), ("build metadata", build)):
+        if value and any(not identifier for identifier in value.split(".")):
+            raise VersionError(f"invalid version {text!r}: {label} has an empty identifier.")
+    for identifier in prerelease.split(".") if prerelease else ():
+        if identifier.isdigit() and len(identifier) > 1 and identifier.startswith("0"):
+            raise VersionError(
+                f"invalid version {text!r}: numeric prerelease identifier {identifier!r} "
+                "has a leading zero."
+            )
+    components = tuple(int(match.group(name)) for name in ("major", "minor", "patch"))
+    if any(component > 0xFFFFFFFF for component in components):
+        raise VersionError(f"invalid version {text!r}: a numeric core field exceeds uint32.")
     return Version(
         raw=text,
-        major=int(match.group("major")),
-        minor=int(match.group("minor")),
-        patch=int(match.group("patch")),
-        prerelease=match.group("prerelease") or "",
+        major=components[0],
+        minor=components[1],
+        patch=components[2],
+        prerelease=prerelease,
+        build=build,
     )
 
 
@@ -138,12 +290,14 @@ def read_authoritative_version() -> Version:
     if not VERSION_FILE.is_file():
         raise VersionError(f"missing authoritative version file: {VERSION_FILE}")
 
-    raw = VERSION_FILE.read_text(encoding="utf-8")
-    lines = [line for line in raw.splitlines() if line.strip()]
-    if len(lines) != 1:
+    raw = read_text(VERSION_FILE)
+    lines = raw.splitlines()
+    if len(lines) != 1 or not lines[0].strip() or raw != f"{lines[0]}\n":
         raise VersionError(
-            f"{VERSION_FILE} must contain exactly one non-empty line, found {len(lines)}."
+            f"{VERSION_FILE} must contain one non-empty line with an LF terminator."
         )
+    if lines[0] != lines[0].strip():
+        raise VersionError(f"{VERSION_FILE} must not contain surrounding white space.")
     return parse_version(lines[0])
 
 
@@ -175,8 +329,8 @@ def _regex_surface(
     pattern: str,
     expected: str,
     *,
-    template: str,
-) -> tuple[Finding | None, callable | None]:
+    required: bool = True,
+) -> tuple[Finding | None, Writer | None]:
     """A surface whose version is one regex capture group in a text file.
 
     Returns the finding plus a closure that rewrites the file, or ``(None, None)`` when
@@ -184,9 +338,11 @@ def _regex_surface(
     """
     path = REPO_ROOT / relative_path
     if not path.is_file():
+        if required:
+            return Finding(name, path, expected, None), None
         return None, None
 
-    text = path.read_text(encoding="utf-8")
+    text = read_text(path)
     match = re.search(pattern, text, re.MULTILINE)
     actual = match.group(1) if match else None
     finding = Finding(name, path, expected, actual)
@@ -194,7 +350,7 @@ def _regex_surface(
     def write() -> None:
         if match:
             start, end = match.span(1)
-            path.write_text(text[:start] + expected + text[end:], encoding="utf-8")
+            atomic_write_text(path, text[:start] + expected + text[end:])
         else:
             raise VersionError(
                 f"{relative_path}: cannot write {name} — the expected pattern is absent.\n"
@@ -210,7 +366,9 @@ def _json_surface(
     relative_path: str,
     key: str,
     expected: str,
-) -> tuple[Finding | None, callable | None]:
+    *,
+    required: bool = True,
+) -> tuple[Finding | None, Writer | None]:
     """A surface whose version is a top-level JSON key.
 
     Rewritten with a targeted regex rather than a json.dump round-trip, because dumping
@@ -218,24 +376,21 @@ def _json_surface(
     """
     path = REPO_ROOT / relative_path
     if not path.is_file():
+        if required:
+            return Finding(name, path, expected, None), None
         return None, None
 
-    data = json.loads(path.read_text(encoding="utf-8"))
+    data = read_json_object(path)
     actual = data.get(key)
     finding = Finding(name, path, expected, actual if isinstance(actual, str) else None)
 
     def write() -> None:
-        text = path.read_text(encoding="utf-8")
-        pattern = rf'("{re.escape(key)}"\s*:\s*")([^"]*)(")'
-        new_text, count = re.subn(pattern, rf"\g<1>{expected}\g<3>", text, count=1)
-        if count != 1:
-            raise VersionError(f"{relative_path}: could not locate the {key!r} key to rewrite.")
-        path.write_text(new_text, encoding="utf-8")
+        atomic_write_text(path, replace_top_level_json_string(path, key, expected))
 
     return finding, write
 
 
-def _npm_lock_surface(expected: str) -> tuple[Finding | None, callable | None]:
+def _npm_lock_surface(expected: str) -> tuple[Finding | None, Writer | None]:
     """``viewer/package-lock.json`` restates the project's own version in two places.
 
     A lockfile whose self-version disagrees with its ``package.json`` makes
@@ -244,11 +399,17 @@ def _npm_lock_surface(expected: str) -> tuple[Finding | None, callable | None]:
     """
     path = REPO_ROOT / "viewer/package-lock.json"
     if not path.is_file():
-        return None, None
+        return Finding("viewer package-lock", path, expected, None), None
 
-    data = json.loads(path.read_text(encoding="utf-8"))
+    data = read_json_object(path)
     top = data.get("version")
-    root_pkg = data.get("packages", {}).get("", {}).get("version")
+    packages = data.get("packages")
+    if not isinstance(packages, dict):
+        raise VersionError("viewer/package-lock.json: 'packages' must be an object.")
+    root = packages.get("")
+    if not isinstance(root, dict):
+        raise VersionError("viewer/package-lock.json: packages[''] must be an object.")
+    root_pkg = root.get("version")
 
     # Report drift unless *both* agree; surface whichever value is wrong.
     if top == expected and root_pkg == expected:
@@ -261,29 +422,29 @@ def _npm_lock_surface(expected: str) -> tuple[Finding | None, callable | None]:
     finding = Finding("viewer package-lock", path, expected, actual)
 
     def write() -> None:
-        text = path.read_text(encoding="utf-8")
-        # Rewrite ONLY the two self-declarations, which are the first two "version" keys in the
-        # file: the top-level project version, then the packages."" root-package version.
-        # Every dependency version comes after those, under a "node_modules/..." key.
-        #
-        # A blanket str.replace of the stale value was the original bug: a dependency that
-        # happened to share the project's version string would be rewritten too, silently
-        # corrupting the locked dependency graph. count=2 targets exactly the two self-versions
-        # and never reaches a dependency.
-        new_text, n = re.subn(
-            r'("version"\s*:\s*")[^"]*(")', rf"\g<1>{expected}\g<2>", text, count=2
+        text = read_text(path)
+        top_pattern = re.compile(r'^(  "version"\s*:\s*")[^"]*(")', re.MULTILINE)
+        new_text, top_count = top_pattern.subn(
+            rf"\g<1>{expected}\g<2>", text, count=1
         )
-        if n < 2:
+        root_pattern = re.compile(
+            r'(^  "packages"\s*:\s*\{\s*\n'
+            r'    ""\s*:\s*\{.*?^      "version"\s*:\s*")[^"]*(")',
+            re.MULTILINE | re.DOTALL,
+        )
+        new_text, root_count = root_pattern.subn(
+            rf"\g<1>{expected}\g<2>", new_text, count=1
+        )
+        if top_count != 1 or root_count != 1:
             raise VersionError(
-                "viewer/package-lock.json: expected at least two 'version' keys (top-level and "
-                "packages.\"\") to rewrite; the file structure is unexpected."
+                "viewer/package-lock.json: cannot locate both project version fields."
             )
-        path.write_text(new_text, encoding="utf-8")
+        atomic_write_text(path, new_text)
 
     return finding, write
 
 
-def _cargo_lock_surface(expected: str) -> tuple[Finding | None, callable | None]:
+def _cargo_lock_surface(expected: str) -> tuple[Finding | None, Writer | None]:
     """``viewer/src-tauri/Cargo.lock`` restates the ``melkor-viewer`` package version.
 
     Matched by package name so a dependency that happens to share the version string is
@@ -291,9 +452,9 @@ def _cargo_lock_surface(expected: str) -> tuple[Finding | None, callable | None]
     """
     path = REPO_ROOT / "viewer/src-tauri/Cargo.lock"
     if not path.is_file():
-        return None, None
+        return Finding("Tauri Cargo.lock", path, expected, None), None
 
-    text = path.read_text(encoding="utf-8")
+    text = read_text(path)
     pattern = re.compile(
         r'(\[\[package\]\]\nname = "melkor-viewer"\nversion = ")([^"]+)(")', re.MULTILINE
     )
@@ -306,16 +467,18 @@ def _cargo_lock_surface(expected: str) -> tuple[Finding | None, callable | None]
             raise VersionError(
                 "viewer/src-tauri/Cargo.lock: no [[package]] entry named 'melkor-viewer'."
             )
-        path.write_text(pattern.sub(rf"\g<1>{expected}\g<3>", text, count=1), encoding="utf-8")
+        atomic_write_text(
+            path, pattern.sub(rf"\g<1>{expected}\g<3>", text, count=1)
+        )
 
     return finding, write
 
 
-def collect_surfaces(version: Version) -> tuple[list[Finding], dict[str, callable]]:
+def collect_surfaces(version: Version) -> tuple[list[Finding], dict[str, Writer]]:
     findings: list[Finding] = []
-    writers: dict[str, callable] = {}
+    writers: dict[str, Writer] = {}
 
-    def add(result: tuple[Finding | None, callable | None]) -> None:
+    def add(result: tuple[Finding | None, Writer | None]) -> None:
         finding, writer = result
         if finding is not None:
             findings.append(finding)
@@ -335,7 +498,6 @@ def collect_surfaces(version: Version) -> tuple[list[Finding], dict[str, callabl
             "viewer/src-tauri/Cargo.toml",
             r'^version\s*=\s*"([^"]+)"',
             version.semver,
-            template='version = "{}"',
         )
     )
     # The lockfiles restate the project's own version and drift just as easily.
@@ -349,7 +511,7 @@ def collect_surfaces(version: Version) -> tuple[list[Finding], dict[str, callabl
     # to keep in step, and demanding one would be a false failure.
     pyproject = REPO_ROOT / "pyproject.toml"
     if pyproject.is_file() and re.search(
-        r"^\[project\]", pyproject.read_text(encoding="utf-8"), re.MULTILINE
+        r"^\[project\]", read_text(pyproject), re.MULTILINE
     ):
         add(
             _regex_surface(
@@ -357,7 +519,6 @@ def collect_surfaces(version: Version) -> tuple[list[Finding], dict[str, callabl
                 "pyproject.toml",
                 r'^version\s*=\s*"([^"]+)"',
                 version.pep440,
-                template='version = "{}"',
             )
         )
     add(
@@ -366,7 +527,7 @@ def collect_surfaces(version: Version) -> tuple[list[Finding], dict[str, callabl
             "python/melkor3d/_version.py",
             r'^__version__\s*=\s*"([^"]+)"',
             version.pep440,
-            template='__version__ = "{}"',
+            required=False,
         )
     )
 
@@ -377,7 +538,6 @@ def collect_surfaces(version: Version) -> tuple[list[Finding], dict[str, callabl
             "CITATION.cff",
             r'^version:\s*"?([^"\n]+?)"?\s*$',
             version.semver,
-            template="version: {}",
         )
     )
 
@@ -397,7 +557,7 @@ def check_no_hardcoded_version_in_cmake() -> list[str]:
     """
     errors: list[str] = []
     path = REPO_ROOT / "CMakeLists.txt"
-    text = path.read_text(encoding="utf-8")
+    text = read_text(path)
 
     if re.search(r"project\s*\(\s*melkor\s+VERSION\s+[0-9]", text, re.IGNORECASE):
         errors.append(
@@ -420,6 +580,25 @@ def check_no_hardcoded_version_in_cmake() -> list[str]:
     return errors
 
 
+def check_no_hardcoded_version_in_scripts() -> list[str]:
+    """Project wrappers must read VERSION instead of restating a release number."""
+
+    errors: list[str] = []
+    for relative in (
+        "scripts/glomap_wrapper.sh",
+        "scripts/lichtfeld_wrapper.sh",
+        "scripts/opensplat_wrapper.sh",
+        "scripts/pipeline.sh",
+    ):
+        path = REPO_ROOT / relative
+        text = read_text(path)
+        if re.search(r'^VERSION=["\'][0-9]', text, re.MULTILINE):
+            errors.append(f"{relative}: states a literal project version.")
+        if 'VERSION=\"$(<\"$' not in text or "/VERSION\")\"" not in text:
+            errors.append(f"{relative}: does not read the root VERSION file.")
+    return errors
+
+
 def check_changelog(version: Version) -> list[str]:
     """The changelog must carry an ``Unreleased`` section, and must head a stable release.
 
@@ -432,7 +611,7 @@ def check_changelog(version: Version) -> list[str]:
     if not path.is_file():
         return ["CHANGELOG.md is missing."]
 
-    text = path.read_text(encoding="utf-8")
+    text = read_text(path)
 
     if not re.search(r"^##\s+Unreleased\s*$", text, re.MULTILINE):
         errors.append(
@@ -499,13 +678,14 @@ def main() -> int:
 
     try:
         version = read_authoritative_version()
+        pep440 = version.pep440
     except VersionError as exc:
         print(f"error: {exc}", file=sys.stderr)
         return 2
 
     print(f"VERSION            {version.raw}")
     print(f"  semver / npm     {version.semver}")
-    print(f"  PEP 440          {version.pep440}")
+    print(f"  PEP 440          {pep440}")
     print(f"  prerelease       {'yes' if version.is_prerelease else 'no'}")
     print()
 
@@ -515,8 +695,12 @@ def main() -> int:
         print(f"error: {exc}", file=sys.stderr)
         return 2
 
-    structural_errors = check_no_hardcoded_version_in_cmake() + check_changelog(version)
-    if args.release_tag:
+    structural_errors = (
+        check_no_hardcoded_version_in_cmake()
+        + check_no_hardcoded_version_in_scripts()
+        + check_changelog(version)
+    )
+    if args.release_tag is not None:
         structural_errors += check_release_tag(version, args.release_tag)
 
     if args.write:

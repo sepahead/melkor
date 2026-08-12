@@ -39,9 +39,14 @@ struct BufferSpan {
 //   - the referenced buffer's bytes were not supplied;
 //   - the bufferView runs past the end of its buffer, or the accessor runs past the end of its
 //     bufferView.
-Result<std::vector<float>> resolve_and_decode_accessor(const Document& doc,
-                                                       std::uint64_t accessor_index,
-                                                       const std::vector<BufferSpan>& buffers);
+Result<DecodedAccessor> resolve_and_decode_accessor(const Document& doc,
+                                                    std::uint64_t accessor_index,
+                                                    const std::vector<BufferSpan>& buffers);
+
+Result<DecodedAccessor> resolve_and_decode_accessor(const Document& doc,
+                                                    std::uint64_t accessor_index,
+                                                    const std::vector<BufferSpan>& buffers,
+                                                    const OperationContext& context);
 
 }  // namespace melkor::format::gltf
 

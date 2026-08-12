@@ -2,30 +2,49 @@
   "schema_version": 1,
   "profile_id": "ply:melkor-canonical-v1",
   "container": "ply",
+  "read_containers": [
+    "ply"
+  ],
+  "write_containers": [
+    "ply"
+  ],
   "status": "stable",
-  "description": "An unambiguous PLY interchange profile with distinct property names for canonical LINEAR values, so no double activation is possible. Distinct from Graphdeco names deliberately.",
+  "description": "A PLY interchange profile for canonical Gaussian values. Distinct property names prevent duplicate activation.",
   "coordinate_system": "gltf-luf",
   "length_unit": "meter",
   "quaternion_order": "xyzw",
   "quaternion_normalized": true,
   "scale_domain": "linear",
+  "scale_constraint": "non-negative",
   "opacity_domain": "linear",
-  "color_space": "linear-srgb",
-  "sh": { "basis": "real", "max_degree": 4, "order": "khr-gaussian-splatting", "phase": "condon-shortley" },
+  "opacity_range": [0.0, 1.0],
+  "color_spaces": ["srgb_rec709_display", "lin_rec709_display"],
+  "sh": {
+    "basis": "real",
+    "max_degree": 4,
+    "order": "degree-major-m-ascending",
+    "phase": "condon-shortley",
+    "coefficients_per_degree": [1, 3, 5, 7, 9]
+  },
   "properties": {
+    "scalar_type": "float32",
     "position": ["x", "y", "z"],
     "scale": ["scale_x", "scale_y", "scale_z"],
     "rotation": ["rotation_x", "rotation_y", "rotation_z", "rotation_w"],
     "opacity": "opacity",
-    "sh": "sh_{degree}_{order}_{channel}"
+    "sh": "sh_{degree}_{index}_{channel}"
   },
-  "required_properties": ["x", "y", "z", "scale_x", "scale_y", "scale_z", "rotation_x", "rotation_y", "rotation_z", "rotation_w", "opacity"],
+  "required_properties": ["x", "y", "z", "scale_x", "scale_y", "scale_z", "rotation_x", "rotation_y", "rotation_z", "rotation_w", "opacity", "sh_0_0_r", "sh_0_0_g", "sh_0_0_b"],
   "header_markers": {
     "melkor_profile": "melkor-canonical-v1",
     "melkor_coordinate_system": "gltf-luf",
     "melkor_length_unit": "meter",
     "melkor_quaternion_order": "xyzw",
     "melkor_scale_domain": "linear",
-    "melkor_opacity_domain": "linear"
+    "melkor_opacity_domain": "linear",
+    "melkor_color_space": "required",
+    "melkor_sh_basis": "real_condon_shortley",
+    "melkor_sh_degree": "0-4",
+    "melkor_antialiased": "0-or-1"
   }
 }

@@ -15,7 +15,7 @@ Review its source revision, dependencies, CUDA runtime, and license before use.
 Provide the generated PLY file to Melkor after the external run:
 
 ```bash
-./build/dev/melkor external-result.ply result.spz
+./build/dev/melkor inspect external-result.ply --strict
 ./build/dev/melkor inspect result.spz --strict
 ```
 

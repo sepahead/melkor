@@ -2,31 +2,53 @@
   "schema_version": 1,
   "profile_id": "ply:graphdeco-3dgs-v1",
   "container": "ply",
+  "read_containers": [
+    "ply"
+  ],
+  "write_containers": [
+    "ply"
+  ],
   "status": "stable",
-  "description": "The PLY layout produced by the reference Inria/Graphdeco 3D Gaussian Splatting trainer. Recognized only when the identifying property set is present, never guessed from value ranges.",
+  "description": "The PLY layout from the Inria Graphdeco 3D Gaussian Splatting trainer. Melkor identifies it from its complete property set.",
   "coordinate_system": "unspecified",
   "length_unit": "unspecified",
   "quaternion_order": "wxyz",
   "quaternion_normalized": false,
   "scale_domain": "log",
+  "scale_constraint": "positive-after-decoding",
   "opacity_domain": "logit",
-  "color_space": "linear-srgb",
+  "color_space": "unspecified-requires-explicit",
   "sh": {
     "basis": "real",
     "max_degree": 3,
     "order": "graphdeco-flattened",
     "phase": "condon-shortley",
+    "coefficients_per_degree": [1, 3, 5, 7],
     "dc_property": "f_dc_[0-2]",
     "rest_property": "f_rest_[0-N]",
-    "note": "f_dc/f_rest are SH coefficients, NOT byte RGB. Degree derived only from an exact valid f_rest count; a partial set fails in strict mode."
+    "note": "f_dc/f_rest are SH coefficients, not byte RGB. Melkor derives the degree only from an exact f_rest count. A partial set is invalid."
   },
   "properties": {
+    "scalar_type": "float32",
     "position": ["x", "y", "z"],
-    "normal_optional_ignored": ["nx", "ny", "nz"],
+    "normal_optional": ["nx", "ny", "nz"],
+    "normal_handling": "zero-accepted,nonzero-severe-loss",
     "opacity": "opacity",
     "scale": ["scale_0", "scale_1", "scale_2"],
     "rotation": ["rot_0", "rot_1", "rot_2", "rot_3"]
   },
   "required_properties": ["x", "y", "z", "f_dc_0", "f_dc_1", "f_dc_2", "opacity", "scale_0", "scale_1", "scale_2", "rot_0", "rot_1", "rot_2", "rot_3"],
+  "header_markers": {
+    "melkor_profile": "graphdeco-3dgs-v1",
+    "melkor_coordinate_system": "required-for-melkor-output",
+    "melkor_length_unit": "meter",
+    "melkor_quaternion_order": "wxyz",
+    "melkor_scale_domain": "log",
+    "melkor_opacity_domain": "logit",
+    "melkor_color_space": "required-for-melkor-output",
+    "melkor_sh_basis": "real_condon_shortley",
+    "melkor_sh_degree": "0-3",
+    "melkor_antialiased": "0-or-1"
+  },
   "upstream": "https://github.com/graphdeco-inria/gaussian-splatting"
 }

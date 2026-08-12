@@ -25,8 +25,7 @@ must be a reviewed decision.
    accidentally change how the old profile behaves. The new test proves the new profile is correct.
 8. **Decide read/write compatibility explicitly** and record it: can Melkor still read the old
    profile? Does it write the new one by default?
-9. **Update the capability output and docs** (`melkor formats`, the format reference) and attach
-   the glTF Validator and any independent-implementation evidence.
+9. **Update the profile data and format documentation.** Attach the validator and independent evidence.
 10. **Release as at least a minor version** when output semantics change, with a migration note.
 
 ## Why a new profile instead of mutating the old one

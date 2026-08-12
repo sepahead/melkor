@@ -5,12 +5,24 @@
 #include <cstddef>
 #include <cstdint>
 #include <cstdio>
+#include <exception>
 #include <filesystem>
 #include <fstream>
 #include <iterator>
 #include <vector>
 
 namespace melkor::fuzzing {
+
+template <typename Run> int run_standalone_main(Run run) noexcept {
+    try {
+        return run();
+    } catch (const std::exception& error) {
+        std::fprintf(stderr, "fuzz replay: unhandled setup error: %s\n", error.what());
+    } catch (...) {
+        std::fputs("fuzz replay: unhandled setup error\n", stderr);
+    }
+    return 1;
+}
 
 // Replays every explicitly requested file or directory. A missing/unreadable path is an error:
 // otherwise a source checkout that accidentally omitted an ignored corpus would still make the
@@ -30,7 +42,8 @@ bool replay_requested_inputs(int argc, char** argv, Exercise exercise, int& case
             }
             if (fs::is_directory(root)) {
                 for (const auto& entry : fs::recursive_directory_iterator(root)) {
-                    if (entry.is_regular_file()) files.push_back(entry.path());
+                    if (entry.is_regular_file())
+                        files.push_back(entry.path());
                 }
             } else if (fs::is_regular_file(root)) {
                 files.push_back(root);
@@ -42,8 +55,8 @@ bool replay_requested_inputs(int argc, char** argv, Exercise exercise, int& case
                 return false;
             }
         } catch (const fs::filesystem_error& error) {
-            std::fprintf(stderr, "fuzz replay: cannot enumerate %s: %s\n",
-                         root.string().c_str(), error.what());
+            std::fprintf(stderr, "fuzz replay: cannot enumerate %s: %s\n", root.string().c_str(),
+                         error.what());
             return false;
         }
 
@@ -58,7 +71,7 @@ bool replay_requested_inputs(int argc, char** argv, Exercise exercise, int& case
                 return false;
             }
             std::vector<std::uint8_t> bytes((std::istreambuf_iterator<char>(in)),
-                                             std::istreambuf_iterator<char>());
+                                            std::istreambuf_iterator<char>());
             if (in.bad()) {
                 std::fprintf(stderr, "fuzz replay: failed while reading corpus input: %s\n",
                              file.string().c_str());

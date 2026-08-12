@@ -48,37 +48,35 @@ extern "C" int LLVMFuzzerTestOneInput(const uint8_t* data, size_t size) {
 #include <vector>
 
 int main(int argc, char** argv) {
-    int cases = 0;
-    if (!melkor::fuzzing::replay_requested_inputs(argc, argv, exercise, cases)) return 1;
+    return melkor::fuzzing::run_standalone_main([&] {
+        int cases = 0;
+        if (!melkor::fuzzing::replay_requested_inputs(argc, argv, exercise, cases))
+            return 1;
 
-    // Built-in framing failures: empty, wrong magic, and a GLB header with a lying total length.
-    const std::vector<std::vector<uint8_t>> builtins = {
-        {},
-        {'n', 'o', 'p', 'e'},
-        // "glTF" magic, version 2, total length lying as 0xffffffff.
-        {0x67, 0x6c, 0x54, 0x46, 0x02, 0x00, 0x00, 0x00, 0xff, 0xff, 0xff, 0xff},
-    };
-    for (const auto& b : builtins) {
-        exercise(b.data(), b.size());
+        const std::vector<std::vector<uint8_t>> builtins = {
+            {},
+            {'n', 'o', 'p', 'e'},
+            {0x67, 0x6c, 0x54, 0x46, 0x02, 0x00, 0x00, 0x00, 0xff, 0xff, 0xff, 0xff},
+        };
+        for (const auto& bytes : builtins) {
+            exercise(bytes.data(), bytes.size());
+            ++cases;
+        }
+
+        const std::string huge_count_json =
+            R"({"asset":{"version":"2.0"},"extensionsUsed":["KHR_gaussian_splatting"],"buffers":[{"byteLength":1}],"bufferViews":[{"buffer":0,"byteOffset":0,"byteLength":1}],"accessors":[{"bufferView":0,"componentType":5126,"count":4294967295,"type":"VEC3"},{"bufferView":0,"componentType":5126,"count":4294967295,"type":"VEC4"},{"bufferView":0,"componentType":5126,"count":4294967295,"type":"VEC3"},{"bufferView":0,"componentType":5126,"count":4294967295,"type":"SCALAR"},{"bufferView":0,"componentType":5126,"count":4294967295,"type":"VEC3"}],"meshes":[{"primitives":[{"mode":0,"attributes":{"POSITION":0,"KHR_gaussian_splatting:ROTATION":1,"KHR_gaussian_splatting:SCALE":2,"KHR_gaussian_splatting:OPACITY":3,"KHR_gaussian_splatting:SH_DEGREE_0_COEF_0":4},"extensions":{"KHR_gaussian_splatting":{"kernel":"ellipse","colorSpace":"srgb_rec709_display"}}}]}],"nodes":[{"mesh":0}],"scenes":[{"nodes":[0]}],"scene":0})";
+        const std::uint8_t one_byte_bin = 0;
+        auto huge_count_glb =
+            melkor::format::glb::build_glb(huge_count_json, &one_byte_bin, sizeof(one_byte_bin));
+        if (!huge_count_glb.has_value()) {
+            std::fprintf(stderr, "gltf_khr fuzz replay: failed to build huge-count input\n");
+            return 1;
+        }
+        exercise(huge_count_glb.value().data(), huge_count_glb.value().size());
         ++cases;
-    }
 
-    // This is a correctly framed GLB whose complete KHR primitive declares UINT32_MAX elements
-    // in every accessor while providing only one byte of BIN data. It reaches accessor-span
-    // validation and exercises the huge-count arithmetic without allocating the claimed shape.
-    const std::string huge_count_json =
-        R"({"asset":{"version":"2.0"},"extensionsUsed":["KHR_gaussian_splatting"],"buffers":[{"byteLength":1}],"bufferViews":[{"buffer":0,"byteOffset":0,"byteLength":1}],"accessors":[{"bufferView":0,"componentType":5126,"count":4294967295,"type":"VEC3"},{"bufferView":0,"componentType":5126,"count":4294967295,"type":"VEC4"},{"bufferView":0,"componentType":5126,"count":4294967295,"type":"VEC3"},{"bufferView":0,"componentType":5126,"count":4294967295,"type":"SCALAR"},{"bufferView":0,"componentType":5126,"count":4294967295,"type":"VEC3"}],"meshes":[{"primitives":[{"mode":0,"attributes":{"POSITION":0,"KHR_gaussian_splatting:ROTATION":1,"KHR_gaussian_splatting:SCALE":2,"KHR_gaussian_splatting:OPACITY":3,"KHR_gaussian_splatting:SH_DEGREE_0_COEF_0":4},"extensions":{"KHR_gaussian_splatting":{"kernel":"ellipse","colorSpace":"srgb_rec709_display"}}}]}],"nodes":[{"mesh":0}],"scenes":[{"nodes":[0]}],"scene":0})";
-    const std::uint8_t one_byte_bin = 0;
-    auto huge_count_glb = melkor::format::glb::build_glb(
-        huge_count_json, &one_byte_bin, sizeof(one_byte_bin));
-    if (!huge_count_glb.has_value()) {
-        std::fprintf(stderr, "gltf_khr fuzz replay: failed to build huge-count input\n");
-        return 1;
-    }
-    exercise(huge_count_glb.value().data(), huge_count_glb.value().size());
-    ++cases;
-
-    std::printf("gltf_khr fuzz replay: %d input(s) exercised without crash\n", cases);
-    return 0;
+        std::printf("gltf_khr fuzz replay: %d input(s) exercised without crash\n", cases);
+        return 0;
+    });
 }
 #endif  // MELKOR_FUZZER_RUNTIME

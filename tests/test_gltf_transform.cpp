@@ -11,6 +11,7 @@
 
 #include <cmath>
 #include <cstdio>
+#include <limits>
 
 namespace {
 
@@ -30,7 +31,9 @@ void check(bool condition, const char* what, int line) {
 
 #define CHECK(cond) check((cond), #cond, __LINE__)
 
-bool approx(double a, double b, double eps = 1e-9) { return std::fabs(a - b) <= eps; }
+bool approx(double a, double b, double eps = 1e-9) {
+    return std::fabs(a - b) <= eps;
+}
 
 bool vec_approx(const math::Vec3& v, double x, double y, double z, double eps = 1e-9) {
     return approx(v[0], x, eps) && approx(v[1], y, eps) && approx(v[2], z, eps);
@@ -44,24 +47,30 @@ gltf::NodeDesc trs(std::array<double, 3> t, std::array<double, 4> r, std::array<
     return n;
 }
 
+gltf::NodeTransform local(const gltf::NodeDesc& node) {
+    auto result = gltf::local_node_transform(node);
+    CHECK(result.has_value());
+    return result.has_value() ? result.value() : gltf::identity_transform();
+}
+
 void test_identity() {
     auto id = gltf::identity_transform();
     CHECK(vec_approx(gltf::apply_point(id, {1.0, 2.0, 3.0}), 1.0, 2.0, 3.0));
     // A default node (identity TRS) is the identity transform.
     gltf::NodeDesc def;
-    auto lt = gltf::local_node_transform(def);
+    auto lt = local(def);
     CHECK(vec_approx(gltf::apply_point(lt, {4.0, 5.0, 6.0}), 4.0, 5.0, 6.0));
 }
 
 void test_translation_only() {
     auto n = trs({10.0, -3.0, 2.0}, {0.0, 0.0, 0.0, 1.0}, {1.0, 1.0, 1.0});
-    auto t = gltf::local_node_transform(n);
+    auto t = local(n);
     CHECK(vec_approx(gltf::apply_point(t, {1.0, 1.0, 1.0}), 11.0, -2.0, 3.0));
 }
 
 void test_scale_only() {
     auto n = trs({0.0, 0.0, 0.0}, {0.0, 0.0, 0.0, 1.0}, {2.0, 3.0, 4.0});
-    auto t = gltf::local_node_transform(n);
+    auto t = local(n);
     CHECK(vec_approx(gltf::apply_point(t, {1.0, 1.0, 1.0}), 2.0, 3.0, 4.0));
 }
 
@@ -69,7 +78,7 @@ void test_rotation_90_about_z() {
     // 90 degrees about +Z: quaternion (0,0,sin45,cos45). Maps +X -> +Y.
     const double s = std::sqrt(0.5);
     auto n = trs({0.0, 0.0, 0.0}, {0.0, 0.0, s, s}, {1.0, 1.0, 1.0});
-    auto t = gltf::local_node_transform(n);
+    auto t = local(n);
     CHECK(vec_approx(gltf::apply_point(t, {1.0, 0.0, 0.0}), 0.0, 1.0, 0.0, 1e-9));
     CHECK(vec_approx(gltf::apply_point(t, {0.0, 1.0, 0.0}), -1.0, 0.0, 0.0, 1e-9));
 }
@@ -80,7 +89,7 @@ void test_trs_order_is_translate_rotate_scale() {
     // rotation), the answer would differ.
     const double s = std::sqrt(0.5);
     auto n = trs({5.0, 0.0, 0.0}, {0.0, 0.0, s, s}, {2.0, 1.0, 1.0});
-    auto t = gltf::local_node_transform(n);
+    auto t = local(n);
     CHECK(vec_approx(gltf::apply_point(t, {1.0, 0.0, 0.0}), 5.0, 2.0, 0.0, 1e-9));
 }
 
@@ -88,27 +97,25 @@ void test_matrix_form_is_column_major() {
     // glTF column-major matrix with translation (5,6,7) in the fourth column and a diag(2,3,4)
     // linear part. Column-major storage: [c0 | c1 | c2 | c3], each a column.
     gltf::NodeDesc n;
-    n.matrix = std::array<double, 16>{
-        2, 0, 0, 0,   // column 0
-        0, 3, 0, 0,   // column 1
-        0, 0, 4, 0,   // column 2
-        5, 6, 7, 1};  // column 3 (translation)
-    auto t = gltf::local_node_transform(n);
+    n.matrix = std::array<double, 16>{2, 0, 0, 0,   // column 0
+                                      0, 3, 0, 0,   // column 1
+                                      0, 0, 4, 0,   // column 2
+                                      5, 6, 7, 1};  // column 3 (translation)
+    auto t = local(n);
     CHECK(vec_approx(gltf::apply_point(t, {1.0, 1.0, 1.0}), 7.0, 9.0, 11.0));  // 2+5, 3+6, 4+7
     CHECK(vec_approx(t.translation, 5.0, 6.0, 7.0));
 }
 
 void test_matrix_off_diagonal_not_transposed() {
-    // A shear that is NOT symmetric, so a transposed read would give a different answer. Column 0 is
-    // (1, 0.5, 0): the linear map sends (1,0,0) -> (1, 0.5, 0). If read transposed it would send
+    // A shear that is NOT symmetric, so a transposed read would give a different answer. Column 0
+    // is (1, 0.5, 0): the linear map sends (1,0,0) -> (1, 0.5, 0). If read transposed it would send
     // (1,0,0) -> (1, 0, 0), missing the shear.
     gltf::NodeDesc n;
-    n.matrix = std::array<double, 16>{
-        1.0, 0.5, 0.0, 0.0,   // column 0
-        0.0, 1.0, 0.0, 0.0,   // column 1
-        0.0, 0.0, 1.0, 0.0,   // column 2
-        0.0, 0.0, 0.0, 1.0};  // column 3
-    auto t = gltf::local_node_transform(n);
+    n.matrix = std::array<double, 16>{1.0, 0.5, 0.0, 0.0,   // column 0
+                                      0.0, 1.0, 0.0, 0.0,   // column 1
+                                      0.0, 0.0, 1.0, 0.0,   // column 2
+                                      0.0, 0.0, 0.0, 1.0};  // column 3
+    auto t = local(n);
     CHECK(vec_approx(gltf::apply_point(t, {1.0, 0.0, 0.0}), 1.0, 0.5, 0.0));
 }
 
@@ -116,8 +123,8 @@ void test_compose_parent_child() {
     // Parent: translate by (10,0,0). Child: rotate 90 about Z. A point (1,0,0) under the child is
     // (0,1,0), then the parent translates to (10,1,0). Composition must equal that.
     const double s = std::sqrt(0.5);
-    auto parent = gltf::local_node_transform(trs({10.0, 0.0, 0.0}, {0, 0, 0, 1}, {1, 1, 1}));
-    auto child = gltf::local_node_transform(trs({0.0, 0.0, 0.0}, {0, 0, s, s}, {1, 1, 1}));
+    auto parent = local(trs({10.0, 0.0, 0.0}, {0, 0, 0, 1}, {1, 1, 1}));
+    auto child = local(trs({0.0, 0.0, 0.0}, {0, 0, s, s}, {1, 1, 1}));
     auto global = gltf::compose(parent, child);
     CHECK(vec_approx(gltf::apply_point(global, {1.0, 0.0, 0.0}), 10.0, 1.0, 0.0, 1e-9));
 
@@ -131,16 +138,33 @@ void test_compose_parent_child() {
 void test_compose_scaled_parent_translates_child() {
     // A scaling parent scales the child's translation: parent scale 2, child translate (1,0,0).
     // The child origin lands at parent.linear * (1,0,0) = (2,0,0).
-    auto parent = gltf::local_node_transform(trs({0, 0, 0}, {0, 0, 0, 1}, {2, 2, 2}));
-    auto child = gltf::local_node_transform(trs({1, 0, 0}, {0, 0, 0, 1}, {1, 1, 1}));
+    auto parent = local(trs({0, 0, 0}, {0, 0, 0, 1}, {2, 2, 2}));
+    auto child = local(trs({1, 0, 0}, {0, 0, 0, 1}, {1, 1, 1}));
     auto global = gltf::compose(parent, child);
     CHECK(vec_approx(gltf::apply_point(global, {0.0, 0.0, 0.0}), 2.0, 0.0, 0.0));
 }
 
-void test_degenerate_quaternion_falls_back_to_identity() {
+void test_degenerate_quaternion_is_rejected() {
     auto n = trs({0, 0, 0}, {0, 0, 0, 0}, {1, 1, 1});  // zero quaternion
-    auto t = gltf::local_node_transform(n);
-    CHECK(vec_approx(gltf::apply_point(t, {1.0, 2.0, 3.0}), 1.0, 2.0, 3.0));
+    auto result = gltf::local_node_transform(n);
+    CHECK(!result.has_value());
+    CHECK(result.error_code() == ErrorCode::invalid_data);
+
+    n = trs({0, 0, 0}, {0, 0, 0, 2}, {1, 1, 1});
+    CHECK(!gltf::local_node_transform(n).has_value());
+}
+
+void test_nonfinite_and_projective_values_are_rejected() {
+    const double infinity = std::numeric_limits<double>::infinity();
+    CHECK(!gltf::local_node_transform(trs({infinity, 0, 0}, {0, 0, 0, 1}, {1, 1, 1})).has_value());
+    CHECK(!gltf::local_node_transform(trs({0, 0, 0}, {0, 0, 0, 1}, {1, infinity, 1})).has_value());
+
+    gltf::NodeDesc matrix;
+    matrix.matrix = std::array<double, 16>{1, 0, 0, 0.5, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1};
+    CHECK(!gltf::local_node_transform(matrix).has_value());
+
+    matrix.matrix = std::array<double, 16>{1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, infinity, 1};
+    CHECK(!gltf::local_node_transform(matrix).has_value());
 }
 
 }  // namespace
@@ -155,7 +179,8 @@ int main() {
     test_matrix_off_diagonal_not_transposed();
     test_compose_parent_child();
     test_compose_scaled_parent_translates_child();
-    test_degenerate_quaternion_falls_back_to_identity();
+    test_degenerate_quaternion_is_rejected();
+    test_nonfinite_and_projective_values_are_rejected();
 
     if (g_failures == 0) {
         std::printf("gltf transform: %d checks passed\n", g_checks);

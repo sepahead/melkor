@@ -11,11 +11,6 @@ Result<float> fail(const char* code, const char* message, double value) {
     return Result<float>::failure(ErrorCode::invalid_data, std::move(diagnostic));
 }
 
-// The largest magnitude the exp() input may take. exp(88) is near the float32 max (~3.4e38), so
-// a log-scale beyond this range would overflow to inf. A real scale never approaches this; a
-// value that does is corrupt, and failing is better than propagating an infinity.
-constexpr double kMaxExpInput = 80.0;
-
 }  // namespace
 
 Result<float> sigmoid_from_logit(float logit) {
@@ -47,20 +42,20 @@ Result<float> logit_from_probability(float probability) {
                     "probability must be strictly inside (0, 1)", probability);
     }
     const double p = probability;
-    return Result<float>::success(static_cast<float>(std::log(p / (1.0 - p))));
+    return Result<float>::success(static_cast<float>(std::log(p) - std::log1p(-p)));
 }
 
 Result<float> linear_scale_from_log(float log_scale) {
     if (!std::isfinite(log_scale)) {
         return fail("MK1104_NONFINITE_LOG_SCALE", "log-scale is not finite", log_scale);
     }
-    if (std::fabs(static_cast<double>(log_scale)) > kMaxExpInput) {
-        return fail("MK1105_LOG_SCALE_OUT_OF_RANGE",
-                    "log-scale is outside the range that maps to a finite positive scale",
-                    log_scale);
-    }
     const double s = std::exp(static_cast<double>(log_scale));
-    return Result<float>::success(static_cast<float>(s));
+    const float result = static_cast<float>(s);
+    if (!std::isfinite(result) || result <= 0.0f) {
+        return fail("MK1105_LOG_SCALE_OUT_OF_RANGE",
+                    "log-scale does not map to a positive finite float", log_scale);
+    }
+    return Result<float>::success(result);
 }
 
 Result<float> log_scale_from_linear(float linear_scale) {

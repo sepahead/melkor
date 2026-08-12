@@ -1,108 +1,132 @@
 # Canonical semantics
 
-Melkor has one public and format-interchange representation of a Gaussian splat: `SplatData`.
-Every canonical format path exchanges it. Formats with read and write paths convert at
-their respective boundaries. This page defines that contract.
+Melkor uses one canonical Gaussian representation for all native format paths.
+Format adapters convert storage conventions only at their boundaries.
 
-The math oracle (`include/melkor/math/`) and scene model
-(`include/melkor/scene.hpp`) implement this single source of truth. Thus, a conversion is a
-defined operation, not a guess.
+The canonical value is a `SplatPrimitive`.
+It contains validated `SplatData`, `SplatMetadata`, and `Provenance`.
 
-Deferred compute-provider, densifier, and pre-A2 mesh-initialization implementations still contain
-a private compatibility representation in the source tree. It is excluded from the installed SDK
-and must not cross into inspection, format, or ordinary CLI data flow. Its removal belongs to
-WP10/WP12/WP14. Its existence does not permit another bridge.
+## Canonical values
 
-## Coordinate frame
+| Quantity | Storage | Canonical domain |
+|---|---|---|
+| Position | float32 | Finite meters in `gltf-luf` |
+| Scale | float32 per axis | Finite, linear, and nonnegative |
+| Rotation | float32 quaternion | Normalized XYZW |
+| Opacity | float32 | Finite linear value in `[0, 1]` |
+| SH | Contiguous float32 | Real Condon-Shortley basis, degree 0 through 4 |
 
-The canonical frame is the glTF world convention: **right-handed, +X left, +Y up, +Z forward,
-meters.** A format that stores another frame declares it explicitly. Conversion uses the
-coordinate-frame registry (`math/coordinate_frame.hpp`). This registry stores an exact orthogonal
-basis-to-canonical matrix for each frame. A label alone, such as "Y-up" or "OpenGL," is ambiguous.
-Melkor rejects it because an ambiguous frame can mirror or rotate a complete scene.
+`SplatData::create` validates all parallel lengths and numeric domains.
+It stores normalized quaternions.
+It exposes no mutable array reference.
 
-## Scalars and their domains
+Zero scale is a valid degenerate canonical Gaussian.
+A target that cannot encode zero scale must report a loss or reject the conversion.
 
-| Quantity | Storage | Domain | Notes |
-|---|---|---|---|
-| Position | float32, meters | finite | Canonical frame. |
-| Scale | float32, per-axis | **linear**, strictly positive | Training-domain log scale is decoded once at the profile boundary, never inside an algorithm. |
-| Opacity | float32 | **linear**, `[0, 1]` | Training-domain logit is decoded once at the boundary. |
-| Rotation | float32 quaternion `x,y,z,w` | unit within tolerance | Identity is `(0,0,0,1)`. `q` and `-q` are the same rotation. |
+## Coordinate frames and units
 
-A "double activation" applies a sigmoid to linear opacity or `exp` to linear scale. It produces a
-plausible but incorrect value. A range check cannot find this error because small log scales and
-small linear scales overlap. One module (`math/activation.hpp`) contains conversions with explicit
-names. This design helps prevent an accidental double activation.
+The canonical frame identifier is `gltf-luf`.
+Its basis-to-canonical matrix is the identity and its unit is one meter.
 
-## Validated construction and editing
+The frame registry also defines `ply-rdf` and `spz-rub`.
+Each entry contains an exact orthogonal basis map and a unit scale.
 
-`SplatData::create` is the only populated construction path. It validates parallel-array lengths,
-finite positions, strictly positive scale, opacity range, unit rotation, SH degree, and exact SH
-storage shape before returning a value. Bulk access is const. `SplatData::edit()` creates an
-isolated transaction.
+PLY does not define a coordinate frame.
+Melkor uses a trusted header marker or an explicit command option.
+It does not infer a frame from a filename or common producer convention.
 
-`commit()` rebuilds through the same validator. It returns a complete new
-value or leaves the source unchanged. Budgeted `reserve` and `append` account before allocation
-and never expose a partial logical append.
+A frame conversion changes the mean, covariance, rotation, and directional SH data.
+Changing only the position is invalid.
 
-`SplatMetadata`, `SplatPrimitive`, and `Provenance` (`include/melkor/provenance.hpp`) make frame,
-domain, color, SH, antialiasing, source profile/hash, and operations explicit. Reproducible JSON
-uses null timestamps and has no source-path field. The full hierarchy-preserving scene graph is
-still WP06 work. The metadata API does not claim that current flat adapters preserve hierarchy.
+## Activation domains
 
-## Format boundaries
+The canonical scale is linear.
+The canonical opacity is linear.
 
-![Format profile matrix. Rows show the five format profiles with their status, maximum SH degree, quaternion convention, and scale and opacity encodings.](../../assets/diagrams/format-matrix.svg)
+Graphdeco PLY stores log scale and logit opacity.
+Its reader applies `exp` and sigmoid exactly once.
+Its writer applies the inverse operations exactly once.
 
-- **Graphdeco-style PLY:** scale is stored as log scale, opacity as logit, quaternion as WXYZ, and
-  higher SH properties are channel-major. The adapter applies `exp`/`sigmoid` once, reorders to
-  XYZW, and transposes to canonical coefficient/RGB interleave on read. Write does the exact
-  inverse. Canonical opacity endpoints cannot be finite logits, so write clamps them with
-  `MK1210_PLY_OPACITY_ENDPOINT_CLAMPED`. Omitting SH or accepting a non-unit stored quaternion is
-  reported, never silent.
-- **SPZ v1–v3:** the vendored codec exposes log scale and logit opacity, XYZW rotation, and
-  coefficient/RGB-interleaved SH. The Melkor adapter converts activation domains once and keeps the
-  other layouts direct. Endpoint clamp, SH truncation, and non-unit rotation use stable `MK132x`
-  diagnostics. The current writer cannot encode degree 4 and fails or explicitly reports a lower
-  requested degree. SPZ v4 remains P0-09.
-- **Legacy mesh GLB/glTF:** this is geometry initialization, not a Gaussian round trip. Positions,
-  transformed normals, optional vertex color, and explicit/default linear scale and opacity are
-  assembled directly into `SplatData`. A KHR Gaussian primitive is rejected by this path so it
-  cannot silently lose rotation, scale, opacity, or SH. Use `melkor convert` for GLB→GLB until the
-  WP06 cross-format planner exists.
+DA3 Gaussian PLY uses the same value domains and field order.
+Its exact profile permits complete SH data through degree 4.
 
-## Covariance and transforms
-
-A Gaussian's shape is the covariance `Σ = R diag(s²) Rᵀ`. For an affine node transform `A`, the
-mean moves as `Aμ + t` **and** the covariance transforms as `Σ' = A Σ Aᵀ`. Moving only the mean
-silently corrupts each anisotropic Gaussian when the other properties do not change.
-`math/covariance.hpp` transforms the covariance, orientation, and scale. It correctly handles
-rotation, nonuniform scale, shear, and reflection. It decomposes the result into positive scale
-and proper rotation.
+SPZ versions 1 through 3 store quantized values through the pinned codec contract.
+The adapter converts them once into canonical values.
 
 ## Spherical harmonics
 
-- Real spherical-harmonic basis, Condon–Shortley phase.
-- Degree **0–4** in the canonical scene. The pinned glTF `KHR_gaussian_splatting` RC profile
-  supports through degree 3. A degree-4 source into it is `LOSS_SH_DEGREE_TRUNCATED`, an approved
-  loss, never a silent truncation.
-- Degree `d` stores exactly `(d+1)²` RGB coefficient vectors per splat, with all lower degrees
-  complete.
-- The degree-0 (DC) coefficient relates to linear RGB by the pinned relation
-  `rgb = SH_C0·sh_dc + 0.5` (`math/color.hpp`). This is not a gamma conversion, and it is never
-  applied twice.
+The canonical SH layout is splat-major.
+Each splat stores `(degree + 1)²` RGB coefficient vectors.
+The coefficient index precedes the RGB channel index.
 
-## Color space
+The degree-0 coefficient follows this relation:
 
-sRGB↔linear is a transfer-function conversion. Linear-RGB↔SH-DC is the coefficient relation above.
-They are different operations. Incorrect order or duplicate application can make splats dark or
-washed out. Both operations are in `math/color.hpp`.
+```text
+rgb = SH_C0 * sh_dc + 0.5
+```
 
-## Antialiasing
+This relation is not an sRGB transfer function.
+Color-space conversion and SH conversion are separate operations.
 
-Antialiasing belongs in `SplatMetadata`, not in the numeric `SplatData` arrays. The current SPZ
-decoder reports it in `SpzDecodeMetadata`. The legacy positional CLI has no metadata-carrying
-conversion planner. Thus, it does not prove cross-format preservation. WP06/WP08 must carry it
-through `SplatPrimitive`. A target that cannot represent it must report
-`LOSS_ANTIALIASING_METADATA_DROPPED` rather than discard it silently.
+The pinned glTF profile supports SH degree 0 through 3.
+Canonical PLY supports degree 0 through 4.
+SPZ versions 1 through 3 support degree 0 through 3.
+
+A degree reduction reports `LOSS_SH_DEGREE_TRUNCATED`.
+The loss is severe and needs exact approval.
+
+## Affine transforms
+
+A Gaussian covariance is:
+
+```text
+Sigma = R * diag(scale^2) * transpose(R)
+```
+
+For a node linear map `A`, Melkor computes:
+
+```text
+Sigma' = A * Sigma * transpose(A)
+```
+
+The decomposition returns a normalized rotation and nonnegative scales.
+The glTF profile rejects reflection, singular maps, and material shear because their rendering semantics are undefined.
+
+Melkor rotates degree 1 through 3 SH coefficients for a proper rotation.
+It leaves degree 0 unchanged.
+
+## Metadata
+
+`SplatMetadata` records:
+
+- The canonical coordinate frame and unit
+- Quaternion, scale, and opacity domains
+- Color space
+- SH basis and degree
+- Optional antialiasing state
+
+An unknown antialiasing state is different from `false`.
+A target override or metadata omission must enter the loss report.
+
+## Format boundaries
+
+![Supported profiles map their stored values into one canonical Gaussian representation.](../../assets/diagrams/format-matrix.svg)
+
+| Profile | Read | Write | Important stored convention |
+|---|---|---|---|
+| `ply:melkor-canonical-v1` | Yes | Yes | Canonical values and required semantic markers |
+| `ply:graphdeco-3dgs-v1` | Yes | Yes | WXYZ, log scale, logit opacity, Graphdeco SH order |
+| `ply:da3-gaussian-v1` | Yes | Yes | Pinned DA3 field order and complete degree-4 SH data |
+| `spz:spz-v1-v3` | Yes | Version 3 | Gzip container and quantized values |
+| `khr-gaussian-splatting-rc-63770cc` | glTF and GLB | GLB | Pinned release-candidate extension, degree 0 through 3 |
+
+The profile identifier defines meaning.
+An existing identifier never changes meaning within the v2 line.
+
+## Provenance
+
+Provenance records the source format, source profile, optional source digest, and operations.
+It has no source-path field.
+
+Reproducible JSON emits null operation timestamps.
+The format readers report verified source byte counts from completed reads.

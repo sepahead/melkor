@@ -7,18 +7,22 @@
 
 set -euo pipefail
 
-# Pin upstream for reproducible installs. Override deliberately when reviewing
-# a newer revision; never silently `git pull` a moving branch.
-DA3_REF="${MELKOR_DA3_REF:-41736238f5bced4debf3f2a12375d2466874866d}"
+# Pin upstream for reproducible installs. Update the profile and adapter before
+# this revision changes.
+DA3_REF="41736238f5bced4debf3f2a12375d2466874866d"
 DA3_REPO="https://github.com/ByteDance-Seed/Depth-Anything-3.git"
 PYTHON_BIN="${MELKOR_PYTHON:-python3}"
 ACCEPT_NONCOMMERCIAL=0
 ACCEPT_UNLOCKED=0
 STAGING_DIR=""
+WRAPPER_STAGING=""
 
 cleanup() {
     if [[ -n "$STAGING_DIR" && -d "$STAGING_DIR" ]]; then
         rm -rf -- "$STAGING_DIR"
+    fi
+    if [[ -n "$WRAPPER_STAGING" && -f "$WRAPPER_STAGING" ]]; then
+        rm -f -- "$WRAPPER_STAGING"
     fi
 }
 trap cleanup EXIT
@@ -43,9 +47,44 @@ if [ "$ACCEPT_UNLOCKED" -ne 1 ]; then
     echo "The source and model revisions are pinned, but Python dependencies are not hash-locked."
     exit 2
 fi
-if [[ ! "$DA3_REF" =~ ^[0-9a-f]{40}$ ]]; then
-    echo "Error: MELKOR_DA3_REF must be a full lowercase commit SHA."
+if [[ -n "${MELKOR_DA3_REF:-}" && "${MELKOR_DA3_REF:-}" != "$DA3_REF" ]]; then
+    echo "Error: MELKOR_DA3_REF cannot change the supported DA3 profile."
+    echo "Update the adapter, profile, tests, and documentation before the source revision changes."
     exit 2
+fi
+
+# Validate the optional package index before setup creates files or uses the network.
+# Do not print this value because a malformed URL can contain a secret.
+if [[ -n "${MELKOR_TORCH_INDEX_URL:-}" ]]; then
+    if ! command -v "$PYTHON_BIN" &> /dev/null; then
+        echo "Error: Python 3 is required but not installed."
+        exit 1
+    fi
+    if ! "$PYTHON_BIN" - <<'PY'
+import os
+from urllib.parse import urlsplit
+
+value = os.environ["MELKOR_TORCH_INDEX_URL"]
+try:
+    parsed = urlsplit(value)
+    valid = (
+        parsed.scheme == "https"
+        and parsed.hostname is not None
+        and parsed.username is None
+        and parsed.password is None
+        and not parsed.query
+        and not parsed.fragment
+        and all(ord(character) >= 0x20 for character in value)
+    )
+    parsed.port
+except ValueError:
+    valid = False
+raise SystemExit(0 if valid else 1)
+PY
+    then
+        echo "Error: MELKOR_TORCH_INDEX_URL must be an HTTPS URL without credentials, a query, or a fragment."
+        exit 2
+    fi
 fi
 
 echo "=========================================="
@@ -140,6 +179,7 @@ else
 fi
 
 # Activate virtual environment
+# shellcheck disable=SC1091
 source "$VENV_DIR/bin/activate"
 
 echo ""
@@ -154,7 +194,7 @@ python -m pip install --upgrade pip
 echo ""
 echo "Installing PyTorch with CUDA support..."
 if [ -n "${MELKOR_TORCH_INDEX_URL:-}" ]; then
-    echo "Using configured PyTorch index: $MELKOR_TORCH_INDEX_URL"
+    echo "Using the configured PyTorch index."
     python -m pip install torch torchvision --index-url "$MELKOR_TORCH_INDEX_URL"
 else
     python -m pip install torch torchvision
@@ -227,22 +267,36 @@ download_model() {
     
     local target="$output_dir/$name"
     local marker="$target/.melkor-revision"
+
+    snapshot_tree_is_safe() {
+        local root="$1"
+        [[ -d "$root" && ! -L "$root" ]] || return 1
+        ! find "$root" \( -type l -o \( ! -type d ! -type f \) \) -print -quit |
+            grep -q .
+    }
+
+    if [[ -L "$target" || ( -e "$target" && ! -d "$target" ) ]]; then
+        echo "Error: the model path is not a regular directory: $target"
+        return 1
+    fi
     if [ -d "$target" ]; then
-        if [ -s "$target/config.json" ] &&
-           [ -f "$marker" ] && [ "$(cat "$marker")" = "$revision" ] &&
+        if snapshot_tree_is_safe "$target" &&
+           [ -f "$target/config.json" ] && [ ! -L "$target/config.json" ] &&
+           [ -s "$target/config.json" ] &&
+           [ -f "$marker" ] && [ ! -L "$marker" ] &&
+           [ "$(cat "$marker")" = "$revision" ] &&
            find "$target" -type f \( -name '*.safetensors' -o -name 'pytorch_model*.bin' \) -size +0c -print -quit | grep -q .; then
-            echo "Model $name already exists at reviewed revision $revision."
+            echo "Model $name already exists with revision marker $revision."
             return 0
         fi
-        echo "Error: $target is partial, unverified, or from a different revision."
+        echo "Error: $target is unsafe, incomplete, or has another revision."
         echo "Move it aside and rerun. The installer will not trust or overwrite it."
         return 1
     else
         echo "Downloading $name from Hugging Face at $revision..."
         STAGING_DIR="$(mktemp -d "$output_dir/.melkor-${name}.XXXXXX")"
-        # Pass values as argv, not interpolated Python source. snapshot_download
-        # verifies Hugging Face's content-addressed cache and supports resumable
-        # transfers for these multi-GB repositories.
+        # Pass values as argv, not interpolated Python source. The downloader
+        # uses the pinned revision and supports resumable transfers.
         python - "$name" "$STAGING_DIR" "$revision" <<'PY' || {
 import sys
 from huggingface_hub import snapshot_download
@@ -260,7 +314,9 @@ PY
             echo "Error: Failed to download $name"
             return 1
         }
-        if [ ! -s "$STAGING_DIR/config.json" ] ||
+        if ! snapshot_tree_is_safe "$STAGING_DIR" ||
+           [ ! -f "$STAGING_DIR/config.json" ] || [ -L "$STAGING_DIR/config.json" ] ||
+           [ ! -s "$STAGING_DIR/config.json" ] ||
            ! find "$STAGING_DIR" -type f \( -name '*.safetensors' -o -name 'pytorch_model*.bin' \) -size +0c -print -quit | grep -q .; then
             rm -rf -- "$STAGING_DIR"
             STAGING_DIR=""
@@ -268,7 +324,10 @@ PY
             return 1
         fi
         printf '%s\n' "$revision" > "$STAGING_DIR/.melkor-revision"
-        mv "$STAGING_DIR" "$target"
+        "$PYTHON_BIN" "$PROJECT_ROOT/tools/atomic_publish.py" "$STAGING_DIR" "$target" || {
+            echo "Error: the model directory appeared during download"
+            return 1
+        }
         STAGING_DIR=""
         echo "Downloaded $name to $target"
     fi
@@ -299,7 +358,7 @@ echo ""
 echo "DA3MONO-LARGE and DA3METRIC-LARGE are depth-only checkpoints. Use the"
 echo "official DA3 depth exporter; Melkor does not present them as splat models."
 echo ""
-read -p "Enter choice [1-7]: " choice
+read -r -p "Enter choice [1-7]: " choice
 
 case $choice in
     1)
@@ -332,7 +391,7 @@ case $choice in
     7)
         echo "Skipping model download. Rerun scripts/setup_da3.sh with the required"
         echo "dependency acceptance flag later so the"
-        echo "snapshot is revision-pinned, validated, and marked atomically."
+        echo "snapshot uses a reviewed revision and an atomic revision marker."
         ;;
     *)
         echo "Error: invalid choice."
@@ -344,10 +403,35 @@ esac
 echo ""
 echo "Creating wrapper scripts..."
 
+publish_wrapper() {
+    local staged="$1"
+    local target="$2"
+    chmod 0755 "$staged"
+    if [[ -L "$target" || ( -e "$target" && ! -f "$target" ) ]]; then
+        echo "Error: wrapper path is not a regular file: $target"
+        return 1
+    fi
+    if [[ -f "$target" ]]; then
+        if cmp -s "$staged" "$target"; then
+            rm -f -- "$staged"
+            WRAPPER_STAGING=""
+            chmod 0755 "$target"
+            return 0
+        fi
+        echo "Error: wrapper already exists with different content: $target"
+        echo "Move the file aside before setup. The installer will not overwrite it."
+        return 1
+    fi
+    "$PYTHON_BIN" "$PROJECT_ROOT/tools/atomic_publish.py" "$staged" "$target"
+    WRAPPER_STAGING=""
+}
+
 # Main DA3 inference wrapper
-cat > "$PROJECT_ROOT/da3-infer" << 'WRAPPER_EOF'
+WRAPPER_STAGING="$(mktemp "$PROJECT_ROOT/.melkor-da3-infer.XXXXXX")"
+cat > "$WRAPPER_STAGING" << 'WRAPPER_EOF'
 #!/usr/bin/env bash
 set -euo pipefail
+# Generated by scripts/setup_da3.sh.
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 DA3_DIR="$SCRIPT_DIR/tools/da3"
 if [ ! -f "$DA3_DIR/venv/bin/activate" ]; then
@@ -357,12 +441,14 @@ fi
 source "$DA3_DIR/venv/bin/activate"
 exec python3 "$DA3_DIR/inference.py" "$@"
 WRAPPER_EOF
-chmod +x "$PROJECT_ROOT/da3-infer"
+publish_wrapper "$WRAPPER_STAGING" "$PROJECT_ROOT/da3-infer"
 
 # Python wrapper for direct imports
-cat > "$PROJECT_ROOT/da3-python" << 'WRAPPER_EOF'
+WRAPPER_STAGING="$(mktemp "$PROJECT_ROOT/.melkor-da3-python.XXXXXX")"
+cat > "$WRAPPER_STAGING" << 'WRAPPER_EOF'
 #!/usr/bin/env bash
 set -euo pipefail
+# Generated by scripts/setup_da3.sh.
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 DA3_DIR="$SCRIPT_DIR/tools/da3"
 if [ ! -f "$DA3_DIR/venv/bin/activate" ]; then
@@ -372,7 +458,7 @@ fi
 source "$DA3_DIR/venv/bin/activate"
 exec python3 "$@"
 WRAPPER_EOF
-chmod +x "$PROJECT_ROOT/da3-python"
+publish_wrapper "$WRAPPER_STAGING" "$PROJECT_ROOT/da3-python"
 
 echo ""
 echo "=========================================="
@@ -399,9 +485,10 @@ echo ""
 echo "  # Long sequences / constrained VRAM: use upstream DA3-Streaming"
 echo "  # (keeps each scene's joint coordinate frame intact)"
 echo ""
-echo "  # Compress the PLY to SPZ with melkor:"
+echo "  # Inspect the PLY before conversion:"
 echo "  ./da3-infer --input images/ --output output.ply"
-echo "  ./build/melkor output.ply output.spz"
+echo "  ./build/dev/melkor inspect output.ply --strict"
+echo "  # See docs/QUICKSTART.md for required source semantics and loss approvals."
 echo ""
 echo "  # With specific model:"
 echo "  ./da3-infer --model da3-large-1.1 --input images/ --output output.ply"

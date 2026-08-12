@@ -59,7 +59,6 @@ MELKOR_LICHTFELD_BIN=/reviewed/bin/LichtFeld-Studio \
 | `-o, --output PATH` | Set the output directory. |
 | `--gpu ID` | Set `CUDA_VISIBLE_DEVICES` for one process. |
 | `--lichtfeld PATH` | Select an executable. |
-| `--force` | Permit use of an existing output directory. |
 | `--dry-run` | Print the command without file changes. |
 | `--verbose, -v` | Print the selected paths. |
 
@@ -92,12 +91,19 @@ Pass only options that your selected upstream revision documents.
 
 ## Output safety
 
-The wrapper refuses an existing output directory by default.
-Use `--force` only after you verify the target path.
+The wrapper refuses an existing output directory.
+Directory replacement is not atomic on all supported platforms.
+Use a new output path for each run.
 
 The external process writes into a same-parent staging directory.
-The wrapper requires at least one output item before it replaces the destination.
+The wrapper requires at least one output item before it publishes the destination.
+It rejects symbolic links and special files in the staged output.
 An external process failure preserves an existing destination.
+
+The output directory must stay outside the COLMAP project and image directory.
+
+The wrapper rejects `--force`.
+This rule prevents a crash from moving or partly replacing an existing directory.
 
 ## Dry run
 
@@ -111,6 +117,7 @@ Use a dry run to inspect quoting and selected paths:
 ```
 
 The dry run does not create the output directory or a temporary workspace.
+It withholds upstream arguments because they can contain secrets.
 
 ## Limits
 
@@ -121,6 +128,7 @@ This wrapper does not verify:
 - The dependency versions
 - The GPU runtime
 - The output format or semantics
+- A stage timeout or restricted process environment
 
 Record those items before you use an output as release evidence.
 The planned adapter runner will enforce them with a manifest.

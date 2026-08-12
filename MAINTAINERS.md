@@ -14,7 +14,7 @@ trail.
 
 | Name | GitHub | Roles | Areas |
 |---|---|---|---|
-| Sepehr Mahmoudian | [@sepahead](https://github.com/sepahead) | Maintainer, Reviewer, Release manager, Security responder | All: core library, compute backends (Metal / CUDA / CPU), format readers and writers, CLI, viewer, packaging and release evidence, adapters, security |
+| Sepehr Mahmoudian | [@sepahead](https://github.com/sepahead) | Maintainer, Reviewer, Release manager, Security responder | All: core library, formats, C ABI, CLI, viewer, release evidence, adapters, and security |
 
 **This is the complete list. There is one person on it.**
 
@@ -37,17 +37,15 @@ None. Nobody has held a role and stepped down.
 None.
 
 A reviewer has no write access. A reviewer reads pull requests in a declared area and gives a
-substantive verdict. Declared areas include compute backends, file formats, the viewer, and the
-packaging pipeline. Each review uses the ten-lens checklist in the pull-request template.
+substantive verdict. Declared areas include file formats, the C ABI, the viewer, and the
+packaging pipeline. Each review uses the twenty-lens checklist in the pull-request template.
 This role gives the project independent scrutiny without repository write access.
 
 **The project is actively looking for reviewers**, particularly in:
 
 - **Untrusted-input parsing** — the GLB, PLY, and SPZ readers, the resource limits, and the
   sanitizer builds. This is the primary attack surface.
-- **Compute-backend parity** — whether the Metal, CUDA, and CPU implementations of an operation
-  really agree, on hardware the maintainer does not own (CUDA in particular is compiled in CI but
-  not hardware-qualified).
+- **Format semantics** — whether each adapter preserves canonical values and reports every loss.
 - **Packaging, provenance, and signing** — whether the release evidence proves what the release
   notes claim it proves.
 - **Format conformance** — whether Melkor's reading and writing of a profile match the
@@ -67,7 +65,7 @@ accountable for:
 
 - Enforcing the correctness rules in [`CONTRIBUTING.md`](CONTRIBUTING.md)
 - Refusing public-contract changes without documentation, tests, and a changelog entry
-- Refusing backend changes that apply to only one of Metal, CUDA, and CPU
+- Refusing format changes that bypass canonical semantics or the loss policy
 - Keeping
   [`docs/audit/production-blockers.md`](docs/audit/production-blockers.md)
   accurate, even when a blocker is inconvenient
@@ -83,8 +81,8 @@ only in public and with a stated reason.
 Decides release content, tags, produces and verifies the evidence bundle
 ([`release/README.md`](release/README.md), [`docs/RELEASE.md`](docs/RELEASE.md)), and publishes.
 Accountable not only for the artifacts but for the **claims** made about them: the release notes,
-the support statement in [`SUPPORT.md`](SUPPORT.md), and the platform matrix. A backend that is
-compiled but not hardware-qualified must be labeled experimental. The release manager is the only
+the support statement in [`SUPPORT.md`](SUPPORT.md), and the platform matrix. A compile-only
+platform is not qualified. The release manager is the only
 role permitted to publish under the project's package-index and signing identities
 ([`GOVERNANCE.md` §9](GOVERNANCE.md#9-package-indexes-and-signing-identities)).
 

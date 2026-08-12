@@ -12,6 +12,7 @@
 #include <cstdint>
 #include <cstdio>
 #include <cstring>
+#include <utility>
 #include <vector>
 
 namespace {
@@ -32,7 +33,22 @@ void check(bool condition, const char* what, int line) {
 
 #define CHECK(cond) check((cond), #cond, __LINE__)
 
-bool approx(float a, float b, float eps = 1e-6f) { return std::fabs(a - b) <= eps; }
+bool approx(float a, float b, float eps = 1e-6f) {
+    return std::fabs(a - b) <= eps;
+}
+
+class CancelDuringDecode final : public ProgressSink {
+public:
+    explicit CancelDuringDecode(CancellationToken token) : token_(std::move(token)) {}
+
+    void on_progress(const ProgressEvent& event) override {
+        if (event.phase == "decode_accessor" && event.completed >= 4096)
+            token_.cancel();
+    }
+
+private:
+    CancellationToken token_;
+};
 
 void put_f32(std::vector<std::uint8_t>& v, float f) {
     std::uint32_t bits;
@@ -50,7 +66,8 @@ void put_i16(std::vector<std::uint8_t>& v, std::int16_t x) {
 }
 
 void put_u32(std::vector<std::uint8_t>& v, std::uint32_t x) {
-    for (int i = 0; i < 4; ++i) v.push_back(static_cast<std::uint8_t>((x >> (8 * i)) & 0xFF));
+    for (int i = 0; i < 4; ++i)
+        v.push_back(static_cast<std::uint8_t>((x >> (8 * i)) & 0xFF));
 }
 
 void put_u16(std::vector<std::uint8_t>& v, std::uint16_t x) {
@@ -86,7 +103,8 @@ void test_float_vec3() {
     CHECK(r.has_value());
     if (r.has_value()) {
         CHECK(r.value().size() == 6);
-        CHECK(approx(r.value()[0], 1.0f) && approx(r.value()[1], -2.5f) && approx(r.value()[2], 3.25f));
+        CHECK(approx(r.value()[0], 1.0f) && approx(r.value()[1], -2.5f) &&
+              approx(r.value()[2], 3.25f));
         CHECK(approx(r.value()[3], 4.0f) && approx(r.value()[5], 6.0f));
     }
 }
@@ -118,8 +136,8 @@ void test_normalized_unsigned_byte() {
 
 void test_normalized_signed_byte_clamps() {
     // Signed normalized: -128 and -127 both map to -1 (the max(c/127,-1) clamp), 127 -> 1.
-    std::vector<std::uint8_t> buf = {static_cast<std::uint8_t>(-128), static_cast<std::uint8_t>(-127),
-                                     127, 0};
+    std::vector<std::uint8_t> buf = {static_cast<std::uint8_t>(-128),
+                                     static_cast<std::uint8_t>(-127), 127, 0};
     gltf::AccessorView v;
     v.component = gltf::ComponentType::i8;
     v.element = gltf::ElementType::scalar;
@@ -179,16 +197,17 @@ void test_interleaved_stride() {
 }
 
 void test_byte_offset() {
-    std::vector<std::uint8_t> buf = {0xAA, 0xBB};  // 2 bytes of unrelated leading data
+    std::vector<std::uint8_t> buf = {0xAA, 0xBB, 0xCC, 0xDD};
     put_f32(buf, 7.0f);
     gltf::AccessorView v;
     v.component = gltf::ComponentType::f32;
     v.element = gltf::ElementType::scalar;
     v.count = 1;
-    v.byte_offset = 2;
+    v.byte_offset = 4;
     auto r = gltf::decode_accessor(v, buf.data(), buf.size());
     CHECK(r.has_value());
-    if (r.has_value()) CHECK(approx(r.value()[0], 7.0f));
+    if (r.has_value())
+        CHECK(approx(r.value()[0], 7.0f));
 }
 
 void test_bounds_failures() {
@@ -247,7 +266,7 @@ void test_normalized_signed_short() {
 }
 
 void test_unsigned_int_decode() {
-    // u32 (5125): normalized maps 0/2^32-1 to 0/1; unnormalized returns the exact value.
+    // UNSIGNED_INT is valid only without normalization.
     std::vector<std::uint8_t> buf;
     put_u32(buf, 0);
     put_u32(buf, 0xFFFFFFFFu);
@@ -257,8 +276,7 @@ void test_unsigned_int_decode() {
     v.normalized = true;
     v.count = 2;
     auto r = gltf::decode_accessor(v, buf.data(), buf.size());
-    CHECK(r.has_value());
-    if (r.has_value()) CHECK(approx(r.value()[0], 0.0f) && approx(r.value()[1], 1.0f));
+    CHECK(!r.has_value());
 
     std::vector<std::uint8_t> buf2;
     put_u32(buf2, 1000);
@@ -269,7 +287,15 @@ void test_unsigned_int_decode() {
     v2.count = 1;
     auto r2 = gltf::decode_accessor(v2, buf2.data(), buf2.size());
     CHECK(r2.has_value());
-    if (r2.has_value()) CHECK(approx(r2.value()[0], 1000.0f));
+    if (r2.has_value())
+        CHECK(approx(r2.value()[0], 1000.0f));
+
+    gltf::AccessorView float_view;
+    float_view.component = gltf::ComponentType::f32;
+    float_view.element = gltf::ElementType::scalar;
+    float_view.normalized = true;
+    float_view.count = 1;
+    CHECK(!gltf::decode_accessor(float_view, buf2.data(), buf2.size()).has_value());
 }
 
 void test_zero_count_is_empty() {
@@ -280,7 +306,67 @@ void test_zero_count_is_empty() {
     v.count = 0;
     auto r = gltf::decode_accessor(v, buf.data(), buf.size());
     CHECK(r.has_value());
-    if (r.has_value()) CHECK(r.value().empty());
+    if (r.has_value())
+        CHECK(r.value().empty());
+}
+
+void test_null_buffer_is_rejected() {
+    gltf::AccessorView v;
+    v.component = gltf::ComponentType::f32;
+    v.element = gltf::ElementType::scalar;
+    v.count = 1;
+    CHECK(!gltf::decode_accessor(v, nullptr, sizeof(float)).has_value());
+
+    v.count = 0;
+    auto empty = gltf::decode_accessor(v, nullptr, 0);
+    CHECK(empty.has_value());
+    if (empty.has_value())
+        CHECK(empty.value().empty());
+}
+
+void test_context_cancels_inside_decode_loop() {
+    constexpr std::size_t kCount = 8192;
+    std::vector<std::uint8_t> buffer(kCount * sizeof(float), 0);
+    gltf::AccessorView view;
+    view.component = gltf::ComponentType::f32;
+    view.element = gltf::ElementType::scalar;
+    view.count = kCount;
+
+    Budget budget(Limits::for_profile(LimitsProfile::desktop));
+    OperationContext context = make_default_context(budget);
+    CancelDuringDecode cancel(context.cancellation);
+    context.progress = &cancel;
+    const auto decoded = gltf::decode_accessor(view, buffer.data(), buffer.size(), context);
+    CHECK(!decoded.has_value());
+    CHECK(decoded.error_code() == ErrorCode::cancelled);
+}
+
+void test_context_owns_memory_charge() {
+    std::vector<std::uint8_t> buffer(3 * sizeof(float), 0);
+    gltf::AccessorView view;
+    view.component = gltf::ComponentType::f32;
+    view.element = gltf::ElementType::vec3;
+    view.count = 1;
+
+    Limits limits = Limits::for_profile(LimitsProfile::desktop);
+    limits.max_memory_bytes = 11;
+    Budget small_budget(limits);
+    OperationContext small_context = make_default_context(small_budget);
+    CHECK(!gltf::decode_accessor(view, buffer.data(), buffer.size(), small_context).has_value());
+    CHECK(small_budget.used(BudgetKind::memory_bytes) == 0);
+
+    limits.max_memory_bytes = 12;
+    Budget exact_budget(limits);
+    OperationContext exact_context = make_default_context(exact_budget);
+    {
+        auto decoded = gltf::decode_accessor(view, buffer.data(), buffer.size(), exact_context);
+        CHECK(decoded.has_value());
+        if (decoded.has_value()) {
+            CHECK(decoded.value().retained_memory_bytes() == 12);
+            CHECK(exact_budget.used(BudgetKind::memory_bytes) == 12);
+        }
+    }
+    CHECK(exact_budget.used(BudgetKind::memory_bytes) == 0);
 }
 
 }  // namespace
@@ -297,6 +383,9 @@ int main() {
     test_normalized_signed_short();
     test_unsigned_int_decode();
     test_zero_count_is_empty();
+    test_null_buffer_is_rejected();
+    test_context_cancels_inside_decode_loop();
+    test_context_owns_memory_charge();
 
     if (g_failures == 0) {
         std::printf("gltf accessor: %d checks passed\n", g_checks);

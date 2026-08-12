@@ -1,9 +1,9 @@
 // Tests for the glTF extension policy.
 //
 // The rule being pinned: a required extension Melkor cannot honor makes the asset unreadable
-// (reject), a supported required extension is fine (accept), and a used-but-not-required unsupported
-// extension is safely ignored but reported. This is the P0-10 fix -- the old behavior rejected
-// required extensions too broadly.
+// (reject), a supported required extension is fine (accept), and a used-but-not-required
+// unsupported extension is safely ignored but reported. This is the P0-10 fix -- the old behavior
+// rejected required extensions too broadly.
 //
 // Self-contained (no external test framework).
 
@@ -48,9 +48,8 @@ void test_supported_required_is_accepted() {
 }
 
 void test_unsupported_required_is_rejected() {
-    auto e = gltf::evaluate_extensions(
-        {"KHR_gaussian_splatting", "KHR_draco_mesh_compression"},
-        {"KHR_gaussian_splatting", "KHR_draco_mesh_compression"});
+    auto e = gltf::evaluate_extensions({"KHR_gaussian_splatting", "KHR_draco_mesh_compression"},
+                                       {"KHR_gaussian_splatting", "KHR_draco_mesh_compression"});
     CHECK(e.unsupported_required.size() == 1);
     CHECK(contains(e.unsupported_required, "KHR_draco_mesh_compression"));
     CHECK(e.ignored_used.empty());
@@ -75,8 +74,7 @@ void test_required_in_both_lists_counts_as_required() {
 
 void test_dedup_and_order() {
     // Duplicates must not produce duplicate findings, and the output order is deterministic.
-    auto e = gltf::evaluate_extensions(
-        {"B_ext", "A_ext", "A_ext"}, {"B_ext", "A_ext", "B_ext"});
+    auto e = gltf::evaluate_extensions({"B_ext", "A_ext", "A_ext"}, {"B_ext", "A_ext", "B_ext"});
     CHECK(e.unsupported_required.size() == 2);
     CHECK(e.unsupported_required[0] == "A_ext" && e.unsupported_required[1] == "B_ext");
     CHECK(e.ignored_used.empty());  // both are required

@@ -30,8 +30,8 @@ namespace melkor::format::glb {
 
 // The fixed constants of the format (glTF 2.0). Stored little-endian on disk; these are the host
 // values the little-endian readers/writers compare against.
-inline constexpr std::uint32_t kMagic = 0x46546C67u;         // 'glTF'
-inline constexpr std::uint32_t kVersion = 2u;                // Melkor targets glTF 2.0 only
+inline constexpr std::uint32_t kMagic = 0x46546C67u;          // 'glTF'
+inline constexpr std::uint32_t kVersion = 2u;                 // Melkor targets glTF 2.0 only
 inline constexpr std::uint32_t kChunkTypeJson = 0x4E4F534Au;  // 'JSON'
 inline constexpr std::uint32_t kChunkTypeBin = 0x004E4942u;   // 'BIN\0'
 inline constexpr std::size_t kHeaderSize = 12;
@@ -43,9 +43,17 @@ inline constexpr std::size_t kChunkAlignment = 4;  // every chunk length is a mu
 // trailing space padding the format mandates -- that is harmless to a JSON parser. The BIN range
 // likewise may include trailing zero padding, which accessors never address.
 struct GlbFraming {
-    ByteRange json;                 // the required JSON chunk's data
-    std::optional<ByteRange> bin;   // the optional BIN chunk's data, if present
+    ByteRange json;                     // the required JSON chunk's data
+    std::optional<ByteRange> bin;       // the optional BIN chunk's data, if present
     std::uint32_t declared_length = 0;  // the header's total-length field (validated <= size)
+    std::uint64_t unknown_chunk_count = 0;
+};
+
+// A complete GLB with a writable BIN payload.
+// The BIN padding remains outside bin_payload and contains zero bytes.
+struct GlbBuildBuffer {
+    std::vector<std::uint8_t> bytes;
+    ByteRange bin_payload;
 };
 
 // Parses and validates GLB framing with strict, overflow-safe bounds checking:
@@ -53,10 +61,18 @@ struct GlbFraming {
 //   - the declared total length is at least the header size and no greater than the buffer;
 //   - every chunk length is 4-byte aligned and its data lies wholly within the declared length,
 //     with `offset + length` computed through checked arithmetic so a lying length cannot wrap;
-//   - the first chunk is JSON, there is exactly one JSON chunk, and at most one BIN chunk;
+//   - the first chunk is JSON, and an optional BIN chunk is second;
+//   - there is exactly one JSON chunk and at most one BIN chunk;
 //   - unknown chunk types are skipped, as the spec requires clients to ignore them.
 // Returns a clean failure (never a crash or an out-of-bounds read) on any malformed input.
 Result<GlbFraming> parse_glb(const std::uint8_t* data, std::size_t size);
+
+// Calculate the complete GLB size without an allocation.
+Result<std::uint64_t> encoded_glb_size(std::size_t json_size, std::size_t bin_size);
+
+// Build the GLB framing and allocate the final buffer once.
+// The caller can write exactly bin_size bytes at bin_payload.
+Result<GlbBuildBuffer> build_glb_buffer(std::string_view json, std::size_t bin_size);
 
 // Builds a GLB from a JSON document and an optional binary buffer, applying the mandated 4-byte
 // padding (trailing spaces for JSON, trailing zeros for BIN) and writing a correct total-length

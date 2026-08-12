@@ -1,28 +1,30 @@
 #include "inspect_command.hpp"
 
+#include "cli_diagnostics.hpp"
+#include "cli_interrupt.hpp"
 #include "melkor/cloud_inspector.hpp"
-#include "melkor/format/gltf_reader.hpp"
-#include "melkor/glb_reader.hpp"
-#include "melkor/ply_writer.hpp"
-#include "melkor/spz_encoder.hpp"
+#include "melkor/color_space.hpp"
+#include "melkor/format/profile.hpp"
+#include "melkor/format/registry.hpp"
+#include "melkor/limits.hpp"
+#include <nlohmann/json.hpp>
 #include "safe_text.hpp"
 
-#include <fstream>
-#include <vector>
-
 #include <algorithm>
-#include <cctype>
-#include <cstdint>
+#include <charconv>
+#include <cmath>
 #include <filesystem>
-#include <iomanip>
 #include <iostream>
-#include <limits>
-#include <locale>
 #include <new>
+#include <optional>
+#include <set>
 #include <sstream>
 #include <stdexcept>
 #include <string>
+#include <type_traits>
 #include <utility>
+#include <variant>
+#include <vector>
 
 namespace melkor::cli {
 namespace {
@@ -30,436 +32,298 @@ namespace {
 namespace fs = std::filesystem;
 
 struct FieldSummary {
-    std::string position = "unknown";
-    std::string color = "unknown";
-    std::string opacity = "unknown";
-    std::string scale = "unknown";
-    std::string rotation = "unknown";
-    std::string sh_rest = "unknown";
+    std::string position = "explicit";
+    std::string color = "explicit_sh";
+    std::string opacity = "explicit";
+    std::string scale = "explicit";
+    std::string rotation = "explicit";
+    std::string sh_rest = "absent";
 };
 
 struct InspectDocument {
-    std::string path;
+    std::string path = "<input>";
     std::string format = "unknown";
-    std::string kind = "unknown";
+    std::string profile;
     std::string encoding = "unknown";
-    uintmax_t bytes = 0;
-    bool has_bytes = false;
-    size_t declared_splats = 0;
-    bool has_declared_splats = false;
-    bool antialiased = false;
-    bool has_antialiased = false;
-    bool has_cloud = false;
+    std::optional<std::uintmax_t> bytes;
+    std::optional<std::uint64_t> declared_splats;
+    std::optional<bool> antialiased;
+    std::string color_space;
     FieldSummary fields;
     CloudInspection inspection;
+    LossReport losses;
+    bool has_cloud = false;
+    ErrorCode error_code = ErrorCode::ok;
 };
 
-std::string extensionOf(const std::string& path) {
-    std::string extension = fs::path(path).extension().string();
-    std::transform(extension.begin(), extension.end(), extension.begin(),
-                   [](unsigned char ch) { return static_cast<char>(std::tolower(ch)); });
-    if (!extension.empty() && extension.front() == '.')
-        extension.erase(extension.begin());
-    return extension;
+std::string safe_string(const std::string& value) {
+    std::ostringstream stream;
+    text::writeDisplayString(stream, value);
+    return stream.str();
 }
 
-void addSourceError(InspectDocument& document, std::string code, std::string message) {
-    addInspectionIssue(document.inspection, InspectionSeverity::Error, std::move(code),
-                       std::move(message));
+std::string report_path(const fs::path& path) {
+    const std::string filename = path.filename().u8string();
+    return filename.empty() ? "<input>" : filename;
 }
 
-const char* severityName(InspectionSeverity severity) {
-    return severity == InspectionSeverity::Error ? "error" : "warning";
-}
-
-const char* plyEncodingName(PlyReader::Metadata::Encoding encoding) {
-    switch (encoding) {
-    case PlyReader::Metadata::Encoding::Ascii:
-        return "ascii";
-    case PlyReader::Metadata::Encoding::BinaryLittleEndian:
-        return "binary_little_endian";
-    case PlyReader::Metadata::Encoding::BinaryBigEndian:
-        return "binary_big_endian";
-    case PlyReader::Metadata::Encoding::Unknown:
-    default:
-        return "unknown";
+std::string suffix_format(const fs::path& path) {
+    std::string suffix = path.extension().u8string();
+    if (!suffix.empty() && suffix.front() == '.')
+        suffix.erase(suffix.begin());
+    for (char& value : suffix) {
+        const auto byte = static_cast<unsigned char>(value);
+        if (byte >= 'A' && byte <= 'Z')
+            value = static_cast<char>(byte - 'A' + 'a');
     }
+    return suffix == "ply" || suffix == "spz" || suffix == "gltf" || suffix == "glb" ? suffix
+                                                                                     : "unknown";
 }
 
-void addPlyFieldWarnings(InspectDocument& document, const PlyReader::Metadata& metadata) {
-    if (metadata.declared_vertices == 0)
+std::optional<FormatId> parse_format(const std::string& value) {
+    if (value == "ply")
+        return FormatId::ply;
+    if (value == "spz")
+        return FormatId::spz;
+    if (value == "gltf")
+        return FormatId::gltf;
+    if (value == "glb")
+        return FormatId::glb;
+    return std::nullopt;
+}
+
+bool parse_positive_double(const std::string& value, double& output) {
+    if (value.empty())
+        return false;
+    double parsed = 0.0;
+    if (!text::parseClassicDouble(value, parsed) || !std::isfinite(parsed) || parsed <= 0.0) {
+        return false;
+    }
+    output = parsed;
+    return true;
+}
+
+void add_failure(InspectDocument& document, ErrorCode code, const std::string& diagnostic_code,
+                 const std::string& message) {
+    if (document.error_code == ErrorCode::ok)
+        document.error_code = code;
+    addInspectionIssue(document.inspection, InspectionSeverity::Error, diagnostic_code, message);
+}
+
+void add_diagnostics(InspectDocument& document, ErrorCode code,
+                     const std::vector<Diagnostic>& diagnostics) {
+    if (diagnostics.empty()) {
+        add_failure(document, code, "MK1901_INSPECT_FAILED", "The asset inspection failed.");
         return;
-    if (!metadata.has_sh_dc && metadata.has_rgb) {
-        addInspectionIssue(document.inspection, InspectionSeverity::Warning, "rgb_color_converted",
-                           "RGB byte colors were converted to spherical-harmonics DC values.");
-    } else if (!metadata.has_sh_dc && !metadata.has_rgb) {
-        addInspectionIssue(document.inspection, InspectionSeverity::Warning, "defaulted_color",
-                           "Color was absent and defaulted by the reader.");
     }
-    if (!metadata.has_opacity) {
-        addInspectionIssue(document.inspection, InspectionSeverity::Warning, "defaulted_opacity",
-                           "Opacity was absent and defaulted by the reader.");
-    }
-    if (!metadata.has_scale) {
-        addInspectionIssue(document.inspection, InspectionSeverity::Warning, "defaulted_scale",
-                           "Scale was absent and defaulted by the reader.");
-    }
-    if (!metadata.has_rotation) {
-        addInspectionIssue(document.inspection, InspectionSeverity::Warning, "defaulted_rotation",
-                           "Rotation was absent and defaulted by the reader.");
+    if (document.error_code == ErrorCode::ok)
+        document.error_code = code;
+    for (const Diagnostic& diagnostic : diagnostics) {
+        const InspectionSeverity severity = diagnostic.severity == Severity::warning
+                                                ? InspectionSeverity::Warning
+                                                : InspectionSeverity::Error;
+        addInspectionIssue(document.inspection, severity, diagnostic.code, diagnostic.message);
+        InspectionIssue& issue = document.inspection.issues.back();
+        issue.path = diagnostic.path;
+        issue.byte_offset = diagnostic.byte_offset;
+        issue.context = diagnostic.context;
     }
 }
 
-InspectDocument inspectPath(const std::string& path) {
+InspectDocument inspect_path(const fs::path& path, const AssetReadOptions& options,
+                             const OperationContext& context) {
     InspectDocument document;
-    document.path = path;
-    const std::string extension = extensionOf(path);
-    if (!extension.empty())
-        document.format = extension;
+    document.path = report_path(path);
+    document.format =
+        options.format.has_value() ? std::string(to_string(*options.format)) : suffix_format(path);
 
-    std::error_code error;
-    const auto status = fs::status(path, error);
-    if (error || !fs::exists(status)) {
-        addSourceError(document, "input_not_found", "The input file does not exist.");
+    auto asset = read_splat_asset(path, options, context);
+    if (!asset.has_value()) {
+        add_diagnostics(document, asset.error_code(), asset.diagnostics());
         return document;
     }
-    if (!fs::is_regular_file(status)) {
-        addSourceError(document, "input_not_regular_file", "The input path is not a regular file.");
-        return document;
-    }
-    document.bytes = fs::file_size(path, error);
-    if (error) {
-        addSourceError(document, "file_size_unavailable", "The input file size could not be read.");
-        return document;
-    }
-    document.has_bytes = true;
 
-    if (document.format == "ply") {
-        PlyReader reader;
-        auto result = reader.readFromFile(path);
-        if (!result.success) {
-            addSourceError(document, "read_error", result.error_message);
-            return document;
-        }
-        if (!result.data.has_value()) {
-            addSourceError(document, "internal_error",
-                           "PLY reader succeeded without canonical scene data.");
-            return document;
-        }
-        const SplatData& data = *result.data;
-        document.kind = "splat_data";
-        document.encoding = plyEncodingName(result.metadata.encoding);
-        document.declared_splats = result.metadata.declared_vertices;
-        document.has_declared_splats = true;
-        document.fields.position = result.metadata.has_position ? "explicit" : "missing";
-        document.fields.color = result.metadata.has_sh_dc ? "explicit_sh_dc"
-                                : result.metadata.has_rgb ? "converted_rgb"
-                                                          : "defaulted";
-        document.fields.opacity = result.metadata.has_opacity ? "explicit" : "defaulted";
-        document.fields.scale = result.metadata.has_scale ? "explicit" : "defaulted";
-        document.fields.rotation = result.metadata.has_rotation ? "explicit" : "defaulted";
-        document.fields.sh_rest = result.metadata.has_sh_rest ? "explicit" : "absent";
-        document.has_cloud = true;
-        document.inspection = inspectCloud(data);
-        if (result.metadata.declared_vertices != data.size()) {
-            addInspectionIssue(document.inspection, InspectionSeverity::Error,
-                               "decoded_count_mismatch",
-                               "Decoded PLY count differs from the declared count.");
-        }
-        addPlyFieldWarnings(document, result.metadata);
-    } else if (document.format == "spz") {
-#ifdef MELKOR_HAS_SPZ
-        SpzDecoder decoder;
-        auto result = decoder.decodeFromFile(path);
-        if (!result.success) {
-            const bool unsupported_version =
-                result.error_message.rfind("Unsupported SPZ version", 0) == 0;
-            addSourceError(document, unsupported_version ? "unsupported_spz_version" : "read_error",
-                           result.error_message);
-            return document;
-        }
-        if (!result.data.has_value()) {
-            addSourceError(document, "internal_error",
-                           "SPZ decoder succeeded without canonical scene data.");
-            return document;
-        }
-        const SplatData& data = *result.data;
-        document.kind = "splat_data";
-        document.encoding = "spz";
-        document.declared_splats = result.metadata.declared_points;
-        document.has_declared_splats = true;
-        document.antialiased = result.metadata.antialiased;
-        document.has_antialiased = true;
-        document.fields = {"explicit", "explicit_sh_dc",
-                           "explicit", "explicit",
-                           "explicit", result.metadata.sh_degree > 0 ? "explicit" : "absent"};
-        document.has_cloud = true;
-        document.inspection = inspectCloud(data);
-        if (result.metadata.decoded_points != result.metadata.declared_points) {
-            addInspectionIssue(document.inspection, InspectionSeverity::Error,
-                               "decoded_count_mismatch",
-                               "Decoded SPZ count differs from the declared count.");
-        }
-#else
-        addSourceError(document, "spz_unavailable",
-                       "SPZ support is not compiled into this binary.");
+    AssetReadResult value = std::move(asset).value();
+    document.format = std::string(to_string(value.format));
+    document.profile = std::string(format_profile(value.profile).profile_id);
+    document.encoding = value.source.encoding;
+    document.bytes = value.source.source_bytes;
+    document.declared_splats = value.source.declared_splats;
+    document.antialiased = value.primitive.metadata().antialiased;
+    document.color_space = std::string(to_string(value.primitive.metadata().color_space));
+    document.fields.sh_rest = value.primitive.metadata().sh_degree > 0 ? "explicit" : "absent";
+    document.losses = std::move(value.losses);
+    auto inspection = inspectCloud(value.primitive.data(), context);
+    if (!inspection.has_value()) {
+        add_diagnostics(document, inspection.error_code(), inspection.diagnostics());
         return document;
-#endif
-    } else if (document.format == "glb" || document.format == "gltf") {
-        // Prefer the real KHR_gaussian_splatting reader: a GLB carrying splats is read as actual
-        // Gaussian data, not as mesh vertices. Only when the asset has no splat primitive do we
-        // fall back to the legacy vertices-to-splats path.
-        std::ifstream in(path, std::ios::binary);
-        std::vector<std::uint8_t> bytes((std::istreambuf_iterator<char>(in)),
-                                        std::istreambuf_iterator<char>());
-        auto scene = melkor::format::gltf::read_glb(bytes.data(), bytes.size());
-        const bool no_splat_primitive = !scene.has_value() && !scene.diagnostics().empty() &&
-                                        scene.diagnostics()[0].code == "MK2161_GLTF_NO_SPLATS";
-
-        if (scene.has_value()) {
-            // KHR_gaussian_splatting is already canonical. Inspect it directly: converting linear
-            // scale/opacity back into the legacy log/logit model merely to compute bounds created
-            // exactly the double-activation bug class A1 is removing.
-            const auto& sd = scene.value().data;
-            document.kind = "splat_data";
-            document.encoding = "khr_gaussian_splatting";
-            document.declared_splats = sd.size();
-            document.has_declared_splats = true;
-            document.fields = {"explicit", "explicit_sh_dc",
-                               "explicit", "explicit",
-                               "explicit", scene.value().sh_degree > 0 ? "explicit" : "absent"};
-            document.has_cloud = true;
-            document.inspection = inspectCloud(sd);
-            // Surface the conversion loss report so an inspector sees what a conversion would lose.
-            for (const auto& item : scene.value().losses.items()) {
-                addInspectionIssue(document.inspection, InspectionSeverity::Warning, item.code,
-                                   item.source_feature.empty() ? item.target_constraint
-                                                               : item.source_feature);
-            }
-        } else if (no_splat_primitive) {
-            // Not a splat asset: sample mesh vertices into the same canonical scene contract.
-            GlbReader reader;
-            GlbConversionConfig config;
-            config.convert_coordinate_system = false;
-            auto result = reader.loadFromFile(path, config);
-            if (!result.success) {
-                addSourceError(document, "read_error", result.error_message);
-                return document;
-            }
-            if (!result.data.has_value()) {
-                addSourceError(document, "internal_error",
-                               "Mesh reader succeeded without canonical scene data.");
-                return document;
-            }
-            document.kind = "mesh_vertices";
-            document.encoding = document.format == "glb" ? "binary" : "json";
-            document.declared_splats = result.total_vertices;
-            document.has_declared_splats = true;
-            document.fields = {"explicit",  "converted_or_defaulted",
-                               "generated", "generated",
-                               "generated", "absent"};
-            document.has_cloud = true;
-            document.inspection = inspectCloud(*result.data);
-        } else {
-            addSourceError(document, "read_error",
-                           scene.diagnostics().empty() ? "failed to read GLB"
-                                                       : scene.diagnostics()[0].message);
-            return document;
-        }
-    } else {
-        addSourceError(document, "unsupported_format",
-                       "Supported inspect inputs are PLY, SPZ, GLB, and glTF.");
     }
+    document.inspection = std::move(inspection).value();
+    document.has_cloud = true;
+    if (document.inspection.error_count != 0)
+        document.error_code = ErrorCode::invalid_data;
     return document;
 }
 
-void writeJsonString(std::ostream& stream, const std::string& value) {
-    static constexpr char hex[] = "0123456789abcdef";
-    stream.put('"');
-    for (size_t index = 0; index < value.size();) {
-        const unsigned char ch = static_cast<unsigned char>(value[index]);
-        if (ch >= 0x80) {
-            const size_t sequence_length = text::utf8SequenceLength(value, index);
-            if (sequence_length > 0) {
-                stream.write(value.data() + index, static_cast<std::streamsize>(sequence_length));
-                index += sequence_length;
-                continue;
-            }
-            // JSON text must be valid UTF-8. Preserve malformed parser/path
-            // bytes deterministically as U+00xx escapes instead of emitting
-            // an invalid byte sequence that downstream JSON parsers reject.
-            stream << "\\u00" << hex[ch >> 4] << hex[ch & 0x0f];
-            ++index;
-            continue;
-        }
-        switch (ch) {
-        case '"':
-            stream << "\\\"";
-            break;
-        case '\\':
-            stream << "\\\\";
-            break;
-        case '\b':
-            stream << "\\b";
-            break;
-        case '\f':
-            stream << "\\f";
-            break;
-        case '\n':
-            stream << "\\n";
-            break;
-        case '\r':
-            stream << "\\r";
-            break;
-        case '\t':
-            stream << "\\t";
-            break;
-        default:
-            if (ch < 0x20) {
-                stream << "\\u00" << hex[ch >> 4] << hex[ch & 0x0f];
+nlohmann::ordered_json loss_json(const LossItem& item) {
+    return {
+        {"code", item.code},
+        {"severity", to_string(item.severity)},
+        {"source_feature", safe_string(item.source_feature)},
+        {"target_constraint", safe_string(item.target_constraint)},
+        {"affected_splats", item.affected_splats},
+        {"remediation", safe_string(item.remediation)},
+    };
+}
+
+nlohmann::ordered_json scalar_json(const JsonScalar& value) {
+    return std::visit(
+        [](const auto& item) -> nlohmann::ordered_json {
+            using T = std::decay_t<decltype(item)>;
+            if constexpr (std::is_same_v<T, std::monostate>) {
+                return nullptr;
+            } else if constexpr (std::is_same_v<T, std::string>) {
+                return safe_string(item);
+            } else if constexpr (std::is_same_v<T, double>) {
+                if (!std::isfinite(item)) {
+                    if (std::isnan(item))
+                        return "nan";
+                    return item < 0.0 ? "-infinity" : "infinity";
+                }
+                return item;
             } else {
-                stream.put(static_cast<char>(ch));
+                return item;
             }
-        }
-        ++index;
-    }
-    stream.put('"');
+        },
+        value);
 }
 
-void writeFloat(std::ostream& stream, float value) {
-    if (value == 0.0f) {
-        stream << '0';
-        return;
-    }
-    std::ostringstream formatted;
-    formatted.imbue(std::locale::classic());
-    formatted << std::setprecision(std::numeric_limits<float>::max_digits10) << value;
-    stream << formatted.str();
+nlohmann::ordered_json context_json(const InspectionIssue& issue) {
+    nlohmann::ordered_json context = nlohmann::ordered_json::object();
+    for (const auto& [key, value] : issue.context)
+        context[safe_string(key)] = scalar_json(value);
+    return context;
 }
 
-void writeNullableSize(std::ostream& stream, bool available, uintmax_t value) {
-    if (available)
-        stream << value;
-    else
-        stream << "null";
-}
-
-void writeJson(const InspectDocument& document, std::ostream& stream) {
-    stream << "{\"schema\":\"melkor.inspect.v1\",\"valid\":"
-           << (document.inspection.valid ? "true" : "false") << ",\"source\":{";
-    stream << "\"path\":";
-    writeJsonString(stream, document.path);
-    stream << ",\"format\":";
-    writeJsonString(stream, document.format);
-    stream << ",\"kind\":";
-    writeJsonString(stream, document.kind);
-    stream << ",\"bytes\":";
-    writeNullableSize(stream, document.has_bytes, document.bytes);
-    stream << "},\"cloud\":";
+nlohmann::ordered_json report_json(const InspectDocument& document) {
+    nlohmann::ordered_json report;
+    report["schema"] = "melkor.inspect.v1";
+    report["valid"] = document.inspection.valid;
+    report["source"] = {
+        {"path", safe_string(document.path)},
+        {"format", document.format},
+        {"profile", document.profile.empty() ? nlohmann::ordered_json(nullptr)
+                                             : nlohmann::ordered_json(document.profile)},
+        {"bytes", document.bytes.has_value() ? nlohmann::ordered_json(*document.bytes)
+                                             : nlohmann::ordered_json(nullptr)},
+    };
     if (!document.has_cloud) {
-        stream << "null";
+        report["cloud"] = nullptr;
     } else {
-        stream << "{\"splats\":" << document.inspection.splat_count
-               << ",\"sh_degree\":" << document.inspection.sh_degree << ",\"bounds\":";
-        if (!document.inspection.bounds.available) {
-            stream << "null";
-        } else {
-            stream << "{\"min\":[";
-            for (int i = 0; i < 3; ++i) {
-                if (i)
-                    stream << ',';
-                writeFloat(stream, document.inspection.bounds.min[i]);
-            }
-            stream << "],\"max\":[";
-            for (int i = 0; i < 3; ++i) {
-                if (i)
-                    stream << ',';
-                writeFloat(stream, document.inspection.bounds.max[i]);
-            }
-            stream << "]},\"fields\":{";
+        nlohmann::ordered_json bounds = nullptr;
+        if (document.inspection.bounds.available) {
+            bounds = {
+                {"min",
+                 {document.inspection.bounds.min[0], document.inspection.bounds.min[1],
+                  document.inspection.bounds.min[2]}},
+                {"max",
+                 {document.inspection.bounds.max[0], document.inspection.bounds.max[1],
+                  document.inspection.bounds.max[2]}},
+            };
         }
-        if (!document.inspection.bounds.available)
-            stream << ",\"fields\":{";
-        stream << "\"position\":";
-        writeJsonString(stream, document.fields.position);
-        stream << ",\"color\":";
-        writeJsonString(stream, document.fields.color);
-        stream << ",\"opacity\":";
-        writeJsonString(stream, document.fields.opacity);
-        stream << ",\"scale\":";
-        writeJsonString(stream, document.fields.scale);
-        stream << ",\"rotation\":";
-        writeJsonString(stream, document.fields.rotation);
-        stream << ",\"sh_rest\":";
-        writeJsonString(stream, document.fields.sh_rest);
-        stream << "}}";
+        report["cloud"] = {
+            {"splats", document.inspection.splat_count},
+            {"sh_degree", document.inspection.sh_degree},
+            {"color_space", document.color_space},
+            {"coordinate_frame", "gltf-luf"},
+            {"unit_to_meter", 1.0},
+            {"bounds", std::move(bounds)},
+            {"fields",
+             {
+                 {"position", document.fields.position},
+                 {"color", document.fields.color},
+                 {"opacity", document.fields.opacity},
+                 {"scale", document.fields.scale},
+                 {"rotation", document.fields.rotation},
+                 {"sh_rest", document.fields.sh_rest},
+             }},
+        };
     }
-    stream << ",\"container\":{\"encoding\":";
-    writeJsonString(stream, document.encoding);
-    stream << ",\"declared_splats\":";
-    writeNullableSize(stream, document.has_declared_splats, document.declared_splats);
-    stream << ",\"antialiased\":";
-    if (document.has_antialiased)
-        stream << (document.antialiased ? "true" : "false");
-    else
-        stream << "null";
-    stream << "},\"validation\":{\"errors\":" << document.inspection.error_count
-           << ",\"warnings\":" << document.inspection.warning_count << ",\"issues\":[";
-    for (size_t index = 0; index < document.inspection.issues.size(); ++index) {
-        const auto& issue = document.inspection.issues[index];
-        if (index)
-            stream << ',';
-        stream << "{\"severity\":";
-        writeJsonString(stream, severityName(issue.severity));
-        stream << ",\"code\":";
-        writeJsonString(stream, issue.code);
-        stream << ",\"message\":";
-        writeJsonString(stream, issue.message);
-        stream << ",\"count\":" << issue.count << ",\"first_index\":";
-        if (issue.has_index)
-            stream << issue.first_index;
-        else
-            stream << "null";
-        stream << '}';
+    report["container"] = {
+        {"encoding", document.encoding},
+        {"declared_splats", document.declared_splats.has_value()
+                                ? nlohmann::ordered_json(*document.declared_splats)
+                                : nlohmann::ordered_json(nullptr)},
+        {"antialiased", document.antialiased.has_value()
+                            ? nlohmann::ordered_json(*document.antialiased)
+                            : nlohmann::ordered_json(nullptr)},
+    };
+    report["losses"] = nlohmann::ordered_json::array();
+    for (const LossItem& item : document.losses.items())
+        report["losses"].push_back(loss_json(item));
+    report["validation"] = {
+        {"error_code", document.error_code == ErrorCode::ok
+                           ? nlohmann::ordered_json(nullptr)
+                           : nlohmann::ordered_json(to_string(document.error_code))},
+        {"errors", document.inspection.error_count},
+        {"warnings", document.inspection.warning_count},
+        {"issues", nlohmann::ordered_json::array()},
+    };
+    for (const InspectionIssue& issue : document.inspection.issues) {
+        report["validation"]["issues"].push_back({
+            {"severity", issue.severity == InspectionSeverity::Error ? "error" : "warning"},
+            {"code", issue.code},
+            {"message", safe_string(issue.message)},
+            {"count", issue.count},
+            {"first_index", issue.has_index ? nlohmann::ordered_json(issue.first_index)
+                                            : nlohmann::ordered_json(nullptr)},
+            {"path", issue.path.empty() ? nlohmann::ordered_json(nullptr)
+                                        : nlohmann::ordered_json(safe_string(issue.path))},
+            {"byte_offset", issue.byte_offset.has_value()
+                                ? nlohmann::ordered_json(*issue.byte_offset)
+                                : nlohmann::ordered_json(nullptr)},
+            {"context", context_json(issue)},
+        });
     }
-    stream << "]}}\n";
+    return report;
 }
 
-void writeHuman(const InspectDocument& document, std::ostream& stream) {
+void write_human(const InspectDocument& document, std::ostream& stream) {
     stream << "Inspection: ";
     text::writeDisplayString(stream, document.path);
-    stream << '\n';
+    stream << '\n' << "  Valid: " << (document.inspection.valid ? "yes" : "no") << '\n';
     stream << "  Format: ";
     text::writeDisplayString(stream, document.format);
-    stream << " (";
-    text::writeDisplayString(stream, document.encoding);
-    stream << ")\n";
-    if (document.has_bytes)
-        stream << "  Bytes: " << document.bytes << '\n';
-    stream << "  Valid: " << (document.inspection.valid ? "yes" : "no") << '\n';
-    if (document.has_cloud) {
-        stream << "  Kind: ";
-        text::writeDisplayString(stream, document.kind);
+    stream << '\n';
+    if (!document.profile.empty()) {
+        stream << "  Profile: ";
+        text::writeDisplayString(stream, document.profile);
         stream << '\n';
-        stream << "  Splats: " << document.inspection.splat_count << '\n';
-        stream << "  SH degree: " << document.inspection.sh_degree << '\n';
+    }
+    if (document.bytes.has_value())
+        stream << "  Bytes: " << *document.bytes << '\n';
+    if (document.has_cloud) {
+        stream << "  Splats: " << document.inspection.splat_count << '\n'
+               << "  SH degree: " << document.inspection.sh_degree << '\n'
+               << "  Color space: ";
+        text::writeDisplayString(stream, document.color_space);
+        stream << '\n';
         if (document.inspection.bounds.available) {
-            stream << "  Bounds: [";
-            for (int i = 0; i < 3; ++i) {
-                if (i)
-                    stream << ", ";
-                writeFloat(stream, document.inspection.bounds.min[i]);
-            }
-            stream << "] to [";
-            for (int i = 0; i < 3; ++i) {
-                if (i)
-                    stream << ", ";
-                writeFloat(stream, document.inspection.bounds.max[i]);
-            }
-            stream << "]\n";
+            stream << "  Bounds: [" << document.inspection.bounds.min[0] << ", "
+                   << document.inspection.bounds.min[1] << ", " << document.inspection.bounds.min[2]
+                   << "] to [" << document.inspection.bounds.max[0] << ", "
+                   << document.inspection.bounds.max[1] << ", " << document.inspection.bounds.max[2]
+                   << "]\n";
         }
     }
-    for (const auto& issue : document.inspection.issues) {
+    for (const LossItem& item : document.losses.items()) {
+        stream << "  LOSS [";
+        text::writeDisplayString(stream, item.code);
+        stream << "] ";
+        text::writeDisplayString(stream, item.source_feature);
+        stream << '\n';
+    }
+    for (const InspectionIssue& issue : document.inspection.issues) {
         stream << "  " << (issue.severity == InspectionSeverity::Error ? "ERROR" : "WARNING")
                << " [";
         text::writeDisplayString(stream, issue.code);
@@ -470,88 +334,206 @@ void writeHuman(const InspectDocument& document, std::ostream& stream) {
         if (issue.has_index)
             stream << " First index: " << issue.first_index << '.';
         stream << '\n';
+        if (!issue.path.empty()) {
+            stream << "    Path: ";
+            text::writeDisplayString(stream, issue.path);
+            stream << '\n';
+        }
+        if (issue.byte_offset.has_value())
+            stream << "    Byte offset: " << *issue.byte_offset << '\n';
+        if (!issue.context.empty())
+            stream << "    Context: " << context_json(issue).dump(-1, ' ', true) << '\n';
     }
 }
 
-void printUsage(const char* program, std::ostream& stream) {
+void print_usage(const char* program, std::ostream& stream) {
     stream << "Usage: ";
     text::writeDisplayString(stream, program);
-    stream << " inspect INPUT [--json] [--strict]\n"
-           << "\nValidate and inspect PLY, SPZ v1-v3, GLB, or glTF without writing output.\n"
-           << "  --json    emit one deterministic melkor.inspect.v1 JSON document\n"
-           << "  --strict  return exit 1 when validation warnings are present\n";
+    stream << " inspect INPUT [options]\n\n"
+              "Validate one Gaussian PLY, SPZ, glTF, or GLB asset.\n\n"
+              "Input options:\n"
+              "  --input-format FORMAT          ply | spz | gltf | glb\n"
+              "  --input-profile PROFILE        Exact profile ID\n"
+              "  --source-frame FRAME           gltf-luf | ply-rdf | spz-rub\n"
+              "  --source-unit-to-meter VALUE   Positive meters per source unit\n"
+              "  --source-color-space SPACE     srgb_rec709_display | lin_rec709_display\n\n"
+              "Report options:\n"
+              "  --json                         Write melkor.inspect.v1 JSON\n"
+              "  --strict                       Fail on warnings or non-informational losses\n"
+              "  --limits-profile PROFILE       web | desktop | server\n"
+              "  -h, --help                     Show this help\n\n"
+              "Exact profile IDs:\n"
+              "  ply:melkor-canonical-v1\n"
+              "  ply:graphdeco-3dgs-v1\n"
+              "  ply:da3-gaussian-v1\n"
+              "  spz:spz-v1-v3\n"
+              "  khr-gaussian-splatting-rc-63770cc\n\n"
+              "PLY and SPZ do not store all source semantics. Supply each missing value.\n"
+              "Use -- before a path that starts with '-'.\n";
 }
 
 }  // namespace
 
-int runInspectCommand(int argc, char* argv[], const char* program) {
+int runInspectCommand(int argc, char* argv[], const char* program) try {
+    AssetReadOptions options;
+    LimitsProfile limits_profile = LimitsProfile::desktop;
+    std::set<std::string> seen_options;
+    std::vector<std::string> positionals;
     bool json = false;
     bool strict = false;
     bool positional_only = false;
-    std::string input;
+
+    const auto require_value = [&](int index, const std::string& option) {
+        if (index + 1 < argc)
+            return true;
+        std::cerr << "MK1802_USAGE: inspect: ";
+        text::writeDisplayString(std::cerr, option);
+        std::cerr << " requires a value\n";
+        return false;
+    };
+    const auto mark_once = [&](const std::string& option) {
+        if (seen_options.insert(option).second)
+            return true;
+        std::cerr << "MK1802_USAGE: inspect: option specified more than once: ";
+        text::writeDisplayString(std::cerr, option);
+        std::cerr << '\n';
+        return false;
+    };
 
     for (int index = 0; index < argc; ++index) {
         const std::string argument = argv[index];
         if (!positional_only && (argument == "-h" || argument == "--help")) {
-            printUsage(program, std::cout);
+            print_usage(program, std::cout);
+            std::cout.flush();
+            if (!std::cout) {
+                std::cerr << "MK1806_OUTPUT_WRITE_FAILED: standard output could not be written\n";
+                return exit_code_for(ErrorCode::io_error);
+            }
             return 0;
         }
         if (!positional_only && argument == "--") {
             positional_only = true;
         } else if (!positional_only && argument == "--json") {
+            if (!mark_once(argument))
+                return 2;
             json = true;
         } else if (!positional_only && argument == "--strict") {
+            if (!mark_once(argument))
+                return 2;
             strict = true;
+        } else if (!positional_only && argument == "--input-format") {
+            if (!mark_once(argument) || !require_value(index, argument))
+                return 2;
+            options.format = parse_format(argv[++index]);
+            if (!options.format.has_value()) {
+                std::cerr << "MK1802_USAGE: inspect: invalid input format\n";
+                return 2;
+            }
+        } else if (!positional_only && argument == "--input-profile") {
+            if (!mark_once(argument) || !require_value(index, argument))
+                return 2;
+            options.profile = format_profile_from_string(argv[++index]);
+            if (!options.profile.has_value()) {
+                std::cerr << "MK1802_USAGE: inspect: unknown exact profile ID\n";
+                return 2;
+            }
+        } else if (!positional_only && argument == "--source-frame") {
+            if (!mark_once(argument) || !require_value(index, argument))
+                return 2;
+            options.source_frame_id = argv[++index];
+        } else if (!positional_only && argument == "--source-unit-to-meter") {
+            if (!mark_once(argument) || !require_value(index, argument))
+                return 2;
+            double value = 0.0;
+            if (!parse_positive_double(argv[++index], value)) {
+                std::cerr << "MK1802_USAGE: inspect: --source-unit-to-meter needs a positive "
+                             "finite value\n";
+                return 2;
+            }
+            options.source_unit_to_meter = value;
+        } else if (!positional_only && argument == "--source-color-space") {
+            if (!mark_once(argument) || !require_value(index, argument))
+                return 2;
+            options.source_color_space = color_space_from_string(argv[++index]);
+            if (!options.source_color_space.has_value()) {
+                std::cerr << "MK1802_USAGE: inspect: unknown source color space\n";
+                return 2;
+            }
+        } else if (!positional_only && argument == "--limits-profile") {
+            if (!mark_once(argument) || !require_value(index, argument))
+                return 2;
+            auto parsed = limits_profile_from_string(argv[++index]);
+            if (!parsed.has_value()) {
+                print_diagnostics(parsed.diagnostics(), std::cerr);
+                return 2;
+            }
+            limits_profile = parsed.value();
         } else if (!positional_only && !argument.empty() && argument.front() == '-') {
-            std::cerr << "Error: Unknown inspect option: ";
+            std::cerr << "MK1802_USAGE: inspect: unknown option ";
             text::writeDisplayString(std::cerr, argument);
             std::cerr << '\n';
-            printUsage(program, std::cerr);
             return 2;
-        } else if (input.empty()) {
-            input = argument;
         } else {
-            std::cerr << "Error: inspect accepts exactly one input file.\n";
-            printUsage(program, std::cerr);
-            return 2;
+            positionals.push_back(argument);
         }
     }
 
-    if (input.empty()) {
-        std::cerr << "Error: inspect requires an input file.\n";
-        printUsage(program, std::cerr);
+    if (positionals.size() != 1) {
+        std::cerr << "MK1802_USAGE: inspect requires one input\n";
+        print_usage(program, std::cerr);
         return 2;
     }
 
-    InspectDocument document;
-    try {
-        document = inspectPath(input);
-    } catch (const std::bad_alloc&) {
-        document.path = input;
-        document.format = extensionOf(input);
-        addSourceError(document, "resource_limit",
-                       "Inspection exceeded available memory for this input.");
-    } catch (const std::length_error&) {
-        document.path = input;
-        document.format = extensionOf(input);
-        addSourceError(document, "resource_limit",
-                       "Inspection exceeded a container or allocation size limit.");
-    } catch (const std::exception& error) {
-        document.path = input;
-        document.format = extensionOf(input);
-        addSourceError(document, "read_error",
-                       std::string("Inspection failed safely: ") + error.what());
+    Limits limits = Limits::for_profile(limits_profile);
+    auto limits_valid = limits.validate();
+    if (!limits_valid.has_value()) {
+        print_diagnostics(limits_valid.diagnostics(), std::cerr);
+        return exit_code_for(limits_valid.error_code());
     }
-    if (json)
-        writeJson(document, std::cout);
-    else
-        writeHuman(document, std::cout);
+    Budget budget(limits);
+    OperationContext context = make_default_context(budget);
+    InterruptController interrupt(context.cancellation);
+    if (!interrupt.installed()) {
+        std::cerr << "MK1805_SIGNAL_HANDLER: SIGINT handling could not be installed\n";
+        return exit_code_for(ErrorCode::internal_error);
+    }
+    context.progress = &interrupt;
 
-    if (!document.inspection.valid)
-        return 1;
-    if (strict && document.inspection.warning_count > 0)
-        return 1;
+    InspectDocument document = inspect_path(fs::u8path(positionals.front()), options, context);
+    if (json)
+        std::cout << report_json(document).dump(-1, ' ', true) << '\n';
+    else
+        write_human(document, std::cout);
+    std::cout.flush();
+    if (!std::cout) {
+        std::cerr << "MK1904_REPORT_WRITE_FAILED: the inspection report could not be written\n";
+        return exit_code_for(ErrorCode::io_error);
+    }
+    if (!document.inspection.valid) {
+        const ErrorCode code =
+            document.error_code == ErrorCode::ok ? ErrorCode::invalid_data : document.error_code;
+        return exit_code_for(code);
+    }
+    if (strict) {
+        const bool has_loss_finding =
+            std::any_of(document.losses.items().begin(), document.losses.items().end(),
+                        [](const LossItem& item) { return item.severity != LossSeverity::info; });
+        if (document.inspection.warning_count != 0 || has_loss_finding)
+            return 1;
+    }
     return 0;
+} catch (const std::bad_alloc&) {
+    std::cerr << "MK1905_INSPECT_MEMORY: inspection exhausted available memory\n";
+    return exit_code_for(ErrorCode::resource_limit);
+} catch (const std::length_error&) {
+    std::cerr << "MK1905_INSPECT_MEMORY: inspection exceeded a container limit\n";
+    return exit_code_for(ErrorCode::resource_limit);
+} catch (const std::exception&) {
+    std::cerr << "MK1906_INSPECT_EXCEPTION: inspection failed safely\n";
+    return exit_code_for(ErrorCode::internal_error);
+} catch (...) {
+    std::cerr << "MK1906_INSPECT_EXCEPTION: inspection failed safely\n";
+    return exit_code_for(ErrorCode::internal_error);
 }
 
 }  // namespace melkor::cli

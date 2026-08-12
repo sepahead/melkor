@@ -2,14 +2,34 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://melkor.dev/schemas/format-profile-v1.json",
   "title": "Melkor format profile v1",
-  "description": "A format profile is descriptive data, never executable. It records the exact semantic conventions of one way of storing Gaussian splats -- property names, activation domains, quaternion order, SH basis and order, color space -- so a reader converts by a stated contract rather than by guessing from property names or value ranges. Container-specific fields beyond the common core are permitted.",
+  "description": "A format profile is descriptive data. It records the exact semantic rules for one Gaussian splat format.",
   "type": "object",
-  "additionalProperties": true,
+  "additionalProperties": false,
   "required": [
     "schema_version",
     "profile_id",
     "container",
-    "status"
+    "read_containers",
+    "write_containers",
+    "status",
+    "description",
+    "coordinate_system",
+    "length_unit",
+    "quaternion_order",
+    "quaternion_normalized",
+    "scale_domain",
+    "scale_constraint",
+    "opacity_domain",
+    "sh",
+    "required_properties"
+  ],
+  "oneOf": [
+    {
+      "required": ["color_space"]
+    },
+    {
+      "required": ["color_spaces"]
+    }
   ],
   "properties": {
     "schema_version": {
@@ -28,6 +48,34 @@
         "glb"
       ]
     },
+    "read_containers": {
+      "type": "array",
+      "minItems": 1,
+      "uniqueItems": true,
+      "items": {
+        "type": "string",
+        "enum": [
+          "ply",
+          "spz",
+          "gltf",
+          "glb"
+        ]
+      }
+    },
+    "write_containers": {
+      "type": "array",
+      "minItems": 1,
+      "uniqueItems": true,
+      "items": {
+        "type": "string",
+        "enum": [
+          "ply",
+          "spz",
+          "gltf",
+          "glb"
+        ]
+      }
+    },
     "status": {
       "type": "string",
       "enum": [
@@ -38,13 +86,37 @@
       ]
     },
     "description": {
-      "type": "string"
+      "type": "string",
+      "minLength": 1
+    },
+    "spec": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "commit",
+        "pinned_in"
+      ],
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "commit": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{40}$"
+        },
+        "pinned_in": {
+          "type": "string"
+        }
+      }
     },
     "coordinate_system": {
-      "type": "string"
+      "type": "string",
+      "minLength": 1
     },
     "length_unit": {
-      "type": "string"
+      "type": "string",
+      "minLength": 1
     },
     "quaternion_order": {
       "type": "string",
@@ -63,6 +135,10 @@
         "log"
       ]
     },
+    "scale_constraint": {
+      "type": "string",
+      "minLength": 1
+    },
     "opacity_domain": {
       "type": "string",
       "enum": [
@@ -70,15 +146,42 @@
         "logit"
       ]
     },
+    "opacity_range": {
+      "type": "array",
+      "minItems": 2,
+      "maxItems": 2,
+      "items": {
+        "type": "number",
+        "minimum": 0.0,
+        "maximum": 1.0
+      }
+    },
     "color_space": {
-      "type": "string"
+      "type": "string",
+      "minLength": 1
+    },
+    "color_spaces": {
+      "type": "array",
+      "minItems": 1,
+      "uniqueItems": true,
+      "items": {
+        "type": "string",
+        "minLength": 1
+      }
     },
     "sh": {
       "type": "object",
-      "additionalProperties": true,
+      "additionalProperties": false,
+      "required": [
+        "basis",
+        "max_degree",
+        "order",
+        "phase",
+        "coefficients_per_degree"
+      ],
       "properties": {
         "basis": {
-          "type": "string"
+          "const": "real"
         },
         "max_degree": {
           "type": "integer",
@@ -86,9 +189,37 @@
           "maximum": 4
         },
         "order": {
-          "type": "string"
+          "type": "string",
+          "minLength": 1
         },
         "phase": {
+          "const": "condon-shortley"
+        },
+        "coefficients_per_degree": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 5,
+          "items": {
+            "type": "integer",
+            "minimum": 1
+          }
+        },
+        "attribute_pattern": {
+          "type": "string"
+        },
+        "accessor_type": {
+          "type": "string"
+        },
+        "component_type": {
+          "type": "string"
+        },
+        "dc_property": {
+          "type": "string"
+        },
+        "rest_property": {
+          "type": "string"
+        },
+        "note": {
           "type": "string"
         }
       }
@@ -99,18 +230,108 @@
     },
     "required_properties": {
       "type": "array",
+      "minItems": 1,
+      "uniqueItems": true,
       "items": {
-        "type": "string"
+        "type": "string",
+        "minLength": 1
+      }
+    },
+    "header_markers": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "melkor_profile": {
+          "type": "string"
+        },
+        "melkor_coordinate_system": {
+          "type": "string"
+        },
+        "melkor_length_unit": {
+          "type": "string"
+        },
+        "melkor_quaternion_order": {
+          "type": "string"
+        },
+        "melkor_scale_domain": {
+          "type": "string"
+        },
+        "melkor_opacity_domain": {
+          "type": "string"
+        },
+        "melkor_color_space": {
+          "type": "string"
+        },
+        "melkor_sh_basis": {
+          "type": "string"
+        },
+        "melkor_sh_degree": {
+          "type": "string"
+        },
+        "melkor_antialiased": {
+          "type": "string"
+        }
+      }
+    },
+    "kernel": {
+      "type": "string"
+    },
+    "primitive_mode": {
+      "type": "string"
+    },
+    "material_handling": {
+      "type": "string"
+    },
+    "representable_limits": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "note": {
+          "type": "string"
+        }
       }
     },
     "upstream": {
-      "type": "string"
+      "type": "string",
+      "pattern": "^https://[^\\s]+$"
     },
     "upstream_revision": {
-      "type": "string"
+      "type": "string",
+      "pattern": "^[0-9a-f]{40}$"
     },
     "license": {
       "type": "string"
+    },
+    "note": {
+      "type": "string"
     }
-  }
+  },
+  "allOf": [
+    {
+      "if": {
+        "properties": {
+          "status": {
+            "const": "release-candidate"
+          }
+        },
+        "required": ["status"]
+      },
+      "then": {
+        "required": ["spec"]
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "opacity_domain": {
+            "const": "linear"
+          }
+        },
+        "required": ["opacity_domain"]
+      },
+      "then": {
+        "required": ["opacity_range"]
+      }
+    }
+  ]
 }

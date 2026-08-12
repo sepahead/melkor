@@ -120,6 +120,7 @@ Use a dry run to inspect quoting and selected paths:
 ```
 
 The dry run does not create the output directory or a temporary workspace.
+It withholds upstream arguments because they can contain secrets.
 
 ## Limits
 
@@ -130,6 +131,7 @@ This wrapper does not verify:
 - The LibTorch version
 - The GPU runtime
 - The output semantics
+- A stage timeout or restricted process environment
 
 Record those items before you use an output as release evidence.
 The planned adapter runner will enforce them with a manifest.

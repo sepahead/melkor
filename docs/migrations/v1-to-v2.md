@@ -1,10 +1,9 @@
 # Migrating the C++ scene API from v1 to v2
 
-Melkor v2 replaces the mutable `GaussianCloud` SDK model with `SplatData`. The v1 model stored
+Melkor v2 replaces the mutable `GaussianCloud` model with `SplatData`. The v1 model stored
 training-domain values and exposed mutable vectors. These values included log scale, logit
-opacity, and WXYZ quaternions. The v2 model stores positive linear scale, linear opacity, and XYZW
-unit quaternions. Linear opacity stays in `[0,1]`. The model validates each construction and
-committed edit.
+opacity, and WXYZ quaternions. The v2 model stores nonnegative linear scale, linear opacity, and
+XYZW unit quaternions. Linear opacity stays in `[0,1]`. The model validates each construction.
 
 ## Construct a scene
 
@@ -28,27 +27,29 @@ if (!scene.has_value()) {
 Format adapters must do log/linear and logit/probability conversion exactly once through
 `melkor/math/activation.hpp`. Do not infer a domain from the numeric range.
 
-## Read and edit
+## Replace scene data
 
-The bulk accessors are const. Replace v1 calls to mutable `cloud.data()` with an explicit edit
-transaction:
+The bulk accessors are const. Replace v1 calls to mutable `cloud.data()` with a new validated
+value:
 
 ```cpp
-auto edit = scene.value().edit();
-auto scales = scene.value().scales();
-scales[0] = {2.0f, 2.0f, 2.0f};
-edit.set_scales(std::move(scales));
+melkor::SplatBufferInput replacement;
+replacement.positions = scene.value().positions();
+replacement.scales = scene.value().scales();
+replacement.rotations = scene.value().rotations();
+replacement.opacities = scene.value().opacities();
+replacement.sh = scene.value().sh();
+replacement.scales[0] = {2.0f, 2.0f, 2.0f};
 
-auto changed = edit.commit();
+auto changed = melkor::SplatData::create(std::move(replacement));
 if (!changed.has_value()) {
     // The original scene is unchanged.
 }
 ```
 
-For incremental construction, use `edit.reserve(count, budget)` and
-`edit.append(record, budget)`. Both account before allocating. A budget or validation failure
-leaves the transaction's logical contents unchanged. `commit()` is one-shot and revalidates all
-parallel lengths and canonical domains atomically.
+For incremental construction, collect each field in `SplatBufferInput`. Check resource limits
+before each allocation. Call `SplatData::create` after all fields are complete. A failed factory
+call does not change the original value.
 
 ## Spherical harmonics
 
@@ -69,8 +70,7 @@ color space, antialiasing flag, source format/profile/hash, and operations. The 
 `provenance_to_json` output is reproducible. Timestamps are `null`, and source paths are not part
 of the schema.
 
-## Backend types
+## Installed SDK boundary
 
-The stable installed boundary remains `melkor/c/melkor.h`. Backend-specific C++ types and the
-legacy mutable `GaussianCloud` are implementation details during the v2 backend migration and are
-not supported SDK contracts.
+The stable installed boundary is `melkor/c/melkor.h`.
+The project does not install `SplatData`, `GaussianCloud`, or another C++ model API.

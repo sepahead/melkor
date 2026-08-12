@@ -1,37 +1,29 @@
 #include "melkor/format/gltf_khr.hpp"
 
+#include <algorithm>
 #include <array>
 #include <cstring>
+#include <limits>
 
 namespace melkor::format::khr {
 
-const char* to_string(ColorSpace space) noexcept {
-    switch (space) {
-        case ColorSpace::srgb_rec709_display:
-            return "srgb_rec709_display";
-        case ColorSpace::lin_rec709_display:
-            return "lin_rec709_display";
-    }
-    return "srgb_rec709_display";
-}
-
-std::optional<ColorSpace> color_space_from_string(std::string_view s) noexcept {
-    if (s == "srgb_rec709_display") return ColorSpace::srgb_rec709_display;
-    if (s == "lin_rec709_display") return ColorSpace::lin_rec709_display;
-    return std::nullopt;
-}
-
 namespace {
 
-// Exact integer square root by increment: for a flat index f, find the largest d with d*d <= f.
-// The SH pyramid is tiny (degree <= 4 gives 25 coefficients), so this loop runs a handful of
-// times and never touches floating point -- there is no sqrt rounding boundary to get wrong.
+// Return the exact floor of the integer square root in bounded time.
 std::uint32_t integer_floor_sqrt(std::size_t f) noexcept {
-    std::uint32_t d = 0;
-    while (static_cast<std::size_t>(d + 1) * static_cast<std::size_t>(d + 1) <= f) {
-        ++d;
+    const std::size_t max_degree =
+        std::min<std::size_t>(f, std::numeric_limits<std::uint32_t>::max());
+    std::size_t low = 0;
+    std::size_t high = max_degree;
+    while (low < high) {
+        const std::size_t middle = low + (high - low + 1u) / 2u;
+        if (middle <= f / middle) {
+            low = middle;
+        } else {
+            high = middle - 1u;
+        }
     }
-    return d;
+    return static_cast<std::uint32_t>(low);
 }
 
 // Parses a run of ASCII digits starting at `pos` in `s`, into `out`, advancing `pos`. Returns
@@ -93,20 +85,24 @@ std::optional<ShAddress> parse_sh_attribute(std::string_view semantic) {
     // The coefficient index must be in range for the degree: n in [0, 2*degree]. A conforming
     // asset never breaks this; an adversarial one might, and mapping it into the pyramid would
     // otherwise read the wrong slot.
-    if (coef >= sh_coefficients_at_degree(degree)) {
+    if (static_cast<std::size_t>(coef) >= sh_coefficients_at_degree(degree)) {
         return std::nullopt;
     }
     return ShAddress{degree, coef};
 }
 
-ShAddress sh_flat_to_address(std::size_t flat_coef) noexcept {
+std::optional<ShAddress> sh_flat_to_address(std::size_t flat_coef) noexcept {
+    if (flat_coef >= sh_total_coefficients(kMaxCanonicalShDegree))
+        return std::nullopt;
     const std::uint32_t degree = integer_floor_sqrt(flat_coef);
     const std::uint32_t coef =
         static_cast<std::uint32_t>(flat_coef - static_cast<std::size_t>(degree) * degree);
     return ShAddress{degree, coef};
 }
 
-std::size_t sh_address_to_flat(ShAddress address) noexcept {
+std::optional<std::size_t> sh_address_to_flat(ShAddress address) noexcept {
+    if (address.coef >= sh_coefficients_at_degree(address.degree))
+        return std::nullopt;
     return static_cast<std::size_t>(address.degree) * address.degree + address.coef;
 }
 

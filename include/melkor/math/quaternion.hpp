@@ -25,7 +25,7 @@
 namespace melkor::math {
 
 // A 3x3 matrix in row-major order, double precision. Used for rotation and covariance.
-using Mat3 = std::array<double, 9>;   // [r0c0 r0c1 r0c2  r1c0 ...]
+using Mat3 = std::array<double, 9>;  // [r0c0 r0c1 r0c2  r1c0 ...]
 using Vec3 = std::array<double, 3>;
 
 // Canonical quaternion, component order x, y, z, w.
@@ -41,14 +41,14 @@ struct Quat {
 namespace tol {
 // Below this norm a quaternion carries no usable direction and is rejected outright.
 constexpr double kQuatRejectNorm = 1e-12;
-// Within this of unit length, a quaternion is renormalised silently (an info-level event).
+// Within this of unit length, a quaternion is renormalized silently (an info-level event).
 constexpr double kQuatRenormalize = 1e-3;
-// Minimum positive scale, in metres. A scale at or below this is degenerate.
-constexpr double kMinScale = 1e-12;
 }  // namespace tol
 
 // The identity rotation.
-constexpr Quat identity_quat() { return Quat{0.0, 0.0, 0.0, 1.0}; }
+constexpr Quat identity_quat() {
+    return Quat{0.0, 0.0, 0.0, 1.0};
+}
 
 double norm(const Quat& q);
 
@@ -64,10 +64,9 @@ bool is_unit(const Quat& q);
 // should have normalized it. The matrix is orthonormal within floating tolerance.
 Mat3 to_matrix(const Quat& q);
 
-// Recovers a quaternion from a rotation matrix, using the numerically stable branch selection
-// that avoids catastrophic cancellation near a 180-degree rotation (the naive `w = sqrt(1 +
-// trace)/2` formula loses all precision when the trace approaches -1). Sign is canonicalised so
-// that w >= 0, which makes serialisation deterministic; q and -q are the same rotation.
+// Recovers a quaternion from a proper rotation matrix, using stable branch selection.
+// The function rejects a scaled, skewed, or reflecting matrix.
+// It uses one canonical sign, including rotations whose `w` value is zero.
 Result<Quat> from_matrix(const Mat3& m);
 
 // Builds a quaternion from an orthonormal right-handed frame given as three column axes. Used

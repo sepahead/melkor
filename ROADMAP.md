@@ -1,97 +1,93 @@
 # Roadmap
 
-This roadmap lists only work that is scheduled, in progress, or explicitly deferred. It is not a
-wish list. An item appears under `v2.0.0` only when it is a release blocker for that version.
+Melkor `2.0.0-dev` has no supported production release.
+The existing `v2.0.0-rc.1` tag has no production support.
 
-Current state: **v2 hardening in progress. No production binary release is currently supported.**
-The `1.x` releases remain downloadable but are not the supported production line, and `main` is
-development software.
+This roadmap defines the product boundary and the remaining release outcomes.
+The [production blocker register](docs/audit/production-blockers.md) tracks finding-level evidence.
 
-## v2.0.0
+## Product boundary
 
-This release is the first one that meets the program's production-readiness requirements. Its full
-blocker register is
-[`docs/audit/production-blockers.md`](docs/audit/production-blockers.md). The
-production-hardening blueprint contains its master release checklist.
+Melkor is a Gaussian-splat asset interoperability toolkit.
+The native core inspects and converts supported PLY, SPZ, glTF, and GLB assets.
 
-The product boundary for this release is deliberately narrow. Melkor v2 is a **dependable asset
-interoperability core**, not an umbrella repository that appears to natively provide every
-reconstruction model.
+The core includes:
 
-**Core, and supported.**
+- Explicit format profiles
+- Canonical Gaussian data and metadata
+- Bounded readers and writers
+- Stable diagnostics and JSON reports
+- Explicit conversion-loss approval
+- Atomic output replacement
+- A narrow C ABI
 
-- Inspect PLY, SPZ, glTF, and GLB assets without initializing a GPU.
-- Resolve explicit semantic profiles rather than guessing activation domains or quaternion order.
-- Validate canonical invariants and enforce shared resource limits.
-- Normalize coordinate frame, units, scale domain, opacity domain, quaternion layout, SH basis
-  and order, and color space.
-- Convert between supported PLY, SPZ, and glTF representations with a machine-readable loss
-  report.
-- Initialize degree-0 Gaussians from mesh vertices or deterministic area-weighted triangle
-  samples.
-- An installable C ABI and C++17 SDK, a stable `melkor` CLI, and a `melkor3d` Python package.
-- A local-only web viewer and a signed desktop package.
-- Complete release artifacts: checksums, SBOMs, signatures, attestations, and clean-room install
-  evidence.
+The local viewer is a separate product surface.
+It uses pinned SparkJS and three.js files.
 
-**Deliberately excluded from v2.0.0.** The project did not forget these items. They are out of
-scope by design. Adding them would not make the product more dependable.
+Development adapters can invoke external reconstruction tools.
+An adapter does not make an external tool part of Melkor.
 
-- A native learned scene-reconstruction model.
-- Automatic download or execution of unreviewed model code.
-- Any claim to select the globally best reconstruction method.
-- Network URL loading in core file readers or in the viewer by default.
-- Silent coordinate or profile inference when confidence is ambiguous.
-- A stable ABI for C++ standard-library types.
-- Dynamic third-party plugins loaded from untrusted directories.
-- Transparent fallback from an unavailable GPU path to a semantically different CPU algorithm.
+## v2.0.0 release outcomes
 
-## Post-v2.0
+The first supported release must complete these outcomes:
 
-Candidate work, not committed. Each item needs its own design and evidence before it is
-scheduled.
+1. Freeze and document the CLI, C ABI, schemas, and profile identifiers.
+2. Close every P0 and P1 production blocker.
+3. Validate each supported format with licensed conformance fixtures.
+4. Run the official glTF validator on each generated GLB fixture.
+5. Freeze the declared SPZ v1-v3 and glTF release-candidate compatibility limits.
+6. Pass clean native builds on each claimed operating system.
+7. Pass sanitizer, fuzz, install, relocation, and hostile-input checks at the release commit.
+8. Publish checksums, SBOMs, signatures, attestations, and clean-install evidence.
+9. Publish a support matrix that names exact operating systems, compilers, and formats.
+10. Obtain the independent review required by [GOVERNANCE.md](GOVERNANCE.md).
 
-- Windows ARM64 and a native CUDA Windows package, if repeatable hardware qualification exists.
-- Optional glTF compression and packing extensions for Gaussian attributes, once the pinned
-  specification permits them and conformance evidence exists.
-- An SPZ-in-glTF adapter path, if such an extension exists in the pinned ecosystem revision.
-- A WebGPU renderer path in the viewer, promoted from experimental only after it passes the
-  target browser matrix.
-- A `--replace-input` wrapper that writes and validates a sibling temporary and atomically
-  replaces the input only after explicit confirmation.
-- An anisotropic scale mode for narrow triangles in `mesh-init --mode surface`.
+The project can release the viewer separately from the native core.
+An unsigned developer bundle cannot satisfy a production desktop claim.
 
-## Experimental
+## Excluded from v2.0.0
 
-Built off by default, excluded from production claims, and not covered by the support policy.
-An experimental feature may be promoted, kept experimental, or removed — being listed here is not
-a commitment to ship it.
+These capabilities are outside the v2 native core:
 
-- **`melkor complete --method geometric-gap-fill`** — a bounded deterministic geometric
-  interpolation of sparse local neighborhoods. It is not learned reconstruction and it is not a
-  replacement for gradient-based training densification. It stays experimental unless its
-  false-bridge rate, transmittance behavior, and useful operating region are demonstrated by
-  benchmark.
-- **Metal and CUDA backends** — compiled but not production-published until exact-SHA hardware
-  parity and performance evidence exists. A compile-only CI job is not hardware qualification.
-- **Feedforward and depth adapters** (for example Depth Anything 3) — external, and blocked on
-  license review of both code and weights, hash-pinned weights, explicit user acceptance, and
-  reference tests for output semantics.
-- **Trainer adapters** (for example OpenSplat, gsplat) — external, and "supported" only once an
-  exact pinned configuration passes an end-to-end test.
+- Gaussian training from photographs
+- A learned reconstruction model
+- Mesh-to-Gaussian initialization
+- Scene completion or densification
+- GPU compute backends
+- A Python package
+- A stable C++ ABI
+- Runtime plugin loading
+- Network URL loading
+- Automatic model or weight downloads
 
-## What "supported" means
+The project must not retain a dormant public API for an excluded capability.
+It can add a capability later through a separate design and compatibility review.
 
-A capability is supported only if all conditions below are true. Anything else is labeled
-experimental, built off by default, and excluded from production claims.
+## Post-v2 candidates
 
-1. It has a documented public contract.
-2. It is enabled in at least one distributed artifact.
-3. It has positive and negative automated tests.
-4. It is included in the compatibility matrix.
-5. It has a named owner.
-6. Its dependencies and license are recorded.
-7. It passes the applicable release platform and hardware matrix.
-8. Its failures produce stable diagnostics.
-9. It is covered by the security policy.
-10. It has a support and deprecation policy.
+These items have no release commitment:
+
+- SPZ revisions after version 3
+- A shared WebAssembly inspection core for the viewer
+- A typed, modular viewer application
+- A Python package over the stable C ABI
+- Additional Gaussian-splat glTF extensions
+- A WebGPU renderer adapter
+- Windows ARM64 packages
+
+Each candidate needs a public contract, threat analysis, dependency record, and conformance evidence.
+
+## Meaning of support
+
+A capability is supported only when all conditions are true:
+
+1. A public contract defines its input, output, and failure behavior.
+2. A distributed artifact enables it.
+3. Positive, boundary, and hostile-input tests cover it.
+4. The release support matrix names it.
+5. Its dependencies and licenses are recorded.
+6. Its release platforms pass at the exact release commit.
+7. Stable diagnostics identify its failures.
+8. The security and deprecation policies cover it.
+
+Source code, a compile-only path, or a passing unit test does not establish support by itself.

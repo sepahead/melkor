@@ -1,6 +1,6 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 960 620" role="img" aria-labelledby="t d">
-  <title id="t">Melkor resource limit profiles</title>
-  <desc id="d">Bar chart comparing the web, desktop, and server limits profiles across five limits: max splats, max input bytes, max memory bytes, max temp bytes, and max decompression ratio. Bars are scaled within each row; exact values are printed on every bar.</desc>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 960 620" role="img" aria-labelledby="limits-title limits-description">
+  <title id="limits-title">Melkor resource limit profiles</title>
+  <desc id="limits-description">The chart compares five web, desktop, and server limits. Each row uses its own scale and shows exact values.</desc>
   <style>
     text { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; fill: #c9d1d9; }
     .h1 { font-size: 14px; fill: #e6edf3; letter-spacing: 2.5px; }
@@ -14,7 +14,7 @@
   <rect x="0.5" y="0.5" width="959" height="619" rx="16" fill="#0d1117" stroke="#2b333d"/>
 
   <text class="h1" x="40" y="44">MELKOR &#183; RESOURCE LIMIT PROFILES</text>
-  <text class="h2" x="40" y="64">UNTRUSTED INPUT IS REFUSED BY POLICY, NOT BY BAD_ALLOC</text>
+  <text class="h2" x="40" y="64">PROFILE DEFAULTS AND IMPLEMENTATION CEILINGS</text>
 
   <g class="leg">
     <rect x="660" y="30" width="10" height="10" rx="2" fill="#60a5fa"/>
@@ -83,8 +83,8 @@
   <g>
     <rect x="40" y="504" width="880" height="66" rx="12" fill="#10151b" stroke="#2b333d"/>
     <text class="sub" x="64" y="530" fill="#fbbf24">HARD CEILINGS NO PROFILE CAN EXCEED</text>
-    <text class="sub" x="64" y="550">splats 4e9 &#183; mesh vertices 4e9 &#183; triangles 8e9 &#183; image dim 2^20 &#183; scene depth 4096 &#183; threads 1024 &#183; zero limit fails validation (MK0202)</text>
+    <text class="sub" x="64" y="550">splats 4e9 &#183; structural objects 4e9 &#183; scene depth 4096 &#183; zero limit fails validation (MK0202)</text>
   </g>
 
-  <text class="sub" x="40" y="600">bars scaled within each row &#183; web deadline 60 s, desktop and server none &#183; source: src/core/limits.cpp</text>
+  <text class="sub" x="40" y="600">bars use one scale per row &#183; web deadline 60 s &#183; source: src/core/limits.cpp</text>
 </svg>

@@ -46,6 +46,10 @@ The wrapper runs these stages:
 4. It runs `colmap global_mapper`.
 5. It checks the three required sparse-model files.
 
+The published `images/` entries are absolute symbolic links.
+Keep the source image directory at its original path.
+Copy the images when you need a portable project.
+
 The sparse model is in `OUTPUT_DIR/sparse/0/` or `OUTPUT_DIR/sparse/`.
 The wrapper requires these files:
 

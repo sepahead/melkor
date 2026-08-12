@@ -2,26 +2,66 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://melkor.dev/schemas/loss-report-v1.json",
   "title": "Melkor conversion loss report v1",
-  "description": "The complete, machine-readable account of what a format conversion lost. Every committed conversion emits one, including a zero-loss report, so automation never has to infer whether reporting was omitted. Losses are distinct from validation diagnostics: a malformed input or a resource-limit failure is an error, not a loss.",
+  "description": "The complete, machine-readable account of what a format conversion lost. Each successful conversion emits one, including a zero-loss report, so automation never has to infer whether reporting was omitted. Losses are distinct from validation diagnostics: a malformed input or a resource-limit failure is an error, not a loss.",
+  "$defs": {
+    "lossCode": {
+      "type": "string",
+      "enum": [
+        "LOSS_SH_DEGREE_TRUNCATED",
+        "LOSS_SH_COEFFICIENTS_DROPPED",
+        "LOSS_SH_COEFFICIENTS_CLAMPED",
+        "LOSS_SH_ROTATION_NOT_APPLIED",
+        "LOSS_SCENE_GRAPH_FLATTENED",
+        "LOSS_NODE_NAME_DROPPED",
+        "LOSS_INSTANCE_EXPANDED",
+        "LOSS_MATERIAL_APPROXIMATED",
+        "LOSS_TEXTURE_BAKED",
+        "LOSS_ANTIALIASING_METADATA_DROPPED",
+        "LOSS_COLOR_SPACE_ASSUMED",
+        "LOSS_COLOR_SPACES_CONFLICT",
+        "LOSS_COLOR_CLAMPED",
+        "LOSS_COLOR_SPACE_METADATA_DROPPED",
+        "LOSS_COORDINATE_METADATA_DROPPED",
+        "LOSS_PROVENANCE_DROPPED",
+        "LOSS_ATTRIBUTION_DROPPED",
+        "LOSS_QUANTIZATION_APPLIED",
+        "LOSS_OPACITY_CLAMPED",
+        "LOSS_SCALE_CLAMPED",
+        "LOSS_NONFINITE_REPAIRED",
+        "LOSS_INVALID_SPLAT_DROPPED",
+        "LOSS_UNKNOWN_PROPERTY_DROPPED",
+        "LOSS_METADATA_DROPPED",
+        "LOSS_VERTEX_NORMALS_DROPPED",
+        "LOSS_QUATERNION_NORMALIZED",
+        "LOSS_EXTENSION_DROPPED",
+        "LOSS_EXTENSION_DECLARATION_DROPPED",
+        "LOSS_GLTF_CONTENT_DROPPED",
+        "LOSS_PRECISION_REDUCED",
+        "LOSS_GAUSSIAN_ATTRIBUTES_GENERATED"
+      ]
+    }
+  },
   "type": "object",
   "additionalProperties": false,
-  "required": ["schema_version", "items"],
+  "required": ["schema_version", "input", "output", "items", "approved_codes"],
   "properties": {
     "schema_version": { "const": 1 },
     "input": {
       "type": "object",
       "additionalProperties": false,
+      "required": ["format", "profile"],
       "properties": {
-        "format": { "type": "string" },
-        "profile": { "type": "string" }
+        "format": { "type": "string", "minLength": 1 },
+        "profile": { "type": "string", "minLength": 1 }
       }
     },
     "output": {
       "type": "object",
       "additionalProperties": false,
+      "required": ["format", "profile"],
       "properties": {
-        "format": { "type": "string" },
-        "profile": { "type": "string" }
+        "format": { "type": "string", "minLength": 1 },
+        "profile": { "type": "string", "minLength": 1 }
       }
     },
     "items": {
@@ -30,11 +70,17 @@
       "items": {
         "type": "object",
         "additionalProperties": false,
-        "required": ["code", "severity", "affected_splats"],
+        "required": [
+          "code",
+          "severity",
+          "source_feature",
+          "target_constraint",
+          "affected_splats",
+          "remediation"
+        ],
         "properties": {
           "code": {
-            "type": "string",
-            "pattern": "^LOSS_[A-Z_]+$",
+            "$ref": "#/$defs/lossCode",
             "description": "A stable loss code. Its meaning never changes across the 2.x line."
           },
           "severity": {
@@ -42,17 +88,78 @@
             "enum": ["info", "warning", "severe", "fatal"],
             "description": "info/warning are recorded and pass; severe blocks unless the exact code is approved; fatal always blocks and cannot be approved."
           },
-          "source_feature": { "type": "string" },
-          "target_constraint": { "type": "string" },
+          "source_feature": { "type": "string", "minLength": 1 },
+          "target_constraint": { "type": "string", "minLength": 1 },
           "affected_splats": { "type": "integer", "minimum": 0 },
-          "remediation": { "type": "string" }
-        }
+          "remediation": { "type": "string", "minLength": 1 }
+        },
+        "allOf": [
+          {
+            "if": {
+              "properties": {
+                "code": {
+                  "enum": [
+                    "LOSS_COLOR_CLAMPED",
+                    "LOSS_QUANTIZATION_APPLIED",
+                    "LOSS_OPACITY_CLAMPED",
+                    "LOSS_PRECISION_REDUCED"
+                  ]
+                }
+              },
+              "required": ["code"]
+            },
+            "then": {
+              "properties": {
+                "severity": { "enum": ["warning", "severe", "fatal"] }
+              }
+            }
+          },
+          {
+            "if": {
+              "properties": {
+                "code": {
+                  "enum": [
+                    "LOSS_SH_DEGREE_TRUNCATED",
+                    "LOSS_SH_COEFFICIENTS_DROPPED",
+                    "LOSS_SH_COEFFICIENTS_CLAMPED",
+                    "LOSS_SH_ROTATION_NOT_APPLIED",
+                    "LOSS_MATERIAL_APPROXIMATED",
+                    "LOSS_TEXTURE_BAKED",
+                    "LOSS_ANTIALIASING_METADATA_DROPPED",
+                    "LOSS_COLOR_SPACE_ASSUMED",
+                    "LOSS_COLOR_SPACES_CONFLICT",
+                    "LOSS_COLOR_SPACE_METADATA_DROPPED",
+                    "LOSS_COORDINATE_METADATA_DROPPED",
+                    "LOSS_ATTRIBUTION_DROPPED",
+                    "LOSS_SCALE_CLAMPED",
+                    "LOSS_NONFINITE_REPAIRED",
+                    "LOSS_INVALID_SPLAT_DROPPED",
+                    "LOSS_UNKNOWN_PROPERTY_DROPPED",
+                    "LOSS_VERTEX_NORMALS_DROPPED",
+                    "LOSS_EXTENSION_DROPPED",
+                    "LOSS_GLTF_CONTENT_DROPPED",
+                    "LOSS_GAUSSIAN_ATTRIBUTES_GENERATED"
+                  ]
+                }
+              },
+              "required": ["code"]
+            },
+            "then": {
+              "properties": {
+                "severity": { "enum": ["severe", "fatal"] }
+              }
+            }
+          }
+        ]
       }
     },
     "approved_codes": {
       "type": "array",
       "description": "The exact loss codes the caller approved (e.g. via --allow-loss). Recorded in the committed report so a downstream reviewer can see which losses were deliberately accepted.",
-      "items": { "type": "string", "pattern": "^LOSS_[A-Z_]+$" }
+      "uniqueItems": true,
+      "items": {
+        "$ref": "#/$defs/lossCode"
+      }
     }
   }
 }

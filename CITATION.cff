@@ -1,0 +1,19 @@
+cff-version: 1.2.0
+message: "If you use Melkor, cite this software."
+title: "Melkor"
+type: software
+version: "2.0.0-dev"
+authors:
+  - family-names: "Mahmoudian"
+    given-names: "Sepehr"
+abstract: >-
+  Melkor validates and converts 3D Gaussian splat data with explicit semantic,
+  loss, and resource-limit contracts.
+repository-code: "https://github.com/sepahead/melkor"
+url: "https://github.com/sepahead/melkor"
+license: MIT
+keywords:
+  - 3D Gaussian splatting
+  - glTF
+  - PLY
+  - SPZ

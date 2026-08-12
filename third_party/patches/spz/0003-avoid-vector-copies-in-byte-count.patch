@@ -1,0 +1,20 @@
+Subject: [PATCH 0003] Avoid full vector copies when counting serialized bytes
+
+The `countBytes` helper takes each vector by value. Every serialization call
+therefore copies one complete SPZ attribute vector only to read its size.
+Large assets incur avoidable allocation, memory use, and copy time.
+
+Pass the vector by const reference. This change does not alter the wire format.
+
+Upstream status: not submitted.
+
+Applies to: nianticlabs/spz @ 2cf0be04d86b5f9632d9073ccbbe3b1e6a609f31 (v2.1.0)
+
+--- a/src/cc/load-spz.cc
++++ b/src/cc/load-spz.cc
+@@ -99,4 +99,4 @@ float invSigmoid(float x) {
+ template <typename T>
+-size_t countBytes(std::vector<T> vec) {
++size_t countBytes(const std::vector<T>& vec) {
+   return vec.size() * sizeof(vec[0]);
+ }

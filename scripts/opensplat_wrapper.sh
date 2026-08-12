@@ -4,7 +4,14 @@ set -euo pipefail
 # Run one user-supplied OpenSplat binary against a validated COLMAP project.
 # This wrapper does not install OpenSplat or simulate unsupported multi-GPU modes.
 
-VERSION="2.0.0"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+REPO_DIR="$(dirname "$SCRIPT_DIR")"
+[[ -f "$REPO_DIR/VERSION" ]] || { printf '[ERROR] VERSION is missing\n' >&2; exit 2; }
+VERSION="$(<"$REPO_DIR/VERSION")"
+[[ "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?(\+[0-9A-Za-z.-]+)?$ ]] || {
+    printf '[ERROR] VERSION is invalid\n' >&2
+    exit 2
+}
 PROJECT_DIR=""
 IMAGES_DIR=""
 OUTPUT_FILE="output.ply"
@@ -133,6 +140,16 @@ while [[ $# -gt 0 ]]; do
     esac
 done
 
+if [[ "$HAS_EXTRA_ARGS" == true ]]; then
+    for argument in "${EXTRA_ARGS[@]}"; do
+        case "$argument" in
+            -o|-o?*|--output|--output=*)
+                fail "Extra arguments must not replace the staged output path"
+                ;;
+        esac
+    done
+fi
+
 [[ -n "$PROJECT_DIR" ]] || fail "Missing COLMAP_PROJECT"
 [[ -d "$PROJECT_DIR" ]] || fail "COLMAP project does not exist: $PROJECT_DIR"
 [[ "$ITERATIONS" =~ ^[1-9][0-9]*$ ]] || fail "Iterations must be a positive integer"
@@ -166,7 +183,13 @@ fi
     fail "OpenSplat is unavailable. Set MELKOR_OPENSPLAT_BIN or use --opensplat PATH."
 OPENSPLAT_BIN="$(cd "$(dirname "$OPENSPLAT_BIN")" && pwd)/$(basename "$OPENSPLAT_BIN")"
 
-if [[ -e "$OUTPUT_FILE" && "$FORCE" == false ]]; then
+if [[ -d "$OUTPUT_FILE" ]]; then
+    fail "The output path is a directory: $OUTPUT_FILE"
+fi
+if [[ (-e "$OUTPUT_FILE" || -L "$OUTPUT_FILE") && ! -f "$OUTPUT_FILE" && ! -L "$OUTPUT_FILE" ]]; then
+    fail "The output path is not a regular file: $OUTPUT_FILE"
+fi
+if [[ (-e "$OUTPUT_FILE" || -L "$OUTPUT_FILE") && "$FORCE" == false ]]; then
     fail "Output already exists. Use --force to permit replacement: $OUTPUT_FILE"
 fi
 
@@ -205,14 +228,14 @@ fi
 
 if [[ "$DRY_RUN" == true ]]; then
     command=("$OPENSPLAT_BIN" "$WORK_DIR" -n "$ITERATIONS" -o "<temporary-output>.ply")
-    if [[ "$HAS_EXTRA_ARGS" == true ]]; then
-        command+=("${EXTRA_ARGS[@]}")
-    fi
     printf 'DRY RUN:'
     if [[ -n "$GPU_ID" ]]; then
         printf ' CUDA_VISIBLE_DEVICES=%q' "$GPU_ID"
     fi
     printf ' %q' "${command[@]}"
+    if [[ "$HAS_EXTRA_ARGS" == true ]]; then
+        printf ' -- <%d upstream arguments withheld>' "${#EXTRA_ARGS[@]}"
+    fi
     printf '\n'
     exit 0
 fi
@@ -221,7 +244,24 @@ output_parent="$(dirname "$OUTPUT_FILE")"
 mkdir -p "$output_parent"
 output_parent="$(cd "$output_parent" && pwd)"
 output_name="$(basename "$OUTPUT_FILE")"
+[[ "$output_name" != "." && "$output_name" != ".." ]] || fail "Invalid output filename"
+case "$output_name" in
+    *.[Pp][Ll][Yy]) ;;
+    *) fail "The output filename must end in .ply" ;;
+esac
 OUTPUT_FILE="$output_parent/$output_name"
+case "$OUTPUT_FILE" in
+    "$PROJECT_DIR"|"$PROJECT_DIR"/*)
+        fail "The output file must stay outside the COLMAP project"
+        ;;
+esac
+if [[ -n "$IMAGES_DIR" ]]; then
+    case "$OUTPUT_FILE" in
+        "$IMAGES_DIR"|"$IMAGES_DIR"/*)
+            fail "The output file must stay outside the image directory"
+            ;;
+    esac
+fi
 TEMP_OUTPUT_DIR="$(mktemp -d "$output_parent/.melkor-opensplat.XXXXXX")"
 staged_output="$TEMP_OUTPUT_DIR/result.ply"
 command=("$OPENSPLAT_BIN" "$WORK_DIR" -n "$ITERATIONS" -o "$staged_output")
@@ -232,6 +272,17 @@ if [[ -n "$GPU_ID" ]]; then
     export CUDA_VISIBLE_DEVICES="$GPU_ID"
 fi
 "${command[@]}"
-[[ -s "$staged_output" ]] || fail "OpenSplat did not create a nonempty output file"
-mv -f -- "$staged_output" "$OUTPUT_FILE"
+[[ -f "$staged_output" && ! -L "$staged_output" && -s "$staged_output" ]] || \
+    fail "OpenSplat did not create a nonempty regular output file"
+if [[ -d "$OUTPUT_FILE" ]] || \
+   [[ (-e "$OUTPUT_FILE" || -L "$OUTPUT_FILE") && ! -f "$OUTPUT_FILE" && ! -L "$OUTPUT_FILE" ]]; then
+    fail "The output path changed to an unsupported object during processing"
+fi
+if [[ (-e "$OUTPUT_FILE" || -L "$OUTPUT_FILE") && "$FORCE" == false ]]; then
+    fail "Output appeared during processing: $OUTPUT_FILE"
+fi
+publish_args=("$staged_output" "$OUTPUT_FILE")
+[[ "$FORCE" == true ]] && publish_args+=(--replace)
+python3 "$REPO_DIR/tools/atomic_publish.py" "${publish_args[@]}" || \
+    fail "The output file could not be published atomically"
 log "OpenSplat completed: $OUTPUT_FILE"

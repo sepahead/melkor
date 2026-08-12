@@ -16,11 +16,14 @@
 #ifndef MELKOR_FORMAT_GLTF_ACCESSOR_HPP
 #define MELKOR_FORMAT_GLTF_ACCESSOR_HPP
 
+#include "melkor/budget.hpp"
 #include "melkor/error.hpp"
 
+#include <array>
 #include <cstddef>
 #include <cstdint>
 #include <optional>
+#include <utility>
 #include <vector>
 
 namespace melkor::format::gltf {
@@ -36,18 +39,21 @@ enum class ComponentType : int {
     f32 = 5126,  // FLOAT
 };
 
-// glTF element types, by their component count.
+// glTF element types. Matrix types can appear in a valid document.
 enum class ElementType : std::uint8_t {
-    scalar = 1,
-    vec2 = 2,
-    vec3 = 3,
-    vec4 = 4,
+    scalar,
+    vec2,
+    vec3,
+    vec4,
+    mat2,
+    mat3,
+    mat4,
 };
 
 // Size of one component in bytes, or 0 for an unrecognized value.
 std::size_t component_size(ComponentType type) noexcept;
 
-// Number of components in one element (1/2/3/4).
+// Return the vector component count. Return zero for a matrix or invalid type.
 std::size_t component_count(ElementType type) noexcept;
 
 // Maps a raw glTF `componentType` integer to the enum, if recognized.
@@ -58,9 +64,50 @@ struct AccessorView {
     ComponentType component = ComponentType::f32;
     ElementType element = ElementType::scalar;
     bool normalized = false;
-    std::size_t count = 0;         // number of elements
-    std::size_t byte_offset = 0;   // start of the first element within the buffer
-    std::size_t byte_stride = 0;   // 0 means tightly packed (component_size * component_count)
+    std::size_t count = 0;        // number of elements
+    std::size_t byte_offset = 0;  // start of the first element within the buffer
+    std::size_t byte_stride = 0;  // 0 means tightly packed (component_size * component_count)
+};
+
+class DecodedAccessor {
+private:
+    // Later members are destroyed first. Release the charge after the values are destroyed.
+    Budget::Charge retained_memory_;
+    std::vector<float> values_;
+    std::array<double, 4> raw_minimum_{};
+    std::array<double, 4> raw_maximum_{};
+    std::size_t raw_component_count_ = 0;
+
+public:
+    DecodedAccessor(std::vector<float> values, Budget::Charge retained_memory = {},
+                    std::array<double, 4> raw_minimum = {}, std::array<double, 4> raw_maximum = {},
+                    std::size_t raw_component_count = 0) noexcept
+        : retained_memory_(std::move(retained_memory)), values_(std::move(values)),
+          raw_minimum_(raw_minimum), raw_maximum_(raw_maximum),
+          raw_component_count_(raw_component_count) {}
+
+    DecodedAccessor(const DecodedAccessor&) = delete;
+    DecodedAccessor& operator=(const DecodedAccessor&) = delete;
+    DecodedAccessor(DecodedAccessor&&) noexcept = default;
+    DecodedAccessor& operator=(DecodedAccessor&& other) noexcept {
+        if (this == &other)
+            return *this;
+        values_ = std::move(other.values_);
+        raw_minimum_ = other.raw_minimum_;
+        raw_maximum_ = other.raw_maximum_;
+        raw_component_count_ = other.raw_component_count_;
+        retained_memory_ = std::move(other.retained_memory_);
+        return *this;
+    }
+
+    bool empty() const noexcept { return values_.empty(); }
+    std::size_t size() const noexcept { return values_.size(); }
+    const float& operator[](std::size_t index) const noexcept { return values_[index]; }
+    const std::vector<float>& values() const noexcept { return values_; }
+    std::uint64_t retained_memory_bytes() const noexcept { return retained_memory_.amount(); }
+    std::size_t raw_component_count() const noexcept { return raw_component_count_; }
+    double raw_minimum(std::size_t component) const noexcept { return raw_minimum_[component]; }
+    double raw_maximum(std::size_t component) const noexcept { return raw_maximum_[component]; }
 };
 
 // Decodes an accessor into a flat, row-major vector of `count * component_count` floats:
@@ -71,8 +118,12 @@ struct AccessorView {
 //     and every element's bytes are validated to lie within `buffer_size`.
 // Fails with a diagnostic (never an out-of-bounds read) on an unrecognized type, a zero-size
 // component, or any element that would fall outside the buffer.
-Result<std::vector<float>> decode_accessor(const AccessorView& view, const std::uint8_t* buffer,
-                                           std::size_t buffer_size);
+Result<DecodedAccessor> decode_accessor(const AccessorView& view, const std::uint8_t* buffer,
+                                        std::size_t buffer_size);
+
+// Decode with resource limits and control checks. The result owns its memory charge.
+Result<DecodedAccessor> decode_accessor(const AccessorView& view, const std::uint8_t* buffer,
+                                        std::size_t buffer_size, const OperationContext& context);
 
 }  // namespace melkor::format::gltf
 

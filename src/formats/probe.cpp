@@ -6,14 +6,14 @@ namespace melkor {
 
 const char* to_string(Confidence confidence) noexcept {
     switch (confidence) {
-        case Confidence::none:
-            return "none";
-        case Confidence::low:
-            return "low";
-        case Confidence::high:
-            return "high";
-        case Confidence::certain:
-            return "certain";
+    case Confidence::none:
+        return "none";
+    case Confidence::low:
+        return "low";
+    case Confidence::high:
+        return "high";
+    case Confidence::certain:
+        return "certain";
     }
     return "none";
 }
@@ -43,7 +43,7 @@ ContainerProbe probe_container(const std::uint8_t* data, std::size_t size) {
     }
 
     // PLY: the ASCII header begins with "ply" followed by a newline. Distinctive.
-    if (starts_with(data, size, "ply\n", 4) || starts_with(data, size, "ply\r", 4)) {
+    if (starts_with(data, size, "ply\n", 4) || starts_with(data, size, "ply\r\n", 5)) {
         result.format = FormatId::ply;
         result.confidence = Confidence::high;
         result.evidence.emplace_back("PLY header 'ply' at offset 0");
@@ -54,13 +54,15 @@ ContainerProbe probe_container(const std::uint8_t* data, std::size_t size) {
     // things, so this is only a low-confidence signal that a deeper structural probe must confirm.
     {
         std::size_t i = 0;
-        while (i < size && (data[i] == ' ' || data[i] == '\t' || data[i] == '\n' || data[i] == '\r')) {
+        while (i < size &&
+               (data[i] == ' ' || data[i] == '\t' || data[i] == '\n' || data[i] == '\r')) {
             ++i;
         }
         if (i < size && data[i] == '{') {
             result.format = FormatId::gltf;
             result.confidence = Confidence::low;
-            result.evidence.emplace_back("leading '{' suggests JSON glTF; needs structural confirmation");
+            result.evidence.emplace_back(
+                "leading '{' suggests JSON glTF; needs structural confirmation");
             return result;
         }
     }
@@ -78,22 +80,22 @@ ContainerProbe probe_container(const std::uint8_t* data, std::size_t size) {
         return result;
     }
 
-    result.evidence.emplace_back("no recognised container magic");
+    result.evidence.emplace_back("no recognized container magic");
     return result;
 }
 
 bool suffix_matches(FormatId probed, const std::string& suffix_lowercase) {
     switch (probed) {
-        case FormatId::ply:
-            return suffix_lowercase == ".ply";
-        case FormatId::spz:
-            return suffix_lowercase == ".spz";
-        case FormatId::gltf:
-            return suffix_lowercase == ".gltf";
-        case FormatId::glb:
-            return suffix_lowercase == ".glb";
-        case FormatId::unknown:
-            return false;
+    case FormatId::ply:
+        return suffix_lowercase == ".ply";
+    case FormatId::spz:
+        return suffix_lowercase == ".spz";
+    case FormatId::gltf:
+        return suffix_lowercase == ".gltf";
+    case FormatId::glb:
+        return suffix_lowercase == ".glb";
+    case FormatId::unknown:
+        return false;
     }
     return false;
 }

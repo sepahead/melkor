@@ -1,6 +1,6 @@
 // Tests for the canonical scene model's invariants (P0-06).
 //
-// The pre-v2 model let a default splat carry uninitialised scalars, an SH degree outside the
+// The pre-v2 model let a default splat carry uninitialized scalars, an SH degree outside the
 // valid range, and arrays resized out of step through a mutable data(). Each test below is one
 // of those failure modes, asserting the new model refuses it at construction with a diagnostic
 // that names the offending splat and field.
@@ -80,16 +80,20 @@ void test_nonfinite_position_is_rejected() {
     CHECK(data.diagnostics()[0].context.count("splat_index") == 1);
 }
 
-void test_nonpositive_scale_is_rejected() {
+void test_zero_scale_is_preserved_and_negative_scale_is_rejected() {
     auto in = valid_input(2);
-    in.scales[0].z = 0.0f;  // a zero scale is degenerate
+    in.scales[0].z = 0.0f;
     auto zero = SplatData::create(std::move(in));
-    CHECK(!zero.has_value());
-    CHECK(zero.diagnostics()[0].code == "MK1505_NONPOSITIVE_SCALE");
+    CHECK(zero.has_value());
+    if (zero.has_value())
+        CHECK(zero.value().scales()[0].z == 0.0f);
 
     auto in2 = valid_input(1);
-    in2.scales[0].x = -1.0f;  // a negative scale is meaningless for a Gaussian
-    CHECK(!SplatData::create(std::move(in2)).has_value());
+    in2.scales[0].x = -1.0f;
+    auto negative = SplatData::create(std::move(in2));
+    CHECK(!negative.has_value());
+    if (!negative.diagnostics().empty())
+        CHECK(negative.diagnostics()[0].code == "MK1505_NEGATIVE_SCALE");
 }
 
 void test_opacity_out_of_range_is_rejected() {
@@ -117,6 +121,19 @@ void test_non_unit_quaternion_is_rejected() {
     CHECK(!SplatData::create(std::move(in2)).has_value());
 }
 
+void test_near_unit_quaternion_is_normalized() {
+    auto in = valid_input(1);
+    in.rotations[0] = Quatf{0.0f, 0.0f, 0.7070f, 0.7070f};
+    auto data = SplatData::create(std::move(in));
+    CHECK(data.has_value());
+    if (!data.has_value())
+        return;
+
+    const Quatf& q = data.value().rotations()[0];
+    const double norm = std::hypot(std::hypot(q.x, q.y), std::hypot(q.z, q.w));
+    CHECK(std::fabs(norm - 1.0) < 1e-6);
+}
+
 // ---------------------------------------------------------------------------
 // ShBuffer
 // ---------------------------------------------------------------------------
@@ -132,7 +149,7 @@ void test_sh_buffer_lengths() {
     CHECK(d3.has_value());
     CHECK(d3.value().coefficients() == 16);
 
-    // Degree 4 must be supported (SPZ v4 carries it): 25 coefficients.
+    // The canonical PLY profile stores degree 4: 25 coefficients.
     auto d4 = ShBuffer::create(4, 1, std::vector<float>(25 * 3, 0.0f));
     CHECK(d4.has_value());
     CHECK(d4.value().coefficients() == 25);
@@ -158,11 +175,14 @@ void test_sh_nonfinite_is_rejected() {
 void test_sh_dc_accessor() {
     // DC term is the first three floats of each splat's block.
     std::vector<float> data{0.1f, 0.2f, 0.3f,   // splat 0: R,G,B
-                            0.4f, 0.5f, 0.6f};   // splat 1
+                            0.4f, 0.5f, 0.6f};  // splat 1
     auto sh = ShBuffer::create(0, 2, std::move(data));
     CHECK(sh.has_value());
-    CHECK(sh.value().dc(0, 0) == 0.1f);
-    CHECK(sh.value().dc(1, 2) == 0.6f);
+    CHECK(sh.value().dc(0).has_value());
+    CHECK(sh.value().dc(0).value().x == 0.1f);
+    CHECK(sh.value().dc(1).has_value());
+    CHECK(sh.value().dc(1).value().z == 0.6f);
+    CHECK(!sh.value().dc(2).has_value());
 }
 
 void test_validate_catches_corruption() {
@@ -172,6 +192,23 @@ void test_validate_catches_corruption() {
     CHECK(data.value().validate().has_value());
 }
 
+void test_moved_from_values_remain_valid() {
+    auto source_sh = ShBuffer::black(2).value();
+    ShBuffer target_sh(std::move(source_sh));
+    CHECK(target_sh.validate().has_value());
+    CHECK(target_sh.splat_count() == 2);
+    CHECK(source_sh.validate().has_value());
+    CHECK(source_sh.splat_count() == 0);
+    CHECK(source_sh.raw().empty());
+
+    auto source_data = SplatData::create(valid_input(2)).value();
+    SplatData target_data(std::move(source_data));
+    CHECK(target_data.validate().has_value());
+    CHECK(target_data.size() == 2);
+    CHECK(source_data.validate().has_value());
+    CHECK(source_data.empty());
+}
+
 }  // namespace
 
 int main() {
@@ -179,14 +216,16 @@ int main() {
     test_valid_scene_constructs();
     test_length_mismatch_is_rejected();
     test_nonfinite_position_is_rejected();
-    test_nonpositive_scale_is_rejected();
+    test_zero_scale_is_preserved_and_negative_scale_is_rejected();
     test_opacity_out_of_range_is_rejected();
     test_non_unit_quaternion_is_rejected();
+    test_near_unit_quaternion_is_normalized();
 
     test_sh_buffer_lengths();
     test_sh_nonfinite_is_rejected();
     test_sh_dc_accessor();
     test_validate_catches_corruption();
+    test_moved_from_values_remain_valid();
 
     if (g_failures == 0) {
         std::printf("scene model: %d checks passed\n", g_checks);

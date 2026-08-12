@@ -1,8 +1,12 @@
-#pragma once
+#ifndef MELKOR_CLOUD_INSPECTOR_HPP
+#define MELKOR_CLOUD_INSPECTOR_HPP
 
 #include "melkor/scene.hpp"
 
 #include <cstddef>
+#include <cstdint>
+#include <map>
+#include <optional>
 #include <string>
 #include <vector>
 
@@ -20,6 +24,9 @@ struct InspectionIssue {
     size_t count = 0;
     size_t first_index = 0;
     bool has_index = false;
+    std::string path;
+    std::optional<std::uint64_t> byte_offset;
+    std::map<std::string, JsonScalar> context;
 };
 
 struct CloudBounds {
@@ -40,9 +47,14 @@ struct CloudInspection {
 
 // Inspect canonical data without mutating it. SplatData already guarantees finite values,
 // canonical domains, complete SH storage, and unit rotations, so this concentrates on useful
-// derived diagnostics: empty input, bounds, and whether squared linear scales are representable
-// as float32 covariance entries. Issue order is stable for deterministic CI artifacts.
+// derived diagnostics: empty input, bounds, and whether a downstream float32 covariance can
+// represent squared linear scales. These representation limits are warnings. Canonical scale
+// remains valid because Melkor stores it directly as float32. Issue order is stable.
 [[nodiscard]] CloudInspection inspectCloud(const SplatData& cloud);
+
+// Use cooperative controls during long validation and inspection loops.
+[[nodiscard]] Result<CloudInspection> inspectCloud(const SplatData& cloud,
+                                                   const OperationContext& context);
 
 // Source-format adapters use this to append metadata warnings/errors while
 // preserving the same deterministic summary accounting.
@@ -51,3 +63,5 @@ void addInspectionIssue(CloudInspection& inspection, InspectionSeverity severity
                         bool has_index = false);
 
 }  // namespace melkor
+
+#endif  // MELKOR_CLOUD_INSPECTOR_HPP

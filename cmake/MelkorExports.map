@@ -1,0 +1,8 @@
+{
+    global:
+        melkor_get_version;
+        melkor_inspect_ply_file;
+        melkor_status_string;
+    local:
+        *;
+};

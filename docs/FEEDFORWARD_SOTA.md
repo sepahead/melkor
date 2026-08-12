@@ -32,6 +32,7 @@ Known non-commercial weights require another flag:
 
 Missing or unspecified terms require `--accept-unlicensed`.
 Review the current upstream license and model card before acceptance.
+The setup command fails before it writes files when an acceptance flag is absent.
 
 Use an isolated development environment.
 Setup rejects an upstream checkout that contains modified or untracked files.
@@ -78,7 +79,6 @@ Inspect it before conversion:
 
 ```bash
 ./build/dev/melkor inspect external.ply --strict
-./build/dev/melkor external.ply external.spz
 ```
 
 The conversion preserves only the semantics that the PLY file provides.
@@ -100,6 +100,7 @@ It does not provide a joint multi-view scene contract through Melkor.
 
 The setup command can create a project-root `*-infer` wrapper.
 Each wrapper activates one local virtual environment.
+It checks the pinned source revision and the clean checkout state.
 It then runs the entry point recorded in the setup script.
 
 Treat that entry point as experimental.
@@ -126,5 +127,5 @@ See [Benchmarks](../benchmarks/README.md) for the evidence format.
 No catalog entry is a production Melkor adapter.
 The planned adapter runner must pin dependencies and validate output semantics.
 
-Track that work as P0-13 and P1-09 in
+Production support requires the conditional adapter gate in
 [the production blocker register](audit/production-blockers.md).

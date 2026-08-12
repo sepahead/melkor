@@ -29,8 +29,8 @@
 #   --accept-noncommercial   allow CC-BY-NC weights (Pi3, VGGT, MapAnything-nc)
 #   --accept-unlicensed      allow AMB3R (no license published)
 #
-# Each install prints the pinned repo's code LICENSE. Checkpoint terms are
-# separate and remain gated when non-commercial or unspecified.
+# Each install reports the pinned repository license file. Checkpoint terms
+# remain separate and gated when they are non-commercial or unspecified.
 #
 # NOTE: these models require Linux + NVIDIA CUDA + a recent PyTorch and
 # download multi-GB weights; they do not run on the macOS/Metal build.
@@ -50,6 +50,14 @@ ACCEPT_NC=0
 ACCEPT_UNLICENSED=0
 ACCEPT_UNLOCKED=0
 SELECTION=""
+WRAPPER_STAGING=""
+
+cleanup() {
+    if [ -n "$WRAPPER_STAGING" ] && [ -f "$WRAPPER_STAGING" ]; then
+        rm -f -- "$WRAPPER_STAGING"
+    fi
+}
+trap cleanup EXIT
 
 usage() {
     cat >&2 <<EOF
@@ -87,7 +95,13 @@ for arg in "$@"; do
         --accept-unlocked-dependencies) ACCEPT_UNLOCKED=1 ;;
         -h|--help)              usage; exit 0 ;;
         --*)                    err "Unknown flag: $arg"; usage; exit 1 ;;
-        *)                      SELECTION="$arg" ;;
+        *)
+            if [ -n "$SELECTION" ]; then
+                err "Specify one model or group."
+                exit 1
+            fi
+            SELECTION="$arg"
+            ;;
     esac
 done
 
@@ -137,6 +151,26 @@ if [ -z "$TARGETS" ]; then
     exit 1
 fi
 
+# Check all terms before setup creates files. A group must never produce a
+# partial install because one required acceptance flag is absent.
+TERMS_MISSING=0
+for target in $TARGETS; do
+    line="$(catalog | awk -F'|' -v selected="$target" '$1==selected')"
+    IFS='|' read -r _name _repo _category license_class _note <<< "$line"
+    if [ "$license_class" = "noncommercial" ] && [ "$ACCEPT_NC" -ne 1 ]; then
+        err "'$target' requires --accept-noncommercial."
+        TERMS_MISSING=1
+    fi
+    if [ "$license_class" = "unlicensed" ] && [ "$ACCEPT_UNLICENSED" -ne 1 ]; then
+        err "'$target' requires --accept-unlicensed."
+        TERMS_MISSING=1
+    fi
+done
+if [ "$TERMS_MISSING" -ne 0 ]; then
+    err "No selected tool was installed. Review the recorded terms before acceptance."
+    exit 2
+fi
+
 # ---- preflight -------------------------------------------------------------
 command -v git >/dev/null    || { err "git is required"; exit 1; }
 command -v python3 >/dev/null || { err "python3 is required"; exit 1; }
@@ -163,16 +197,14 @@ pinned_ref() {
 install_one() {
     local name="$1" repo="$2" cat="$3" lic="$4" note="$5"
 
-    # License gate.
+    # Keep a defense-in-depth gate for direct calls from future code.
     if [ "$lic" = "noncommercial" ] && [ "$ACCEPT_NC" -ne 1 ]; then
-        warn "Skipping '$name': weights are non-commercial (CC-BY-NC-4.0)."
-        warn "  Re-run with --accept-noncommercial if that fits your use."
-        return 0
+        err "'$name' requires --accept-noncommercial."
+        return 2
     fi
     if [ "$lic" = "unlicensed" ] && [ "$ACCEPT_UNLICENSED" -ne 1 ]; then
-        warn "Skipping '$name': no LICENSE published (all rights reserved)."
-        warn "  Re-run with --accept-unlicensed for research/evaluation only."
-        return 0
+        err "'$name' requires --accept-unlicensed."
+        return 2
     fi
 
     local dir="$TOOLS_DIR/$name" ref
@@ -181,6 +213,11 @@ install_one() {
     log "=== $name  [$cat, $lic] ==="
     log "$note"
 
+    if [ -L "$dir" ] || [ -L "$dir/repo" ] || \
+       { [ -e "$dir/repo" ] && [ ! -d "$dir/repo" ]; }; then
+        err "$name has an unsafe install path: $dir"
+        return 2
+    fi
     if [ -d "$dir/repo/.git" ]; then
         if [ "$(git -C "$dir/repo" remote get-url origin)" != "$repo" ]; then
             err "$name has an unexpected origin: $dir/repo"
@@ -205,11 +242,11 @@ install_one() {
         return 2
     fi
 
-    # Surface the ACTUAL license from the checkout.
+    # Report the license file from the bound source revision.
     local lic_file
     lic_file="$(find "$dir/repo" -maxdepth 1 -iname 'LICENSE*' -print -quit)"
     if [ -n "$lic_file" ]; then
-        log "License ($name): $(head -1 "$lic_file" | tr -d '\r')  [$lic_file]"
+        log "License file ($name): $lic_file"
     else
         warn "$name: no LICENSE file in the repo — treat as all-rights-reserved."
     fi
@@ -218,6 +255,10 @@ install_one() {
     # weight auto-download (from_pretrained / documented CLI) rather than
     # hardcoding fragile weight URLs.
     local venv="$dir/venv"
+    if [ -L "$venv" ] || { [ -e "$venv" ] && [ ! -d "$venv" ]; }; then
+        err "$name has an unsafe virtual environment path: $venv"
+        return 2
+    fi
     if [ ! -d "$venv" ]; then
         python3 -m venv "$venv" >&2
     fi
@@ -252,14 +293,14 @@ install_one() {
     esac
     deactivate
 
-    create_wrapper "$name" "$cat"
+    create_wrapper "$name" "$cat" "$ref"
     log "Installed '$name' -> $dir"
 }
 
 # Thin project-root wrapper that activates the model's venv and runs its
 # canonical entry point. Mirrors the da3-infer pattern.
 create_wrapper() {
-    local name="$1" cat="$2"
+    local name="$1" cat="$2" ref="$3"
     local wrapper="$PROJECT_ROOT/$name-infer"
     # Entry points verified against each repo's README/docs.
     local entry
@@ -273,28 +314,56 @@ create_wrapper() {
         spfsplatv2)  entry='python -m src.main "$@"' ;;            # Hydra: +experiment=... mode=test over RE10K/ACID data (see DATASETS.md)
         *)           entry='python demo.py "$@"' ;;
     esac
-    cat > "$wrapper" <<WRAP
+    WRAPPER_STAGING="$(mktemp "$PROJECT_ROOT/.melkor-${name}-infer.XXXXXX")"
+    cat > "$WRAPPER_STAGING" <<WRAP
 #!/usr/bin/env bash
 set -euo pipefail
-# Auto-generated by setup_feedforward_sota.sh — runs $name.
+# Generated by scripts/setup_feedforward_sota.sh for $name.
 SCRIPT_DIR="\$(cd "\$(dirname "\${BASH_SOURCE[0]}")" && pwd)"
 DIR="\$SCRIPT_DIR/tools/$name"
+EXPECTED_REF="$ref"
 # shellcheck disable=SC1091
 if [ ! -f "\$DIR/venv/bin/activate" ]; then
     echo "Error: missing $name environment; rerun setup_feedforward_sota.sh" >&2
     exit 1
 fi
+if [ "\$(git -C "\$DIR/repo" rev-parse HEAD 2>/dev/null || true)" != "\$EXPECTED_REF" ]; then
+    echo "Error: $name source does not match the reviewed revision." >&2
+    exit 2
+fi
+if [ -n "\$(git -C "\$DIR/repo" status --porcelain --untracked-files=all)" ]; then
+    echo "Error: $name source contains local or generated files." >&2
+    exit 2
+fi
 source "\$DIR/venv/bin/activate"
 cd "\$DIR/repo"
 $entry
 WRAP
-    chmod +x "$wrapper"
+    chmod 0755 "$WRAPPER_STAGING"
+    if [ -L "$wrapper" ] || { [ -e "$wrapper" ] && [ ! -f "$wrapper" ]; }; then
+        err "Wrapper path is not a regular file: $wrapper"
+        return 2
+    fi
+    if [ -f "$wrapper" ]; then
+        if cmp -s "$WRAPPER_STAGING" "$wrapper"; then
+            rm -f -- "$WRAPPER_STAGING"
+            WRAPPER_STAGING=""
+            chmod 0755 "$wrapper"
+        else
+            err "Wrapper already exists with different content: $wrapper"
+            err "Move the file aside before setup. The installer will not overwrite it."
+            return 2
+        fi
+    else
+        python3 "$PROJECT_ROOT/tools/atomic_publish.py" "$WRAPPER_STAGING" "$wrapper"
+        WRAPPER_STAGING=""
+    fi
     log "Wrapper: $wrapper"
     case "$cat" in
         geometry-colmap)
             log "  -> exports a COLMAP 'sparse/'; feed it to pipeline.sh --skip-colmap" ;;
         geometry-ply)
-            log "  -> writes a PLY point cloud; melkor scene.ply scene.spz for the viewer" ;;
+            log "  -> writes PLY point geometry. Inspect its semantics before conversion." ;;
         geometry-mono)
             log "  -> per-image geometry (points/depth/normals); see docs/FEEDFORWARD_SOTA.md" ;;
         dataset-eval)

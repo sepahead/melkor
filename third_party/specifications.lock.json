@@ -1,10 +1,9 @@
 {
   "schema_version": 1,
   "_comment": [
-    "Pinned specifications Melkor implements against. Unlike a code dependency, a spec is pinned",
-    "by the exact upstream commit and the SHA-256 of each vendored file, so that a later editorial",
-    "or semantic change upstream cannot silently alter Melkor's behaviour. CI verifies the vendored",
-    "files against these hashes. Updating a pinned spec follows",
+    "Reviewed specifications that Melkor implements. The commit records the upstream review target.",
+    "CI verifies each vendored file against its SHA-256 digest. The reviewed Melkor source commit",
+    "is the offline trust boundary. Updating a specification follows",
     "docs/maintainers/updating-khr-gaussian-splatting.md and creates a NEW profile ID rather than",
     "mutating an old one."
   ],
@@ -22,7 +21,8 @@
         { "path": "README.md", "sha256": "09cc2c7b579bbb30d1b3568e70a114694cdbfd2ed4bae1f059704c7b558b1468" },
         { "path": "schema/mesh.primitive.KHR_gaussian_splatting.schema.json", "sha256": "9108b6504bac62baba06f0b066920f8a54010fb4a0f743642b41b79d95b6f239" }
       ],
-      "license": "See the KhronosGroup/glTF repository LICENSE; Khronos specification text and schemas are redistributed under their terms with copyright retained.",
+      "license": "CC-BY-4.0",
+      "license_notice_file": "third_party/specs/KHR_gaussian_splatting/63770cc70a37/README.md",
       "semantic_decisions": {
         "sh_degrees": "0-3 (COEF counts 1/3/5/7 per degree). The canonical Melkor scene stores 0-4; SPZ degree 4 into this profile is LOSS_SH_DEGREE_TRUNCATED, never silent.",
         "sh_attributes": "KHR_gaussian_splatting:SH_DEGREE_N_COEF_M, accessor type VEC3, component type float.",

@@ -25,11 +25,23 @@ namespace melkor {
 
 // A validated byte range within a known-size buffer. Constructing one is the only sanctioned
 // way to turn a file-declared (offset, length) pair into something you may index with.
-struct ByteRange {
-    std::uint64_t offset = 0;
-    std::uint64_t length = 0;
+class ByteRange {
+public:
+    constexpr ByteRange() noexcept = default;
 
-    std::uint64_t end() const noexcept { return offset + length; }  // safe: checked_range
+    std::uint64_t offset() const noexcept { return offset_; }
+    std::uint64_t length() const noexcept { return length_; }
+    std::uint64_t end() const noexcept { return offset_ + length_; }
+
+private:
+    friend Result<ByteRange> checked_range(std::uint64_t, std::uint64_t, std::uint64_t,
+                                           const char*);
+
+    constexpr ByteRange(std::uint64_t offset, std::uint64_t length) noexcept
+        : offset_(offset), length_(length) {}
+
+    std::uint64_t offset_ = 0;
+    std::uint64_t length_ = 0;
 };
 
 Result<std::uint64_t> checked_add(std::uint64_t a, std::uint64_t b, const char* what = "value");

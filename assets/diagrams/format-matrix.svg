@@ -1,89 +1,100 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 960 520" role="img" aria-labelledby="t d">
-  <title id="t">Melkor format profile capability matrix</title>
-  <desc id="d">Capability matrix for the five format profiles: KHR gaussian splatting RC, melkor canonical PLY, graphdeco 3DGS PLY, generic point cloud PLY, and SPZ v4. Columns show status, maximum SH degree, quaternion convention, scale and opacity encodings.</desc>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 960 600" role="img" aria-labelledby="format-title format-description">
+  <title id="format-title">Melkor format profile capability matrix</title>
+  <desc id="format-description">Five format profiles show their state, supported containers, SH degree, quaternion order, scale domain, and opacity domain.</desc>
   <style>
     text { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; fill: #c9d1d9; }
     .h1 { font-size: 14px; fill: #e6edf3; letter-spacing: 2.5px; }
     .h2 { font-size: 11px; fill: #8b949e; letter-spacing: 2px; }
-    .col { font-size: 10px; fill: #8b949e; letter-spacing: 1.5px; }
-    .cell { font-size: 11px; }
-    .name { font-size: 12px; fill: #e6edf3; }
-    .sub { font-size: 10px; fill: #8b949e; }
+    .col { font-size: 9px; fill: #8b949e; letter-spacing: 1.1px; }
+    .cell { font-size: 10px; }
+    .name { font-size: 11px; fill: #e6edf3; }
+    .sub { font-size: 9px; fill: #8b949e; }
   </style>
 
-  <rect x="0.5" y="0.5" width="959" height="519" rx="16" fill="#0d1117" stroke="#2b333d"/>
-
+  <rect x="0.5" y="0.5" width="959" height="599" rx="16" fill="#0d1117" stroke="#2b333d"/>
   <text class="h1" x="40" y="44">MELKOR &#183; FORMAT PROFILE MATRIX</text>
-  <text class="h2" x="40" y="64">WHAT EACH PROFILE ENCODES, EXACTLY</text>
+  <text class="h2" x="40" y="64">THE PROFILE DEFINES THE SEMANTICS. THE CONTAINER DOES NOT.</text>
   <circle cx="906" cy="40" r="5" fill="#fb923c"/>
   <circle cx="888" cy="40" r="5" fill="#34d399"/>
   <circle cx="870" cy="40" r="5" fill="#a78bfa"/>
 
   <g class="col">
     <text x="64" y="106">PROFILE</text>
-    <text x="384" y="106">STATUS</text>
-    <text x="530" y="106">SH MAX</text>
-    <text x="626" y="106">QUATERNION</text>
-    <text x="760" y="106">SCALE</text>
-    <text x="856" y="106">OPACITY</text>
+    <text x="378" y="106">STATE</text>
+    <text x="510" y="106">CONTAINER SUPPORT</text>
+    <text x="688" y="106">SH</text>
+    <text x="724" y="106">QUATERNION</text>
+    <text x="824" y="106">SCALE</text>
+    <text x="876" y="106">OPACITY</text>
   </g>
   <line x1="40" y1="118" x2="920" y2="118" stroke="#21262d"/>
 
   <g>
-    <rect x="40" y="132" width="880" height="60" rx="8" fill="#161b22" stroke="#a78bfa" stroke-width="1.25"/>
-    <text class="name" x="64" y="157">khr-gaussian-splatting-rc</text>
-    <text class="sub" x="64" y="176">glTF / GLB &#183; POINTS primitive &#183; kernel=ellipse</text>
-    <rect x="384" y="146" width="122" height="22" rx="11" fill="#2a1e0e"/>
-    <text class="cell" x="398" y="161" fill="#fbbf24">release cand.</text>
-    <text class="cell" x="544" y="161" fill="#e6edf3">3</text>
-    <text class="cell" x="626" y="161" fill="#34d399">xyzw, unit</text>
-    <text class="cell" x="760" y="161" fill="#34d399">linear</text>
-    <text class="cell" x="856" y="161" fill="#34d399">linear</text>
-  </g>
-  <g>
-    <rect x="40" y="204" width="880" height="60" rx="8" fill="#161b22" stroke="#fb923c" stroke-width="1.25"/>
-    <text class="name" x="64" y="229">ply: melkor-canonical-v1</text>
-    <text class="sub" x="64" y="248">PLY &#183; melkor_* header markers &#183; KHR SH order</text>
-    <rect x="384" y="218" width="82" height="22" rx="11" fill="#0e2a1a"/>
-    <text class="cell" x="398" y="233" fill="#34d399">stable</text>
-    <text class="cell" x="544" y="233" fill="#e6edf3">4</text>
-    <text class="cell" x="626" y="233" fill="#34d399">xyzw, unit</text>
-    <text class="cell" x="760" y="233" fill="#34d399">linear</text>
-    <text class="cell" x="856" y="233" fill="#34d399">linear</text>
-  </g>
-  <g>
-    <rect x="40" y="276" width="880" height="60" rx="8" fill="#161b22" stroke="#fb923c" stroke-width="1.25"/>
-    <text class="name" x="64" y="301">ply: graphdeco-3dgs-v1</text>
-    <text class="sub" x="64" y="320">PLY &#183; f_dc / f_rest layout &#183; unit and axes unspecified</text>
-    <rect x="384" y="290" width="82" height="22" rx="11" fill="#0e2a1a"/>
-    <text class="cell" x="398" y="305" fill="#34d399">stable</text>
-    <text class="cell" x="544" y="305" fill="#e6edf3">3</text>
-    <text class="cell" x="626" y="305" fill="#fb7185">wxyz, raw</text>
-    <text class="cell" x="760" y="305" fill="#fb7185">log</text>
-    <text class="cell" x="856" y="305" fill="#fb7185">logit</text>
-  </g>
-  <g>
-    <rect x="40" y="348" width="880" height="60" rx="8" fill="#161b22" stroke="#fb923c" stroke-width="1.25"/>
-    <text class="name" x="64" y="373">ply: generic-point-cloud-v1</text>
-    <text class="sub" x="64" y="392">PLY &#183; RGB type declared, never guessed</text>
-    <rect x="384" y="362" width="82" height="22" rx="11" fill="#0e2a1a"/>
-    <text class="cell" x="398" y="377" fill="#34d399">stable</text>
-    <text class="cell" x="544" y="377" fill="#e6edf3">0</text>
-    <text class="cell" x="626" y="377" fill="#34d399">xyzw</text>
-    <text class="cell" x="760" y="377" fill="#34d399">linear</text>
-    <text class="cell" x="856" y="377" fill="#34d399">linear</text>
-  </g>
-  <g>
-    <rect x="40" y="420" width="880" height="60" rx="8" fill="#161b22" stroke="#34d399" stroke-width="1.25"/>
-    <text class="name" x="64" y="445">spz: spz-v4</text>
-    <text class="sub" x="64" y="464">SPZ &#183; Zstandard in v4 &#183; vendored codec writes v3 today</text>
-    <rect x="384" y="434" width="122" height="22" rx="11" fill="#2a1e0e"/>
-    <text class="cell" x="398" y="449" fill="#fbbf24">release cand.</text>
-    <text class="cell" x="544" y="449" fill="#e6edf3">4</text>
-    <text class="cell" x="626" y="449" fill="#34d399">xyzw, unit</text>
-    <text class="cell" x="760" y="449" fill="#34d399">linear</text>
-    <text class="cell" x="856" y="449" fill="#34d399">linear</text>
+    <rect x="40" y="132" width="880" height="66" rx="8" fill="#161b22" stroke="#a78bfa" stroke-width="1.25"/>
+    <text class="name" x="64" y="157">khr-gaussian-splatting-rc-63770cc</text>
+    <text class="sub" x="64" y="177">glTF 2.0 &#183; POINTS &#183; ellipse kernel</text>
+    <rect x="378" y="146" width="112" height="22" rx="11" fill="#2a1e0e"/>
+    <text class="cell" x="387" y="161" fill="#fbbf24">release-candidate</text>
+    <text class="cell" x="510" y="155" fill="#34d399">glTF + GLB read</text>
+    <text class="cell" x="510" y="174" fill="#34d399">GLB write</text>
+    <text class="cell" x="690" y="164" fill="#e6edf3">3</text>
+    <text class="cell" x="724" y="164" fill="#34d399">xyzw, unit</text>
+    <text class="cell" x="824" y="164" fill="#34d399">linear</text>
+    <text class="cell" x="876" y="164" fill="#34d399">linear</text>
   </g>
 
-  <text class="sub" x="40" y="504">green = canonical convention &#183; red = source convention that melkor converts on read &#183; source: profiles/*/*.json</text>
+  <g>
+    <rect x="40" y="214" width="880" height="66" rx="8" fill="#161b22" stroke="#fb923c" stroke-width="1.25"/>
+    <text class="name" x="64" y="239">ply:melkor-canonical-v1</text>
+    <text class="sub" x="64" y="259">canonical PLY &#183; explicit melkor_* markers</text>
+    <rect x="378" y="228" width="70" height="22" rx="11" fill="#0e2a1a"/>
+    <text class="cell" x="392" y="243" fill="#34d399">stable</text>
+    <text class="cell" x="510" y="246" fill="#34d399">PLY read/write</text>
+    <text class="cell" x="690" y="246" fill="#e6edf3">4</text>
+    <text class="cell" x="724" y="246" fill="#34d399">xyzw, unit</text>
+    <text class="cell" x="824" y="246" fill="#34d399">linear</text>
+    <text class="cell" x="876" y="246" fill="#34d399">linear</text>
+  </g>
+
+  <g>
+    <rect x="40" y="296" width="880" height="66" rx="8" fill="#161b22" stroke="#fb923c" stroke-width="1.25"/>
+    <text class="name" x="64" y="321">ply:graphdeco-3dgs-v1</text>
+    <text class="sub" x="64" y="341">Graphdeco PLY &#183; explicit frame, unit, and color required</text>
+    <rect x="378" y="310" width="70" height="22" rx="11" fill="#0e2a1a"/>
+    <text class="cell" x="392" y="325" fill="#34d399">stable</text>
+    <text class="cell" x="510" y="328" fill="#34d399">PLY read/write</text>
+    <text class="cell" x="690" y="328" fill="#e6edf3">3</text>
+    <text class="cell" x="724" y="328" fill="#fb923c">wxyz, raw</text>
+    <text class="cell" x="824" y="328" fill="#fb923c">log</text>
+    <text class="cell" x="876" y="328" fill="#fb923c">logit</text>
+  </g>
+
+  <g>
+    <rect x="40" y="378" width="880" height="66" rx="8" fill="#161b22" stroke="#34d399" stroke-width="1.25"/>
+    <text class="name" x="64" y="403">ply:da3-gaussian-v1</text>
+    <text class="sub" x="64" y="423">pinned DA3 PLY &#183; explicit unit and color required</text>
+    <rect x="378" y="392" width="94" height="22" rx="11" fill="#2a1e0e"/>
+    <text class="cell" x="388" y="407" fill="#fbbf24">experimental</text>
+    <text class="cell" x="510" y="410" fill="#34d399">PLY read/write</text>
+    <text class="cell" x="690" y="410" fill="#e6edf3">4</text>
+    <text class="cell" x="724" y="410" fill="#fb923c">wxyz, raw</text>
+    <text class="cell" x="824" y="410" fill="#fb923c">log</text>
+    <text class="cell" x="876" y="410" fill="#fb923c">logit</text>
+  </g>
+
+  <g>
+    <rect x="40" y="460" width="880" height="66" rx="8" fill="#161b22" stroke="#34d399" stroke-width="1.25"/>
+    <text class="name" x="64" y="485">spz:spz-v1-v3</text>
+    <text class="sub" x="64" y="505">SPZ gzip versions 1 through 3 &#183; explicit unit and color required</text>
+    <rect x="378" y="474" width="70" height="22" rx="11" fill="#0e2a1a"/>
+    <text class="cell" x="392" y="489" fill="#34d399">stable</text>
+    <text class="cell" x="510" y="483" fill="#34d399">read v1&#8211;v3</text>
+    <text class="cell" x="510" y="502" fill="#34d399">write v3</text>
+    <text class="cell" x="690" y="492" fill="#e6edf3">3</text>
+    <text class="cell" x="724" y="492" fill="#34d399">xyzw, unit</text>
+    <text class="cell" x="824" y="492" fill="#fb923c">log</text>
+    <text class="cell" x="876" y="492" fill="#34d399">linear</text>
+  </g>
+
+  <text class="sub" x="40" y="570">sources: profiles/*/*.json &#183; src/formats/profile.cpp</text>
 </svg>

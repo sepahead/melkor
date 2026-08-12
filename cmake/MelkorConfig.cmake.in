@@ -5,20 +5,20 @@
 #     find_package(Melkor 2 CONFIG REQUIRED)
 #     target_link_libraries(my_app PRIVATE Melkor::melkor)
 #
-# and gets the relocatable shared library plus its public headers. The `2` requests the 2.x
-# ABI line; the accompanying version file refuses a 3.x that could have broken it.
+# This command provides the relocatable shared library and the public C header.
+# The `2` requests the 2.x ABI line.
+# The version file rejects a 3.x library.
 
 @PACKAGE_INIT@
 
 include("${CMAKE_CURRENT_LIST_DIR}/MelkorTargets.cmake")
 
-# Confirm the imported target actually materialised, so a broken or partial install fails here
-# with a clear message rather than at the consumer's link step with an obscure one.
+# Reject an incomplete install before the consumer link step.
 if(NOT TARGET Melkor::melkor)
     set(Melkor_FOUND FALSE)
     set(Melkor_NOT_FOUND_MESSAGE
-        "The Melkor package is installed but the Melkor::melkor target is missing; the "
-        "installation is incomplete.")
+        "The Melkor package is installed, but the Melkor::melkor target is missing. "
+        "The installation is incomplete.")
     return()
 endif()
 

@@ -37,8 +37,7 @@ benchmarks/
 ├── schema/
 │   ├── benchmark-manifest-v1.schema.json   what a benchmark run declares
 │   └── benchmark-result-v1.schema.json     what a benchmark run produces
-├── manifests/                    one manifest per benchmark, versioned by ID
-│   └── format-roundtrip-v1.json
+├── manifests/                    reviewed benchmark manifests
 ├── datasets/
 │   └── manifest.json             dataset identities, licenses, and digests (never the data)
 ├── runners/                      the code that executes a manifest and emits a result
@@ -69,6 +68,7 @@ A benchmark that reports a mean without its spread hides its variance.
 
 ## Status
 
-The schema and policy are in place. The runners and the first published results are part of
-work package 21, which also wires a release regression gate on stable hardware. Until a result
-exists for a claim, that claim may not appear in a public Melkor surface.
+The schema and policy are in place. The repository has no executable benchmark manifest or
+published result. Work package 21 adds runners and a release gate on stable hardware.
+
+Do not publish a quantitative claim until its reviewed result exists.

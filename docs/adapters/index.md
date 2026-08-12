@@ -51,8 +51,8 @@ Code License. Model weights are licensed for research purposes only, with no com
 
 **COLMAP** — Johannes Schönberger and contributors. <https://github.com/colmap/colmap>.
 BSD-3-Clause. Structure-from-motion and multi-view stereo. Note that **standalone GLOMAP is
-deprecated**: global mapping now lives inside COLMAP as the `global_mapper` command, and Melkor's
-adapter targets that ([P0-14](../audit/production-blockers.md)).
+deprecated**: global mapping now lives inside COLMAP as the `global_mapper` command.
+Melkor's development wrapper targets that command.
 
 **gsplat** — Nerfstudio project. <https://github.com/nerfstudio-project/gsplat>. Apache-2.0. A
 CUDA-accelerated Gaussian-splat rasterizer and training library.
@@ -82,8 +82,8 @@ The adapter protocol, process runner, and run manifests are not complete.
 Mutable general trainer installers now fail closed.
 DA3 and feedforward setup use detached source revisions.
 Their Python dependencies still need complete hash locks.
-The blocker register tracks this issue as
-[P0-13](../audit/production-blockers.md).
+The conditional adapter gate tracks this issue in
+[the production blocker register](../audit/production-blockers.md).
 
 ## License boundary
 
@@ -93,8 +93,7 @@ additional obligations. These obligations depend on your jurisdiction and distri
 
 Melkor's position is deliberately conservative:
 
-- Restricted source and restricted weights are **not** in the core source bundle, Python wheel,
-  or viewer artifacts.
+- Restricted source and restricted weights are **not** in the core source bundle or viewer artifacts.
 - The adapter manifest records code terms and weight terms in separate fields because they
   frequently differ.
 - An adapter that needs acceptance refuses to install or run before acceptance. The record

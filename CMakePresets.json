@@ -1,107 +1,113 @@
 {
-  "version": 6,
-  "cmakeMinimumRequired": { "major": 3, "minor": 25, "patch": 0 },
+  "version": 5,
+  "cmakeMinimumRequired": {
+    "major": 3,
+    "minor": 24,
+    "patch": 0
+  },
   "configurePresets": [
     {
       "name": "dev",
-      "displayName": "Developer (CPU, strict warnings)",
-      "description": "Everyday CPU build with warnings as errors. No GPU backend.",
+      "displayName": "Developer",
+      "description": "Build all format adapters with strict compiler warnings.",
       "binaryDir": "${sourceDir}/build/dev",
       "generator": "Ninja",
       "cacheVariables": {
         "CMAKE_BUILD_TYPE": "RelWithDebInfo",
-        "MELKOR_WERROR": "ON",
-        "MELKOR_USE_METAL": "OFF",
-        "MELKOR_USE_CUDA": "OFF"
+        "CMAKE_EXPORT_COMPILE_COMMANDS": "ON",
+        "MELKOR_BUILD_SPZ": "ON",
+        "MELKOR_WERROR": "ON"
       }
     },
     {
-      "name": "release-cpu",
-      "displayName": "Release (CPU, installable SDK)",
-      "description": "Optimized CPU build used to produce and install the SDK.",
-      "binaryDir": "${sourceDir}/build/release-cpu",
+      "name": "release",
+      "displayName": "Release",
+      "description": "Build the optimized CLI and installable C SDK.",
+      "binaryDir": "${sourceDir}/build/release",
       "generator": "Ninja",
       "cacheVariables": {
         "CMAKE_BUILD_TYPE": "Release",
-        "MELKOR_WERROR": "ON",
-        "MELKOR_USE_METAL": "OFF",
-        "MELKOR_USE_CUDA": "OFF",
-        "MELKOR_INSTALL": "ON"
+        "MELKOR_BUILD_SPZ": "ON",
+        "MELKOR_INSTALL": "ON",
+        "MELKOR_WERROR": "ON"
+      }
+    },
+    {
+      "name": "spz-off",
+      "displayName": "SPZ disabled",
+      "description": "Verify the build without the optional SPZ adapter.",
+      "binaryDir": "${sourceDir}/build/spz-off",
+      "generator": "Ninja",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "RelWithDebInfo",
+        "MELKOR_BUILD_SPZ": "OFF",
+        "MELKOR_WERROR": "ON"
       }
     },
     {
       "name": "asan-ubsan",
-      "displayName": "AddressSanitizer + UndefinedBehaviorSanitizer",
-      "description": "Debug build under ASan and UBSan for the untrusted-input and math paths.",
+      "displayName": "AddressSanitizer and UndefinedBehaviorSanitizer",
+      "description": "Check format and safety code with ASan and UBSan.",
       "binaryDir": "${sourceDir}/build/asan-ubsan",
       "generator": "Ninja",
       "cacheVariables": {
         "CMAKE_BUILD_TYPE": "Debug",
-        "MELKOR_USE_METAL": "OFF",
-        "MELKOR_USE_CUDA": "OFF",
-        "CMAKE_CXX_FLAGS": "-fsanitize=address,undefined -fno-omit-frame-pointer -g",
-        "CMAKE_EXE_LINKER_FLAGS": "-fsanitize=address,undefined"
-      }
-    },
-    {
-      "name": "macos-metal",
-      "displayName": "macOS with Metal",
-      "description": "Apple build with the Metal backend enabled. Requires macOS and Xcode.",
-      "binaryDir": "${sourceDir}/build/macos-metal",
-      "generator": "Ninja",
-      "cacheVariables": {
-        "CMAKE_BUILD_TYPE": "Release",
+        "MELKOR_BUILD_SPZ": "ON",
         "MELKOR_WERROR": "ON",
-        "MELKOR_USE_METAL": "ON"
-      },
-      "condition": {
-        "type": "equals",
-        "lhs": "${hostSystemName}",
-        "rhs": "Darwin"
-      }
-    },
-    {
-      "name": "linux-cuda-compile",
-      "displayName": "Linux CUDA (compile-only)",
-      "description": "Compiles the CUDA backend. This is a compile check, NOT hardware qualification: a green build here does not entitle the project to claim runtime CUDA support (P1-13).",
-      "binaryDir": "${sourceDir}/build/linux-cuda",
-      "generator": "Ninja",
-      "cacheVariables": {
-        "CMAKE_BUILD_TYPE": "Release",
-        "MELKOR_USE_CUDA": "ON"
-      },
-      "condition": {
-        "type": "equals",
-        "lhs": "${hostSystemName}",
-        "rhs": "Linux"
+        "CMAKE_CXX_FLAGS": "-fsanitize=address,undefined -fno-omit-frame-pointer -g",
+        "CMAKE_EXE_LINKER_FLAGS": "-fsanitize=address,undefined",
+        "CMAKE_SHARED_LINKER_FLAGS": "-fsanitize=address,undefined"
       }
     }
   ],
   "buildPresets": [
-    { "name": "dev", "configurePreset": "dev" },
-    { "name": "release-cpu", "configurePreset": "release-cpu" },
-    { "name": "asan-ubsan", "configurePreset": "asan-ubsan" },
-    { "name": "macos-metal", "configurePreset": "macos-metal" },
-    { "name": "linux-cuda-compile", "configurePreset": "linux-cuda-compile" }
+    {
+      "name": "dev",
+      "configurePreset": "dev"
+    },
+    {
+      "name": "release",
+      "configurePreset": "release"
+    },
+    {
+      "name": "spz-off",
+      "configurePreset": "spz-off"
+    },
+    {
+      "name": "asan-ubsan",
+      "configurePreset": "asan-ubsan"
+    }
   ],
   "testPresets": [
     {
       "name": "dev",
       "configurePreset": "dev",
-      "output": { "outputOnFailure": true },
-      "execution": { "noTestsAction": "error" }
+      "output": {
+        "outputOnFailure": true
+      },
+      "execution": {
+        "noTestsAction": "error"
+      }
+    },
+    {
+      "name": "spz-off",
+      "configurePreset": "spz-off",
+      "output": {
+        "outputOnFailure": true
+      },
+      "execution": {
+        "noTestsAction": "error"
+      }
     },
     {
       "name": "asan-ubsan",
       "configurePreset": "asan-ubsan",
-      "output": { "outputOnFailure": true },
-      "execution": { "noTestsAction": "error" }
-    },
-    {
-      "name": "macos-metal",
-      "configurePreset": "macos-metal",
-      "output": { "outputOnFailure": true },
-      "execution": { "noTestsAction": "error" }
+      "output": {
+        "outputOnFailure": true
+      },
+      "execution": {
+        "noTestsAction": "error"
+      }
     }
   ]
 }

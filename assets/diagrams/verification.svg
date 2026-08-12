@@ -1,6 +1,6 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 960 560" role="img" aria-labelledby="t d">
-  <title id="t">Melkor verification surface</title>
-  <desc id="d">Bar chart of the 41 registered CTest tests by category, the four libFuzzer targets, and the CLI exit code contract from 0 through 130.</desc>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 960 540" role="img" aria-labelledby="verification-title verification-description">
+  <title id="verification-title">Melkor verification surface</title>
+  <desc id="verification-description">The full build registers 39 CTest tests and four fuzz targets. The command-line interface uses ten stable exit codes.</desc>
   <style>
     text { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; fill: #c9d1d9; }
     .h1 { font-size: 14px; fill: #e6edf3; letter-spacing: 2.5px; }
@@ -11,64 +11,60 @@
     .code { font-size: 11px; }
   </style>
 
-  <rect x="0.5" y="0.5" width="959" height="559" rx="16" fill="#0d1117" stroke="#2b333d"/>
-
+  <rect x="0.5" y="0.5" width="959" height="539" rx="16" fill="#0d1117" stroke="#2b333d"/>
   <text class="h1" x="40" y="44">MELKOR &#183; VERIFICATION SURFACE</text>
-  <text class="h2" x="40" y="64">41 REGISTERED TESTS &#183; 4 FUZZ TARGETS &#183; ONE EXIT-CODE CONTRACT</text>
+  <text class="h2" x="40" y="64">39 REGISTERED TESTS &#183; 4 FUZZ TARGETS &#183; ONE EXIT-CODE CONTRACT</text>
   <circle cx="906" cy="40" r="5" fill="#fb923c"/>
   <circle cx="888" cy="40" r="5" fill="#34d399"/>
   <circle cx="870" cy="40" r="5" fill="#a78bfa"/>
 
   <g>
-    <text class="row" x="40" y="112">core + safety substrate</text>
-    <rect x="320" y="98" width="600" height="20" rx="4" fill="#fb923c"/>
-    <text class="val" x="892" y="112">12</text>
+    <text class="row" x="40" y="112">core + format safety</text>
+    <rect x="320" y="98" width="560" height="20" rx="4" fill="#fb923c"/>
+    <text class="val" x="854" y="112">14</text>
 
     <text class="row" x="40" y="152">glTF / GLB / KHR</text>
-    <rect x="320" y="138" width="550" height="20" rx="4" fill="#a78bfa"/>
-    <text class="val" x="842" y="152">11</text>
+    <rect x="320" y="138" width="400" height="20" rx="4" fill="#a78bfa"/>
+    <text class="val" x="694" y="152">10</text>
 
-    <text class="row" x="40" y="192">providers + properties + CLI</text>
-    <rect x="320" y="178" width="350" height="20" rx="4" fill="#34d399"/>
-    <text class="val" x="648" y="192">7</text>
+    <text class="row" x="40" y="192">property + fuzz replay</text>
+    <rect x="320" y="178" width="280" height="20" rx="4" fill="#fbbf24"/>
+    <text class="val" x="580" y="192">7</text>
 
-    <text class="row" x="40" y="232">Python contract suites</text>
-    <rect x="320" y="218" width="300" height="20" rx="4" fill="#60a5fa"/>
-    <text class="val" x="598" y="232">6</text>
-
-    <text class="row" x="40" y="272">fuzz corpus replay</text>
-    <rect x="320" y="258" width="250" height="20" rx="4" fill="#fbbf24"/>
-    <text class="val" x="548" y="272">5</text>
+    <text class="row" x="40" y="232">CLI + Python contracts</text>
+    <rect x="320" y="218" width="320" height="20" rx="4" fill="#60a5fa"/>
+    <text class="val" x="620" y="232">8</text>
   </g>
 
   <g>
-    <rect x="40" y="308" width="880" height="86" rx="12" fill="#10151b" stroke="#2b333d"/>
-    <text class="h2" x="64" y="338">COVERAGE-GUIDED FUZZING &#183; EVERY FIXED CRASH BECOMES A PERMANENT CORPUS ENTRY</text>
-    <rect x="64" y="352" width="190" height="28" rx="14" fill="#161b22" stroke="#fb923c"/>
-    <text class="code" x="88" y="371" fill="#fb923c">fuzz_ply</text>
-    <rect x="270" y="352" width="190" height="28" rx="14" fill="#161b22" stroke="#34d399"/>
-    <text class="code" x="294" y="371" fill="#34d399">fuzz_spz</text>
-    <rect x="476" y="352" width="190" height="28" rx="14" fill="#161b22" stroke="#a78bfa"/>
-    <text class="code" x="500" y="371" fill="#a78bfa">fuzz_glb</text>
-    <rect x="682" y="352" width="214" height="28" rx="14" fill="#161b22" stroke="#60a5fa"/>
-    <text class="code" x="706" y="371" fill="#60a5fa">fuzz_gltf_khr</text>
+    <rect x="40" y="270" width="880" height="86" rx="12" fill="#10151b" stroke="#2b333d"/>
+    <text class="h2" x="64" y="300">COVERAGE-GUIDED FUZZING &#183; EACH FIXED CRASH BECOMES A CORPUS ENTRY</text>
+    <rect x="64" y="314" width="190" height="28" rx="14" fill="#161b22" stroke="#fb923c"/>
+    <text class="code" x="88" y="333" fill="#fb923c">fuzz_ply</text>
+    <rect x="270" y="314" width="190" height="28" rx="14" fill="#161b22" stroke="#34d399"/>
+    <text class="code" x="294" y="333" fill="#34d399">fuzz_spz</text>
+    <rect x="476" y="314" width="190" height="28" rx="14" fill="#161b22" stroke="#a78bfa"/>
+    <text class="code" x="500" y="333" fill="#a78bfa">fuzz_glb</text>
+    <rect x="682" y="314" width="214" height="28" rx="14" fill="#161b22" stroke="#60a5fa"/>
+    <text class="code" x="706" y="333" fill="#60a5fa">fuzz_gltf_khr</text>
   </g>
 
   <g>
-    <rect x="40" y="414" width="880" height="100" rx="12" fill="#10151b" stroke="#2b333d"/>
-    <text class="h2" x="64" y="444">EXIT-CODE CONTRACT &#183; SCRIPTS BRANCH ON THE KIND OF FAILURE</text>
+    <rect x="40" y="376" width="880" height="100" rx="12" fill="#10151b" stroke="#2b333d"/>
+    <text class="h2" x="64" y="406">EXIT-CODE CONTRACT &#183; AUTOMATION CAN CLASSIFY EACH FAILURE</text>
     <g class="code">
-      <text x="64"  y="474" fill="#34d399">0 ok</text>
-      <text x="150" y="474" fill="#fbbf24">2 bad args</text>
-      <text x="286" y="474" fill="#fb7185">3 bad data</text>
-      <text x="422" y="474" fill="#a78bfa">4 unsupported</text>
-      <text x="592" y="474" fill="#60a5fa">5 io error</text>
-      <text x="722" y="474" fill="#fb923c">6 over limit</text>
-      <text x="64"  y="498" fill="#2dd4bf">7 no backend</text>
-      <text x="226" y="498" fill="#ef4444">8 internal bug</text>
-      <text x="404" y="498" fill="#8b949e">130 cancelled (128 + SIGINT)</text>
+      <text x="64" y="436" fill="#34d399">0 ok</text>
+      <text x="130" y="436" fill="#fbbf24">1 strict</text>
+      <text x="220" y="436" fill="#fbbf24">2 bad args</text>
+      <text x="340" y="436" fill="#fb7185">3 bad data</text>
+      <text x="460" y="436" fill="#a78bfa">4 unsupported</text>
+      <text x="610" y="436" fill="#60a5fa">5 io error</text>
+      <text x="730" y="436" fill="#fb923c">6 over limit</text>
+      <text x="64" y="460" fill="#2dd4bf">7 no backend</text>
+      <text x="226" y="460" fill="#ef4444">8 internal bug</text>
+      <text x="404" y="460" fill="#8b949e">130 cancelled (128 + SIGINT)</text>
     </g>
   </g>
 
-  <text class="sub" x="40" y="540">source: CMakeLists.txt add_test entries &#183; src/core/error.cpp exit_code_for</text>
+  <text class="sub" x="40" y="516">sources: CMakeLists.txt add_test &#183; src/core/error.cpp exit_code_for &#183; docs/INSPECT.md</text>
 </svg>

@@ -107,14 +107,27 @@ Request the PLY and SPZ files:
 ./scripts/pipeline.sh images result \
   --opensplat /reviewed/bin/opensplat \
   --melkor "$PWD/build/dev/melkor" \
-  --format both
+  --format both \
+  --source-frame VERIFIED_FRAME \
+  --source-unit-to-meter VERIFIED_SCALE \
+  --source-color-space VERIFIED_COLOR_SPACE \
+  --output-antialiased false \
+  --allow-loss LOSS_COLOR_SPACE_METADATA_DROPPED \
+  --allow-loss LOSS_COORDINATE_METADATA_DROPPED
 ```
 
+Replace each `VERIFIED_*` value with producer information that you checked.
+The wrapper does not infer a coordinate frame, unit, or color space.
+
 Use `--format spz` when SPZ is the requested final format.
-The PLY training result remains in the output directory.
+The final output contains the SPZ file and `point_cloud.loss-report.json`.
+
+The report records each SPZ conversion loss and each approved code.
+Keep it with the SPZ asset.
 
 The pipeline fails when it cannot find the Melkor executable.
 It does not silently skip a requested SPZ output.
+It fails before training when required source semantics or approvals are missing.
 
 ## Dry run
 
@@ -135,6 +148,8 @@ It does not require the external executables to exist.
 
 The wrapper fails before work when the output directory exists.
 This rule prevents stale output selection and accidental replacement.
+The wrapper publishes its staging directory with an atomic no-replace rename.
+Concurrent pipeline runs cannot merge their output directories.
 
 The wrapper also fails for these conditions:
 
@@ -143,9 +158,11 @@ The wrapper also fails for these conditions:
 - A missing external executable
 - A missing or empty PLY result
 - A requested SPZ result that Melkor did not create
+- A requested SPZ loss report that Melkor did not create
 
-The external tools still write their own files directly.
-The wrapper cannot make those writes atomic.
+The external tools write inside a private staging directory.
+Their files become visible at the final path only after all stages succeed.
+The input, image, and output directories must not overlap.
 
 ## Retired options
 
@@ -163,6 +180,8 @@ Use a tool-specific command when you need a contract that this wrapper does not 
 
 The pipeline does not create a signed or content-addressed run manifest.
 It does not verify the COLMAP or OpenSplat source revision.
+It inherits the caller environment and does not impose a stage timeout.
 
 Record the complete environment and output digest for reproducible work.
-Track the manifest-driven replacement in [the blocker register](audit/production-blockers.md).
+Production support requires the conditional adapter gate in
+[the blocker register](audit/production-blockers.md).

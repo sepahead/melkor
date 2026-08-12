@@ -7,8 +7,7 @@
 // coefficient convention the rest of the toolkit uses (the 3DGS/KHR real basis, Condon-Shortley
 // phase, coefficients ordered m = -l..+l within each degree) rather than for some other library's.
 //
-// Scope: degrees 0-3, the ceiling of the pinned glTF `KHR_gaussian_splatting` RC profile. Degree 4
-// (which SPZ v4 carries) is not yet supported and is rejected rather than silently mishandled.
+// Scope: degrees 0-4, the ceiling of the canonical model and the DA3 PLY profile.
 //
 // Correctness is not asserted, it is constructed and checked: each band matrix is the least-squares
 // operator that reproduces `Y_l^m(R^{-1} d)` in the span of `{Y_l^m'(d)}`, and the tests verify it
@@ -33,9 +32,9 @@ namespace melkor::math {
 bool is_proper_rotation(const Mat3& m, double tol = 1e-6);
 
 class ShRotation {
-  public:
+public:
     // The highest SH degree this operator supports.
-    static constexpr std::uint32_t kMaxDegree = 3;
+    static constexpr std::uint32_t kMaxDegree = 4;
 
     // Builds the rotation operator for degrees 0..degree under the proper rotation `rotation`.
     // Fails if `degree > kMaxDegree` or `rotation` is not a proper rotation.
@@ -43,16 +42,16 @@ class ShRotation {
 
     std::uint32_t degree() const noexcept { return degree_; }
 
-    // Rotates one splat's SH coefficient block in place. The block holds `(degree+1)^2` coefficients,
-    // each with `channels` contiguous values (3 for RGB), laid out coefficient-major then channel --
-    // the scene model's per-splat layout: value(coeff k, channel c) = block[k*channels + c]. The DC
-    // term (coefficient 0) is rotation-invariant and is left untouched.
-    void rotate_block(float* block, std::size_t channels) const;
+    // Rotate one SH block in place. The function supports one through four channels.
+    // The function changes no value if validation or conversion fails.
+    Result<void> rotate_block(float* block, std::size_t channels) const;
 
-    // The (2l+1)x(2l+1) band matrix for degree l, row-major (M[m*(2l+1) + m']). Exposed for tests.
-    const std::vector<double>& band(std::uint32_t l) const;
+    // Return the row-major matrix for one band. Return null for an invalid band.
+    const std::vector<double>* band(std::uint32_t l) const noexcept;
 
-  private:
+private:
+    ShRotation() = default;
+
     std::uint32_t degree_ = 0;
     std::array<std::vector<double>, kMaxDegree + 1> bands_;
 };

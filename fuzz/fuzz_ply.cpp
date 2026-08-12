@@ -71,30 +71,31 @@ extern "C" int LLVMFuzzerTestOneInput(const uint8_t* data, size_t size) {
 #include <cstdio>
 
 int main(int argc, char** argv) {
-    int cases = 0;
-    if (!melkor::fuzzing::replay_requested_inputs(argc, argv, exercise, cases))
-        return 1;
+    return melkor::fuzzing::run_standalone_main([&] {
+        int cases = 0;
+        if (!melkor::fuzzing::replay_requested_inputs(argc, argv, exercise, cases))
+            return 1;
 
-    // Also run a handful of built-in adversarial inputs, so the replay is meaningful even with an
-    // empty corpus directory. These are shapes that have historically broken PLY parsers.
-    const char*
-        builtins[] =
-            {
-                "",                                        // empty
-                "ply\n",                                   // truncated header
-                "ply\nformat binary_little_endian 1.0\n",  // no end_header
-                "ply\nformat ascii 1.0\nelement vertex 999999999999\nproperty float "
-                "x\nend_header\n",  // huge count
-                "ply\nformat ascii 1.0\nelement vertex 1\nproperty float x\nproperty float "
-                "y\nproperty float z\nend_header\n1 2\n",  // short record
-                "not a ply at all",                        // wrong magic
-            };
-    for (const char* b : builtins) {
-        exercise(reinterpret_cast<const uint8_t*>(b), std::char_traits<char>::length(b));
-        ++cases;
-    }
+        // Also run a handful of built-in adversarial inputs, so the replay is meaningful even with
+        // an empty corpus directory. These are shapes that have historically broken PLY parsers.
+        const char* builtins[] = {
+            "",                                        // empty
+            "ply\n",                                   // truncated header
+            "ply\nformat binary_little_endian 1.0\n",  // no end_header
+            "ply\nformat ascii 1.0\nelement vertex 999999999999\nproperty float "
+            "x\nend_header\n",  // huge count
+            "ply\nformat ascii 1.0\nelement vertex 1\nproperty float x\nproperty float "
+            "y\nproperty float z\nend_header\n1 2\n",  // short record
+            "not a ply at all",                        // wrong magic
+        };
+        for (const char* bytes : builtins) {
+            exercise(reinterpret_cast<const uint8_t*>(bytes),
+                     std::char_traits<char>::length(bytes));
+            ++cases;
+        }
 
-    std::printf("ply fuzz replay: %d input(s) exercised without crash\n", cases);
-    return 0;
+        std::printf("ply fuzz replay: %d input(s) exercised without crash\n", cases);
+        return 0;
+    });
 }
 #endif  // MELKOR_FUZZER_RUNTIME
