@@ -27,7 +27,7 @@ body:
     attributes:
       label: Consumer tool and version
       description: Identify the tool that read or rejected the file. Give its exact version.
-      placeholder: "Melkor 2.0.0-rc.1"
+      placeholder: "Melkor 2.0.0-dev / git <short SHA>"
     validations:
       required: true
 

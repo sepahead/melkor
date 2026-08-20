@@ -18,6 +18,9 @@ See [`docs/audit/production-blockers.md`](docs/audit/production-blockers.md) for
 
 ### Added
 
+- The documentation now has one index for active guides, current status, migrations, and historical audit records.
+- The CLI now has one reference for commands, options, profiles, reports, output safety, and automation.
+- A dated 50-lens documentation review now records corrections, evidence, and local verification limits.
 - One immutable canonical model now holds validated positions, scales, rotations, opacity, and spherical harmonics.
 - The format registry now reads PLY, SPZ, glTF, and GLB into the canonical model.
 - The registry now writes PLY, SPZ version 3, and GLB from the canonical model.
@@ -34,6 +37,12 @@ See [`docs/audit/production-blockers.md`](docs/audit/production-blockers.md) for
 
 ### Changed
 
+- Governance now distinguishes temporary development wrappers from the planned manifest-based adapter contract.
+- The benchmark policy now covers only current product surfaces and labels unimplemented benchmark directories.
+- COLMAP migration guidance now covers the integrated global mapper and optional view-graph calibration.
+- Governance and maintainer guidance now match the security policy for an unacknowledged private report.
+- Repository ownership now names the current parser, profile, schema, viewer, and contribution paths.
+- Issue forms now use the current `2.0.0-dev` version in report examples.
 - Each conversion now uses one exact source profile, target profile, loss policy, and resource profile.
 - `melkor convert` now writes its loss report after staging and before the atomic commit.
 - Consumers must use that report only when the command returns exit status zero.

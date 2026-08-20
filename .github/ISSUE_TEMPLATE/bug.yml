@@ -32,7 +32,7 @@ body:
       description: >-
         Paste the release tag or the output of `melkor --version`.
         Give the exact commit for a source build. Use `git rev-parse HEAD`.
-      placeholder: "v2.0.0-rc.1 / git 4f2a91c"
+      placeholder: "2.0.0-dev / git <short SHA>"
     validations:
       required: true
 

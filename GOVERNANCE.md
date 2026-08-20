@@ -11,18 +11,23 @@ claiming a review process that does not exist.
 
 Governance decisions are bounded by this product definition.
 Melkor is a Gaussian-splat asset interoperability core.
-It inspects, validates, normalizes, and converts supported PLY, SPZ, glTF, and GLB assets.
+It inspects and converts supported PLY, SPZ, glTF, and GLB assets.
+Each native operation validates input before it returns data or installs output.
 
 Melkor is **not** a reconstruction or training system. It contains no learned
 scene-reconstruction model, and it does not vendor or redistribute one.
 
 Reconstruction,
 training, depth estimation, and feedforward inference are separate programs with their own
-licenses, hardware requirements, and quality characteristics. Melkor reaches them through
-**external adapters**: pinned manifests that describe how to obtain, verify, invoke, and
-validate an external tool. An adapter describes a tool. It does not become that tool, and the
-tool's behavior is not Melkor's contract. See [`docs/adapters/index.md`](docs/adapters/index.md)
-and the scope section of [`ROADMAP.md`](ROADMAP.md).
+licenses, hardware requirements, and quality characteristics.
+Current shell wrappers can invoke user-supplied external programs for development work.
+They do not provide a pinned production adapter contract.
+
+The project plans manifest-based adapters that define how to obtain, verify, invoke, and
+validate an external tool. An adapter describes a tool. It does not become that tool.
+The external tool's behavior is not Melkor's native contract.
+See [`docs/adapters/index.md`](docs/adapters/index.md) and the scope section of
+[`ROADMAP.md`](ROADMAP.md).
 
 This boundary keeps copyleft or research-only model code outside the permissively licensed core.
 It also keeps the support scope manageable. The maintainer will decline a proposal that erodes
@@ -93,10 +98,9 @@ responder triages them against the threat model in [`SECURITY.md`](SECURITY.md).
 coordinates an embargoed fix, requests a CVE when necessary, and publishes the advisory.
 The security responder may use the emergency exception in [§8](#8-emergency-security-exception).
 
-The security responder will try to acknowledge a report within a few days. This target applies
-only while that person is available. After two weeks without acknowledgment, the project asks
-reporters to use the escalation process in [`SECURITY.md`](SECURITY.md). Reporters remain free to
-disclose on their own timeline.
+The response targets and same-thread follow-up guidance are in [`SECURITY.md`](SECURITY.md).
+These targets apply only while the security responder is available.
+Reporters remain free to disclose on their own timeline.
 
 ## 3. Bus factor and the independent review requirement
 

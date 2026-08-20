@@ -19,7 +19,7 @@ The validator uses a module worker, so large checks do not block viewer controls
 
 Choose **Open local splat** or drag one file anywhere over the viewer. PLY,
 SPZ, SPLAT, KSPLAT, and bundled SOG/ZIP files are supported up to 256 MiB. The
-file is streamed directly into Spark inside the browser or desktop webview: it
+file is validated and passed to Spark inside the browser or desktop webview. It
 is never uploaded, copied into `public/`, or granted persistent filesystem
 access. Selecting another local file replaces the retained `File` reference,
 so the viewer does not keep an unbounded history in memory.
@@ -62,8 +62,7 @@ Selecting another file or scene cancels the active validation worker.
 
 ## Scene fixtures
 
-The normal developer setup exercises all four Spark container paths plus a
-temporal sequence:
+The normal developer setup exercises SPZ, SOG, SPLAT, and temporal PLY paths:
 
 | Scene | Format | Size | Provenance |
 |---|---:|---:|---|

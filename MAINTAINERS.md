@@ -95,8 +95,9 @@ invoke the emergency exception in
 review and record the bypass in the release notes.
 
 With one person in this role, the acknowledgment target in `SECURITY.md` holds only while that
-person is available. The project asks reporters to use the escalation process in `SECURITY.md`
-for an unacknowledged report. Reporters remain free to disclose on their own timeline.
+person is available.
+The detailed response targets and same-thread follow-up guidance are in `SECURITY.md`.
+Reporters remain free to disclose on their own timeline.
 
 ## Ownership of code paths
 

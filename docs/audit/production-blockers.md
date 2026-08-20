@@ -4,7 +4,7 @@ This register lists the current release gates for the narrow Melkor v2 product.
 It replaces the 2026-07-14 implementation backlog.
 The dated audit files preserve that historical review.
 
-Last updated: 2026-08-12.
+Last reviewed against `main`: 2026-08-20.
 
 ## Release boundary
 

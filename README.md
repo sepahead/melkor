@@ -142,6 +142,8 @@ melkor inspect INPUT [options]
 melkor convert INPUT OUTPUT [options]
 ```
 
+See the [complete CLI reference](docs/CLI.md) for every option, profile, and automation rule.
+
 Inspect a self-describing asset:
 
 ```bash
@@ -257,7 +259,9 @@ The viewer fetch script verifies each downloaded fixture digest.
 
 | Document | Contents |
 |---|---|
+| [Documentation index](docs/README.md) | Guide map, document status, and audit-record boundary |
 | [Quick Start](docs/QUICKSTART.md) | Build, inspect, convert, install, and viewer steps |
+| [CLI reference](docs/CLI.md) | Commands, options, profiles, loss reports, and automation rules |
 | [Asset inspection](docs/INSPECT.md) | Inspection report, diagnostics, and exit codes |
 | [Canonical semantics](docs/reference/canonical-semantics.md) | Canonical values and format mappings |
 | [Loss policy](docs/reference/loss-policy.md) | Loss severity and approval rules |
@@ -271,7 +275,7 @@ The viewer fetch script verifies each downloaded fixture digest.
 
 ```text
 melkor/
-├── include/melkor/    Internal C++ headers and the public C ABI
+├── include/melkor/    Private C++ headers and the public C ABI header
 ├── src/               Format, safety, CLI, and C ABI implementation
 ├── profiles/          Machine-readable format profiles
 ├── schemas/           Inspection, loss-report, and profile schemas

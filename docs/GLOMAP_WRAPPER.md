@@ -6,7 +6,7 @@ It does not run the retired standalone GLOMAP program.
 
 Use this wrapper as a transition tool.
 The wrapper does not install or pin COLMAP.
-The planned adapter runner will provide a pinned tool contract.
+Any future supported adapter must provide a pinned tool contract.
 
 ## Requirements
 
@@ -26,6 +26,24 @@ It accepts these input image formats:
 - TIFF
 
 Convert other image formats before you run the wrapper.
+
+Current COLMAP documentation recommends `view_graph_calibrator` before global mapping when
+reliable camera intrinsics are unavailable.
+That command changes the database in place.
+The wrapper does not run it automatically.
+
+Prepare a copied project when you need that calibration:
+
+```bash
+cp -a existing-project calibrated-project
+colmap view_graph_calibrator --database_path calibrated-project/database.db
+./scripts/glomap_wrapper.sh calibrated-project output \
+  --skip-features --skip-matching
+```
+
+The copied project must contain `database.db` and `images/`.
+See the official [COLMAP CLI reference](https://colmap.github.io/cli.html) for the calibration
+preconditions and current command behavior.
 
 ## Basic use
 

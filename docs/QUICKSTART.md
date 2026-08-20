@@ -50,6 +50,7 @@ ctest --preset dev
 ```
 
 The executable is `build/dev/melkor`.
+See the [CLI reference](CLI.md) for every command option and profile.
 
 The `MELKOR_BUILD_SPZ` setting accepts `AUTO`, `ON`, or `OFF`.
 `AUTO` enables SPZ when CMake finds the vendored source and zlib.

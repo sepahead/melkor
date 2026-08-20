@@ -3,7 +3,7 @@
 Melkor now has a narrow and internally consistent v2 product design.
 The authoritative release gates are in [`production-blockers.md`](production-blockers.md).
 
-Last updated: 2026-08-12.
+Last reviewed against `main`: 2026-08-20.
 
 ## Current product state
 
