@@ -1,0 +1,58 @@
+<ns0:svg xmlns:ns0="http://www.w3.org/2000/svg" viewBox="656 266 124 124" width="124" height="124" role="img" aria-labelledby="melkor-archive-title melkor-archive-desc"><ns0:title id="melkor-archive-title">MELKOR historical profile mark</ns0:title><ns0:desc id="melkor-archive-desc">Archived design extracted from a historical portfolio SVG. This image makes no current product or release claim.</ns0:desc><ns0:defs><ns0:filter id="edgeGlow" x="-30%" y="-30%" width="160%" height="160%">
+      <ns0:feGaussianBlur stdDeviation="2.4" result="b" />
+      <ns0:feMerge><ns0:feMergeNode in="b" /><ns0:feMergeNode in="SourceGraphic" /></ns0:feMerge>
+    </ns0:filter>
+    <ns0:filter id="nodeShadow" x="-40%" y="-40%" width="180%" height="180%">
+      <ns0:feDropShadow dx="0" dy="1.5" stdDeviation="2.4" flood-color="#000000" flood-opacity="0.38" />
+    </ns0:filter>
+    <ns0:filter id="soft" x="-60%" y="-60%" width="220%" height="220%">
+      <ns0:feGaussianBlur stdDeviation="4" result="b" />
+      <ns0:feMerge><ns0:feMergeNode in="b" /><ns0:feMergeNode in="SourceGraphic" /></ns0:feMerge>
+    </ns0:filter>
+    </ns0:defs><ns0:style>.mel-plate{fill: url(#melPlate);}
+.mel-rock{fill: url(#melRock);}
+.mel-fog-g{opacity: 0.42;}
+.mel-ridge{fill: none; stroke: #fdba74; stroke-opacity: 0.7; stroke-width: 1.3; stroke-linejoin: round; stroke-linecap: round;}
+.mel-facet{fill: #1a0e08;}
+.mel-tin{stroke: #000000; stroke-opacity: 0.35; stroke-width: 0.6; stroke-linejoin: round;}
+.mel-front{fill: #ffedd5; filter: url(#edgeGlow);}
+.mel-edge{fill: none; stroke: url(#melBezel); stroke-width: 2.4; stroke-linejoin: miter;}
+.mel-groove{fill: none; stroke: #05070b; stroke-opacity: 0.5; stroke-width: 1;}
+.mel-hairline{fill: none; stroke: #2b333d; stroke-opacity: 0.55; stroke-width: 1;}</ns0:style><ns0:g class="nodes"><ns0:g>
+    <ns0:defs>
+      <ns0:linearGradient id="melPlate" x1="0" y1="280" x2="0" y2="376" gradientUnits="userSpaceOnUse">
+        <ns0:stop offset="0%" stop-color="#2b1a10" /><ns0:stop offset="55%" stop-color="#170d07" /><ns0:stop offset="100%" stop-color="#0b0604" />
+      </ns0:linearGradient>
+      <ns0:linearGradient id="melRock" x1="0" y1="292" x2="0" y2="352" gradientUnits="userSpaceOnUse">
+        <ns0:stop offset="0%" stop-color="#241209" /><ns0:stop offset="55%" stop-color="#3a1e0e" /><ns0:stop offset="100%" stop-color="#582d15" />
+      </ns0:linearGradient>
+      <ns0:radialGradient id="melHeat" gradientUnits="userSpaceOnUse" cx="718" cy="350" r="62">
+        <ns0:stop offset="0%" stop-color="#c2410c" stop-opacity="0.72" /><ns0:stop offset="45%" stop-color="#9a3412" stop-opacity="0.38" /><ns0:stop offset="100%" stop-color="#7c2d12" stop-opacity="0" />
+      </ns0:radialGradient>
+      <ns0:linearGradient id="melBezel" x1="0" y1="280" x2="0" y2="376" gradientUnits="userSpaceOnUse">
+        <ns0:stop offset="0%" stop-color="#fed7aa" /><ns0:stop offset="45%" stop-color="#b45309" /><ns0:stop offset="100%" stop-color="#571c07" />
+      </ns0:linearGradient>
+      <ns0:clipPath id="melClip"><ns0:path d="M718 280 L759.6 304 L759.6 352 L718 376 L676.4 352 L676.4 304 Z" /></ns0:clipPath>
+      <ns0:clipPath id="melMassif"><ns0:path d="M688 352 L706 306 L718 326 L730 294 L748 352 Z" /></ns0:clipPath>
+      <ns0:clipPath id="melBuild"><ns0:rect x="666" y="288" width="104" height="92"><ns0:animate attributeName="y" values="288;288;354;354;288;288" keyTimes="0;0.12;0.2;0.32;0.72;1" dur="6s" repeatCount="indefinite" /><ns0:animate attributeName="height" values="92;92;26;26;92;92" keyTimes="0;0.12;0.2;0.32;0.72;1" dur="6s" repeatCount="indefinite" /></ns0:rect></ns0:clipPath>
+    </ns0:defs>
+    <ns0:g filter="url(#nodeShadow)"><ns0:path d="M718 280 L759.6 304 L759.6 352 L718 376 L676.4 352 L676.4 304 Z" class="mel-plate" /></ns0:g>
+    <ns0:g clip-path="url(#melClip)">
+      <ns0:path d="M718 280 L759.6 304 L759.6 352 L718 376 L676.4 352 L676.4 304 Z" fill="url(#melHeat)" />
+      <ns0:g class="mel-fog-g" filter="url(#soft)"><ns0:path d="M688 352 L706 306 L718 326 L730 294 L748 352 Z" class="mel-rock" /><ns0:path d="M730 294 L748 352 L730 352 Z" class="mel-facet" /><ns0:polygon class="mel-tin" points="688,352 706,306 712,352" fill="#4a2712" />
+      <ns0:polygon class="mel-tin" points="706,306 718,326 712,352" fill="#2a1509" />
+      <ns0:polygon class="mel-tin" points="718,326 720,352 712,352" fill="#1c0e07" />
+      <ns0:polygon class="mel-tin" points="718,326 730,294 720,352" fill="#5c3117" />
+      <ns0:polygon class="mel-tin" points="730,294 730,352 720,352" fill="#331a0c" /><ns0:path d="M688 352 L706 306 L718 326 L730 294 L748 352" class="mel-ridge" /></ns0:g>
+      <ns0:g clip-path="url(#melBuild)"><ns0:path d="M688 352 L706 306 L718 326 L730 294 L748 352 Z" class="mel-rock" /><ns0:path d="M730 294 L748 352 L730 352 Z" class="mel-facet" /><ns0:polygon class="mel-tin" points="688,352 706,306 712,352" fill="#4a2712" />
+      <ns0:polygon class="mel-tin" points="706,306 718,326 712,352" fill="#2a1509" />
+      <ns0:polygon class="mel-tin" points="718,326 720,352 712,352" fill="#1c0e07" />
+      <ns0:polygon class="mel-tin" points="718,326 730,294 720,352" fill="#5c3117" />
+      <ns0:polygon class="mel-tin" points="730,294 730,352 720,352" fill="#331a0c" /><ns0:path d="M688 352 L706 306 L718 326 L730 294 L748 352" class="mel-ridge" /></ns0:g>
+      <ns0:g clip-path="url(#melMassif)"><ns0:rect class="mel-front" x="684" y="352" width="68" height="3.4" opacity="0"><ns0:animate attributeName="y" values="352;352;293;293;352" keyTimes="0;0.32;0.72;0.74;1" dur="6s" repeatCount="indefinite" /><ns0:animate attributeName="opacity" values="0;0;0.9;0.9;0;0" keyTimes="0;0.32;0.37;0.67;0.72;1" dur="6s" repeatCount="indefinite" /></ns0:rect></ns0:g>
+    </ns0:g>
+    <ns0:path d="M718 280 L759.6 304 L759.6 352 L718 376 L676.4 352 L676.4 304 Z" class="mel-edge" />
+    <ns0:path d="M718 282.8 L757.2 305.4 L757.2 350.6 L718 373.2 L678.8 350.6 L678.8 305.4 Z" class="mel-groove" />
+    <ns0:path d="M718 278.4 L761 303.2 L761 352.8 L718 377.6 L675 352.8 L675 303.2 Z" class="mel-hairline" />
+    </ns0:g>
+  </ns0:g></ns0:svg>

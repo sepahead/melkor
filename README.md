@@ -1,6 +1,8 @@
 <div align="center">
 
-<img src="assets/logo.svg" alt="An ember-lit hexagonal plate with a faceted twin-peak massif." width="200" />
+<img src="assets/logo.svg" alt="Melkor: copper-edged twin peaks in a graphite frame, with a slow inspection sweep." width="200" />
+
+[Logo design archive](assets/archive/logos/README.md)
 
 # Melkor
 

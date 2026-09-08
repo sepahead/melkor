@@ -1,0 +1,2 @@
+# Preserve exact historical SVG whitespace.
+**/*.svg whitespace=-blank-at-eol

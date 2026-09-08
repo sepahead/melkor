@@ -1,0 +1,14 @@
+<ns0:svg xmlns:ns0="http://www.w3.org/2000/svg" viewBox="628 188 124 124" width="124" height="124" role="img" aria-labelledby="melkor-archive-title melkor-archive-desc"><ns0:title id="melkor-archive-title">MELKOR historical profile mark</ns0:title><ns0:desc id="melkor-archive-desc">Archived design extracted from a historical portfolio SVG. This image makes no current product or release claim.</ns0:desc><ns0:defs><ns0:radialGradient id="cubeGrad" cx="50%" cy="42%" r="70%">
+      <ns0:stop offset="0%" stop-color="#2a1608" />
+      <ns0:stop offset="100%" stop-color="#0a1117" />
+    </ns0:radialGradient>
+    <ns0:filter id="soft" x="-60%" y="-60%" width="220%" height="220%">
+      <ns0:feGaussianBlur stdDeviation="4" result="b" />
+      <ns0:feMerge><ns0:feMergeNode in="b" /><ns0:feMergeNode in="SourceGraphic" /></ns0:feMerge>
+    </ns0:filter>
+    </ns0:defs><ns0:style>:root{--hub-accent: #34d399; --cube-accent: #fb923c; --tri-accent: #a78bfa;}
+.cube{fill: url(#cubeGrad); stroke: #fb923c; stroke-width: 2; filter: url(#soft);}</ns0:style><ns0:g class="nodes"><ns0:g>
+    <ns0:rect x="644" y="204" width="92" height="92" rx="16" class="cube" />
+    
+    </ns0:g>
+  </ns0:g></ns0:svg>

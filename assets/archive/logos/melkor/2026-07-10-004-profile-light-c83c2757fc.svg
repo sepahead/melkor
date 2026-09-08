@@ -1,0 +1,30 @@
+<ns0:svg xmlns:ns0="http://www.w3.org/2000/svg" viewBox="628 188 124 124" width="124" height="124" role="img" aria-labelledby="melkor-archive-title melkor-archive-desc"><ns0:title id="melkor-archive-title">MELKOR historical profile mark</ns0:title><ns0:desc id="melkor-archive-desc">Archived design extracted from a historical portfolio SVG. This image makes no current product or release claim.</ns0:desc><ns0:defs><ns0:radialGradient id="cubeGrad" cx="50%" cy="42%" r="70%">
+      <ns0:stop offset="0%" stop-color="#2a1608" />
+      <ns0:stop offset="100%" stop-color="#0a1117" />
+    </ns0:radialGradient>
+    <ns0:radialGradient id="melSplat" cx="50%" cy="50%" r="50%">
+      <ns0:stop offset="0%" stop-color="#fdba74" stop-opacity="0.95" />
+      <ns0:stop offset="55%" stop-color="#fb923c" stop-opacity="0.55" />
+      <ns0:stop offset="100%" stop-color="#fb923c" stop-opacity="0" />
+    </ns0:radialGradient>
+    <ns0:filter id="soft" x="-60%" y="-60%" width="220%" height="220%">
+      <ns0:feGaussianBlur stdDeviation="4" result="b" />
+      <ns0:feMerge><ns0:feMergeNode in="b" /><ns0:feMergeNode in="SourceGraphic" /></ns0:feMerge>
+    </ns0:filter>
+    </ns0:defs><ns0:style>:root{--hub-accent: #34d399; --cube-accent: #fb923c; --tri-accent: #a78bfa;}
+.mel-hex{fill: url(#cubeGrad); stroke: #fb923c; stroke-width: 2; stroke-linejoin: miter; filter: url(#soft);}
+.mel-grid{fill: none; stroke: #fb923c; stroke-opacity: 0.16; stroke-width: 1;}
+.mel-wire{fill: none; stroke: #fdba74; stroke-opacity: 0.75; stroke-width: 1.4; stroke-linejoin: round;}
+.mel-wired{fill: none; stroke: #fdba74; stroke-opacity: 0.4; stroke-width: 1.1; stroke-dasharray: 3 3;}
+:root{--hub-accent: #059669; --cube-accent: #c2410c; --tri-accent: #7c3aed;}
+.mel-hex{fill: #ffffff; stroke: #c2410c;}
+.mel-grid{stroke: #c2410c;}
+.mel-wire{stroke: #b45309;}
+.mel-wired{stroke: #b45309;}</ns0:style><ns0:g class="nodes"><ns0:g>
+    <ns0:path d="M690 202 L731.6 226 L731.6 274 L690 298 L648.4 274 L648.4 226 Z" class="mel-hex" />
+    <ns0:path class="mel-grid" d="M660 274 L690 258 L720 274" />
+    <ns0:path class="mel-wire" d="M662 264 L681 228 L690 242 L700 220 L720 264" />
+    <ns0:path class="mel-wired" d="M681 228 L692 264 M700 220 L689 264" />
+    <ns0:ellipse cx="668" cy="256" rx="6" ry="2.4" transform="rotate(-28 668 256)" fill="url(#melSplat)" opacity="0.8" /><ns0:ellipse cx="676" cy="244" rx="5" ry="2" transform="rotate(-38 676 244)" fill="url(#melSplat)" opacity="0.9" /><ns0:ellipse cx="683" cy="232" rx="4" ry="1.6" transform="rotate(-46 683 232)" fill="url(#melSplat)" opacity="1" /><ns0:ellipse cx="674" cy="260" rx="5.5" ry="2.2" transform="rotate(18 674 260)" fill="url(#melSplat)" opacity="0.7" /><ns0:ellipse cx="686" cy="249" rx="4.5" ry="1.8" transform="rotate(-12 686 249)" fill="url(#melSplat)" opacity="0.85" /><ns0:ellipse cx="699" cy="238" rx="3.6" ry="1.5" transform="rotate(-30 699 238)" fill="url(#melSplat)" opacity="0.6" /><ns0:ellipse cx="706" cy="254" rx="3.4" ry="1.4" transform="rotate(14 706 254)" fill="url(#melSplat)" opacity="0.35" />
+    </ns0:g>
+  </ns0:g></ns0:svg>

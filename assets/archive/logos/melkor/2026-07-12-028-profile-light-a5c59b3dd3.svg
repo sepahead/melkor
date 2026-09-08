@@ -1,0 +1,112 @@
+<ns0:svg xmlns:ns0="http://www.w3.org/2000/svg" viewBox="628 188 124 124" width="124" height="124" role="img" aria-labelledby="melkor-archive-title melkor-archive-desc"><ns0:title id="melkor-archive-title">MELKOR historical profile mark</ns0:title><ns0:desc id="melkor-archive-desc">Archived design extracted from a historical portfolio SVG. This image makes no current product or release claim.</ns0:desc><ns0:defs><ns0:filter id="edgeGlow" x="-30%" y="-30%" width="160%" height="160%">
+      <ns0:feGaussianBlur stdDeviation="2.4" result="b" />
+      <ns0:feMerge><ns0:feMergeNode in="b" /><ns0:feMergeNode in="SourceGraphic" /></ns0:feMerge>
+    </ns0:filter>
+    <ns0:filter id="nodeShadow" x="-40%" y="-40%" width="180%" height="180%">
+      <ns0:feDropShadow dx="0" dy="1.5" stdDeviation="2.4" flood-color="#000000" flood-opacity="0.38" />
+    </ns0:filter>
+    </ns0:defs><ns0:style>:root{--hub-accent: #34d399; --cube-accent: #fb923c; --tri-accent: #a78bfa;}
+.mel-plate{fill: url(#melPlate);}
+.mel-rock{fill: #050302;}
+.mel-ridge{fill: none; stroke: #fdba74; stroke-opacity: 0.7; stroke-width: 1.3; stroke-linejoin: round; stroke-linecap: round;}
+.mel-facet{fill: #070302;}
+.mel-tin{stroke: #000000; stroke-opacity: 0.4; stroke-width: 0.6; stroke-linejoin: round;}
+.mel-splat{fill: url(#melSplat);}
+.mel-front{fill: #ffedd5; filter: url(#edgeGlow);}
+.mel-edge{fill: none; stroke: url(#melBezel); stroke-width: 2.4; stroke-linejoin: miter;}
+.mel-groove{fill: none; stroke: #05070b; stroke-opacity: 0.5; stroke-width: 1;}
+.mel-hairline{fill: none; stroke: #2b333d; stroke-opacity: 0.55; stroke-width: 1;}
+:root{--hub-accent: #059669; --cube-accent: #c2410c; --tri-accent: #7c3aed;}</ns0:style><ns0:g class="nodes"><ns0:g>
+    <ns0:defs>
+      <ns0:linearGradient id="melPlate" x1="0" y1="202" x2="0" y2="298" gradientUnits="userSpaceOnUse">
+        <ns0:stop offset="0%" stop-color="#2b1a10" /><ns0:stop offset="55%" stop-color="#170d07" /><ns0:stop offset="100%" stop-color="#0b0604" />
+      </ns0:linearGradient>
+      <ns0:radialGradient id="melSplat">
+        <ns0:stop offset="0%" stop-color="#fed7aa" stop-opacity="0.9" /><ns0:stop offset="42%" stop-color="#f97316" stop-opacity="0.5" /><ns0:stop offset="100%" stop-color="#ea580c" stop-opacity="0" />
+      </ns0:radialGradient>
+      <ns0:radialGradient id="melHeat" gradientUnits="userSpaceOnUse" cx="690" cy="272" r="62">
+        <ns0:stop offset="0%" stop-color="#c2410c" stop-opacity="0.72" /><ns0:stop offset="45%" stop-color="#9a3412" stop-opacity="0.38" /><ns0:stop offset="100%" stop-color="#7c2d12" stop-opacity="0" />
+      </ns0:radialGradient>
+      <ns0:linearGradient id="melBezel" x1="0" y1="202" x2="0" y2="298" gradientUnits="userSpaceOnUse">
+        <ns0:stop offset="0%" stop-color="#fed7aa" /><ns0:stop offset="45%" stop-color="#b45309" /><ns0:stop offset="100%" stop-color="#571c07" />
+      </ns0:linearGradient>
+      <ns0:clipPath id="melClip"><ns0:path d="M690 202 L731.6 226 L731.6 274 L690 298 L648.4 274 L648.4 226 Z" /></ns0:clipPath>
+      <ns0:clipPath id="melMassif"><ns0:path d="M660 274 L678 228 L690 248 L702 216 L720 274 Z" /></ns0:clipPath>
+    </ns0:defs>
+    <ns0:g filter="url(#nodeShadow)"><ns0:path d="M690 202 L731.6 226 L731.6 274 L690 298 L648.4 274 L648.4 226 Z" class="mel-plate" /></ns0:g>
+    <ns0:g clip-path="url(#melClip)">
+      <ns0:path d="M690 202 L731.6 226 L731.6 274 L690 298 L648.4 274 L648.4 226 Z" fill="url(#melHeat)" />
+      <ns0:path d="M660 274 L678 228 L690 248 L702 216 L720 274 Z" class="mel-rock" />
+      <ns0:path d="M702 216 L720 274 L702 274 Z" class="mel-facet" />
+      <ns0:polygon class="mel-tin" points="660,274 678,228 684,274" fill="#170b05" />
+      <ns0:polygon class="mel-tin" points="678,228 690,248 684,274" fill="#0e0703" />
+      <ns0:polygon class="mel-tin" points="690,248 692,274 684,274" fill="#241109" />
+      <ns0:polygon class="mel-tin" points="690,248 702,216 692,274" fill="#331A0d" />
+      <ns0:polygon class="mel-tin" points="702,216 702,274 692,274" fill="#20100a" />
+      <ns0:path d="M660 274 L678 228 L690 248 L702 216 L720 274" class="mel-ridge" />
+      <ns0:circle class="mel-splat" cx="681.1" cy="270.6" r="1.7"><ns0:animate attributeName="r" values="1.7;1.7;0;0;1.7;1.7" keyTimes="0;0.12;0.2;0.3;0.4;1" dur="6s" repeatCount="indefinite" /></ns0:circle>
+      <ns0:circle class="mel-splat" cx="691.8" cy="270.3" r="1.7"><ns0:animate attributeName="r" values="1.7;1.7;0;0;1.7;1.7" keyTimes="0;0.12;0.2;0.3;0.4;1" dur="6s" repeatCount="indefinite" /></ns0:circle>
+      <ns0:circle class="mel-splat" cx="702.5" cy="270" r="1.7"><ns0:animate attributeName="r" values="1.7;1.7;0;0;1.7;1.7" keyTimes="0;0.12;0.2;0.3;0.4;1" dur="6s" repeatCount="indefinite" /></ns0:circle>
+      <ns0:circle class="mel-splat" cx="663.9" cy="269.9" r="1.7"><ns0:animate attributeName="r" values="1.7;1.7;0;0;1.7;1.7" keyTimes="0;0.12;0.2;0.3;0.4;1" dur="6s" repeatCount="indefinite" /></ns0:circle>
+      <ns0:circle class="mel-splat" cx="713.1" cy="269.7" r="1.7"><ns0:animate attributeName="r" values="1.7;1.7;0;0;1.7;1.7" keyTimes="0;0.12;0.2;0.3;0.4;1" dur="6s" repeatCount="indefinite" /></ns0:circle>
+      <ns0:circle class="mel-splat" cx="674.6" cy="269.6" r="1.7"><ns0:animate attributeName="r" values="1.7;1.7;0;0;1.7;1.7" keyTimes="0;0.12;0.2;0.4;0.4;1" dur="6s" repeatCount="indefinite" /></ns0:circle>
+      <ns0:circle class="mel-splat" cx="685.2" cy="269.3" r="1.7"><ns0:animate attributeName="r" values="1.7;1.7;0;0;1.7;1.7" keyTimes="0;0.12;0.2;0.4;0.4;1" dur="6s" repeatCount="indefinite" /></ns0:circle>
+      <ns0:circle class="mel-splat" cx="695.9" cy="268.9" r="1.7"><ns0:animate attributeName="r" values="1.7;1.7;0;0;1.7;1.7" keyTimes="0;0.12;0.2;0.4;0.4;1" dur="6s" repeatCount="indefinite" /></ns0:circle>
+      <ns0:circle class="mel-splat" cx="709" cy="268.6" r="1.7"><ns0:animate attributeName="r" values="1.7;1.7;0;0;1.7;1.7" keyTimes="0;0.12;0.2;0.4;0.4;1" dur="6s" repeatCount="indefinite" /></ns0:circle>
+      <ns0:circle class="mel-splat" cx="670.4" cy="268.5" r="1.7"><ns0:animate attributeName="r" values="1.7;1.7;0;0;1.7;1.7" keyTimes="0;0.12;0.2;0.4;0.4;1" dur="6s" repeatCount="indefinite" /></ns0:circle>
+      <ns0:circle class="mel-splat" cx="697.5" cy="265" r="1.7"><ns0:animate attributeName="r" values="1.7;1.7;0;0;1.7;1.7" keyTimes="0;0.12;0.2;0.4;0.4;1" dur="6s" repeatCount="indefinite" /></ns0:circle>
+      <ns0:circle class="mel-splat" cx="708.2" cy="264.7" r="1.7"><ns0:animate attributeName="r" values="1.7;1.7;0;0;1.7;1.7" keyTimes="0;0.12;0.2;0.4;0.4;1" dur="6s" repeatCount="indefinite" /></ns0:circle>
+      <ns0:circle class="mel-splat" cx="669.6" cy="264.6" r="1.7"><ns0:animate attributeName="r" values="1.7;1.7;0;0;1.7;1.7" keyTimes="0;0.12;0.2;0.4;0.4;1" dur="6s" repeatCount="indefinite" /></ns0:circle>
+      <ns0:circle class="mel-splat" cx="680.3" cy="264.3" r="1.7"><ns0:animate attributeName="r" values="1.7;1.7;0;0;1.7;1.7" keyTimes="0;0.12;0.2;0.4;0.5;1" dur="6s" repeatCount="indefinite" /></ns0:circle>
+      <ns0:circle class="mel-splat" cx="691" cy="264" r="1.7"><ns0:animate attributeName="r" values="1.7;1.7;0;0;1.7;1.7" keyTimes="0;0.12;0.2;0.4;0.5;1" dur="6s" repeatCount="indefinite" /></ns0:circle>
+      <ns0:circle class="mel-splat" cx="701.7" cy="263.7" r="1.7"><ns0:animate attributeName="r" values="1.7;1.7;0;0;1.7;1.7" keyTimes="0;0.12;0.2;0.4;0.5;1" dur="6s" repeatCount="indefinite" /></ns0:circle>
+      <ns0:circle class="mel-splat" cx="663.1" cy="263.6" r="1.7"><ns0:animate attributeName="r" values="1.7;1.7;0;0;1.7;1.7" keyTimes="0;0.12;0.2;0.4;0.5;1" dur="6s" repeatCount="indefinite" /></ns0:circle>
+      <ns0:circle class="mel-splat" cx="712.3" cy="263.4" r="1.7"><ns0:animate attributeName="r" values="1.7;1.7;0;0;1.7;1.7" keyTimes="0;0.12;0.2;0.4;0.5;1" dur="6s" repeatCount="indefinite" /></ns0:circle>
+      <ns0:circle class="mel-splat" cx="676.2" cy="263.3" r="1.7"><ns0:animate attributeName="r" values="1.7;1.7;0;0;1.7;1.7" keyTimes="0;0.12;0.2;0.4;0.5;1" dur="6s" repeatCount="indefinite" /></ns0:circle>
+      <ns0:circle class="mel-splat" cx="686.8" cy="263" r="1.7"><ns0:animate attributeName="r" values="1.7;1.7;0;0;1.7;1.7" keyTimes="0;0.12;0.2;0.4;0.5;1" dur="6s" repeatCount="indefinite" /></ns0:circle>
+      <ns0:circle class="mel-splat" cx="713.9" cy="259.5" r="1.7"><ns0:animate attributeName="r" values="1.7;1.7;0;0;1.7;1.7" keyTimes="0;0.12;0.2;0.5;0.5;1" dur="6s" repeatCount="indefinite" /></ns0:circle>
+      <ns0:circle class="mel-splat" cx="675.4" cy="259.4" r="1.7"><ns0:animate attributeName="r" values="1.7;1.7;0;0;1.7;1.7" keyTimes="0;0.12;0.2;0.5;0.5;1" dur="6s" repeatCount="indefinite" /></ns0:circle>
+      <ns0:circle class="mel-splat" cx="686" cy="259.1" r="1.7"><ns0:animate attributeName="r" values="1.7;1.7;0;0;1.7;1.7" keyTimes="0;0.12;0.2;0.5;0.5;1" dur="6s" repeatCount="indefinite" /></ns0:circle>
+      <ns0:circle class="mel-splat" cx="696.7" cy="258.7" r="1.7"><ns0:animate attributeName="r" values="1.7;1.7;0;0;1.7;1.7" keyTimes="0;0.12;0.2;0.5;0.5;1" dur="6s" repeatCount="indefinite" /></ns0:circle>
+      <ns0:circle class="mel-splat" cx="707.4" cy="258.4" r="1.7"><ns0:animate attributeName="r" values="1.7;1.7;0;0;1.7;1.7" keyTimes="0;0.12;0.2;0.5;0.5;1" dur="6s" repeatCount="indefinite" /></ns0:circle>
+      <ns0:circle class="mel-splat" cx="668.8" cy="258.3" r="1.7"><ns0:animate attributeName="r" values="1.7;1.7;0;0;1.7;1.7" keyTimes="0;0.12;0.2;0.5;0.5;1" dur="6s" repeatCount="indefinite" /></ns0:circle>
+      <ns0:circle class="mel-splat" cx="679.5" cy="258" r="1.7"><ns0:animate attributeName="r" values="1.7;1.7;0;0;1.7;1.7" keyTimes="0;0.12;0.2;0.5;0.5;1" dur="6s" repeatCount="indefinite" /></ns0:circle>
+      <ns0:circle class="mel-splat" cx="692.6" cy="257.7" r="1.7"><ns0:animate attributeName="r" values="1.7;1.7;0;0;1.7;1.7" keyTimes="0;0.12;0.2;0.5;0.5;1" dur="6s" repeatCount="indefinite" /></ns0:circle>
+      <ns0:circle class="mel-splat" cx="703.3" cy="257.4" r="1.7"><ns0:animate attributeName="r" values="1.7;1.7;0;0;1.7;1.7" keyTimes="0;0.12;0.2;0.5;0.6;1" dur="6s" repeatCount="indefinite" /></ns0:circle>
+      <ns0:circle class="mel-splat" cx="670.1" cy="254.1" r="1.7"><ns0:animate attributeName="r" values="1.7;1.7;0;0;1.7;1.7" keyTimes="0;0.12;0.2;0.5;0.6;1" dur="6s" repeatCount="indefinite" /></ns0:circle>
+      <ns0:circle class="mel-splat" cx="680.8" cy="253.8" r="1.7"><ns0:animate attributeName="r" values="1.7;1.7;0;0;1.7;1.7" keyTimes="0;0.12;0.2;0.5;0.6;1" dur="6s" repeatCount="indefinite" /></ns0:circle>
+      <ns0:circle class="mel-splat" cx="691.5" cy="253.5" r="1.7"><ns0:animate attributeName="r" values="1.7;1.7;0;0;1.7;1.7" keyTimes="0;0.12;0.2;0.5;0.6;1" dur="6s" repeatCount="indefinite" /></ns0:circle>
+      <ns0:circle class="mel-splat" cx="702.1" cy="253.2" r="1.7"><ns0:animate attributeName="r" values="1.7;1.7;0;0;1.7;1.7" keyTimes="0;0.12;0.2;0.5;0.6;1" dur="6s" repeatCount="indefinite" /></ns0:circle>
+      <ns0:circle class="mel-splat" cx="674.2" cy="252.8" r="1.7"><ns0:animate attributeName="r" values="1.7;1.7;0;0;1.7;1.7" keyTimes="0;0.12;0.2;0.5;0.6;1" dur="6s" repeatCount="indefinite" /></ns0:circle>
+      <ns0:circle class="mel-splat" cx="684.9" cy="252.4" r="1.7"><ns0:animate attributeName="r" values="1.7;1.7;0;0;1.7;1.7" keyTimes="0;0.12;0.2;0.6;0.6;1" dur="6s" repeatCount="indefinite" /></ns0:circle>
+      <ns0:circle class="mel-splat" cx="698" cy="252.1" r="1.7"><ns0:animate attributeName="r" values="1.7;1.7;0;0;1.7;1.7" keyTimes="0;0.12;0.2;0.6;0.6;1" dur="6s" repeatCount="indefinite" /></ns0:circle>
+      <ns0:circle class="mel-splat" cx="708.7" cy="251.8" r="1.7"><ns0:animate attributeName="r" values="1.7;1.7;0;0;1.7;1.7" keyTimes="0;0.12;0.2;0.6;0.6;1" dur="6s" repeatCount="indefinite" /></ns0:circle>
+      <ns0:circle class="mel-splat" cx="675.5" cy="248.5" r="1.7"><ns0:animate attributeName="r" values="1.7;1.7;0;0;1.7;1.7" keyTimes="0;0.12;0.2;0.6;0.6;1" dur="6s" repeatCount="indefinite" /></ns0:circle>
+      <ns0:circle class="mel-splat" cx="686.2" cy="248.2" r="1.7"><ns0:animate attributeName="r" values="1.7;1.7;0;0;1.7;1.7" keyTimes="0;0.12;0.2;0.6;0.6;1" dur="6s" repeatCount="indefinite" /></ns0:circle>
+      <ns0:circle class="mel-splat" cx="696.9" cy="247.9" r="1.7"><ns0:animate attributeName="r" values="1.7;1.7;0;0;1.7;1.7" keyTimes="0;0.12;0.2;0.6;0.6;1" dur="6s" repeatCount="indefinite" /></ns0:circle>
+      <ns0:circle class="mel-splat" cx="707.6" cy="247.6" r="1.7"><ns0:animate attributeName="r" values="1.7;1.7;0;0;1.7;1.7" keyTimes="0;0.12;0.2;0.6;0.6;1" dur="6s" repeatCount="indefinite" /></ns0:circle>
+      <ns0:circle class="mel-splat" cx="679.7" cy="247.2" r="1.7"><ns0:animate attributeName="r" values="1.7;1.7;0;0;1.7;1.7" keyTimes="0;0.12;0.2;0.6;0.6;1" dur="6s" repeatCount="indefinite" /></ns0:circle>
+      <ns0:circle class="mel-splat" cx="690.3" cy="246.9" r="1.7"><ns0:animate attributeName="r" values="1.7;1.7;0;0;1.7;1.7" keyTimes="0;0.12;0.2;0.6;0.6;1" dur="6s" repeatCount="indefinite" /></ns0:circle>
+      <ns0:circle class="mel-splat" cx="703.4" cy="246.5" r="1.7"><ns0:animate attributeName="r" values="1.7;1.7;0;0;1.7;1.7" keyTimes="0;0.12;0.2;0.6;0.7;1" dur="6s" repeatCount="indefinite" /></ns0:circle>
+      <ns0:circle class="mel-splat" cx="680.6" cy="242.6" r="1.7"><ns0:animate attributeName="r" values="1.7;1.7;0;0;1.7;1.7" keyTimes="0;0.12;0.2;0.6;0.7;1" dur="6s" repeatCount="indefinite" /></ns0:circle>
+      <ns0:circle class="mel-splat" cx="696.8" cy="242.3" r="1.7"><ns0:animate attributeName="r" values="1.7;1.7;0;0;1.7;1.7" keyTimes="0;0.12;0.2;0.6;0.7;1" dur="6s" repeatCount="indefinite" /></ns0:circle>
+      <ns0:circle class="mel-splat" cx="707.5" cy="242" r="1.7"><ns0:animate attributeName="r" values="1.7;1.7;0;0;1.7;1.7" keyTimes="0;0.12;0.2;0.6;0.7;1" dur="6s" repeatCount="indefinite" /></ns0:circle>
+      <ns0:circle class="mel-splat" cx="674.1" cy="241.6" r="1.7"><ns0:animate attributeName="r" values="1.7;1.7;0;0;1.7;1.7" keyTimes="0;0.12;0.2;0.6;0.7;1" dur="6s" repeatCount="indefinite" /></ns0:circle>
+      <ns0:circle class="mel-splat" cx="687.2" cy="241.3" r="1.7"><ns0:animate attributeName="r" values="1.7;1.7;0;0;1.7;1.7" keyTimes="0;0.12;0.2;0.6;0.7;1" dur="6s" repeatCount="indefinite" /></ns0:circle>
+      <ns0:circle class="mel-splat" cx="703.3" cy="241" r="1.7"><ns0:animate attributeName="r" values="1.7;1.7;0;0;1.7;1.7" keyTimes="0;0.12;0.2;0.7;0.7;1" dur="6s" repeatCount="indefinite" /></ns0:circle>
+      <ns0:circle class="mel-splat" cx="708.4" cy="237.5" r="1.7"><ns0:animate attributeName="r" values="1.7;1.7;0;0;1.7;1.7" keyTimes="0;0.12;0.2;0.7;0.7;1" dur="6s" repeatCount="indefinite" /></ns0:circle>
+      <ns0:circle class="mel-splat" cx="680.2" cy="236.7" r="1.7"><ns0:animate attributeName="r" values="1.7;1.7;0;0;1.7;1.7" keyTimes="0;0.12;0.2;0.7;0.7;1" dur="6s" repeatCount="indefinite" /></ns0:circle>
+      <ns0:circle class="mel-splat" cx="701.9" cy="236.4" r="1.7"><ns0:animate attributeName="r" values="1.7;1.7;0;0;1.7;1.7" keyTimes="0;0.12;0.2;0.7;0.7;1" dur="6s" repeatCount="indefinite" /></ns0:circle>
+      <ns0:circle class="mel-splat" cx="676.1" cy="235.7" r="1.7"><ns0:animate attributeName="r" values="1.7;1.7;0;0;1.7;1.7" keyTimes="0;0.12;0.2;0.7;0.7;1" dur="6s" repeatCount="indefinite" /></ns0:circle>
+      <ns0:circle class="mel-splat" cx="697.8" cy="235.4" r="1.7"><ns0:animate attributeName="r" values="1.7;1.7;0;0;1.7;1.7" keyTimes="0;0.12;0.2;0.7;0.7;1" dur="6s" repeatCount="indefinite" /></ns0:circle>
+      <ns0:circle class="mel-splat" cx="702.5" cy="231.6" r="1.7"><ns0:animate attributeName="r" values="1.7;1.7;0;0;1.7;1.7" keyTimes="0;0.12;0.2;0.7;0.7;1" dur="6s" repeatCount="indefinite" /></ns0:circle>
+      <ns0:circle class="mel-splat" cx="696" cy="230.5" r="1.7"><ns0:animate attributeName="r" values="1.7;1.7;0;0;1.7;1.7" keyTimes="0;0.12;0.2;0.7;0.7;1" dur="6s" repeatCount="indefinite" /></ns0:circle>
+      <ns0:circle class="mel-splat" cx="702.9" cy="226.4" r="1.7"><ns0:animate attributeName="r" values="1.7;1.7;0;0;1.7;1.7" keyTimes="0;0.12;0.2;0.7;0.8;1" dur="6s" repeatCount="indefinite" /></ns0:circle>
+      <ns0:circle class="mel-splat" cx="701.8" cy="219.8" r="1.7"><ns0:animate attributeName="r" values="1.7;1.7;0;0;1.7;1.7" keyTimes="0;0.12;0.2;0.7;0.8;1" dur="6s" repeatCount="indefinite" /></ns0:circle>
+      <ns0:g clip-path="url(#melMassif)"><ns0:rect class="mel-front" x="656" y="274" width="68" height="3.4" opacity="0"><ns0:animate attributeName="y" values="274;274;215;215;274" keyTimes="0;0.32;0.72;0.74;1" dur="6s" repeatCount="indefinite" /><ns0:animate attributeName="opacity" values="0;0;0.9;0.9;0;0" keyTimes="0;0.32;0.37;0.67;0.72;1" dur="6s" repeatCount="indefinite" /></ns0:rect></ns0:g>
+    </ns0:g>
+    <ns0:path d="M690 202 L731.6 226 L731.6 274 L690 298 L648.4 274 L648.4 226 Z" class="mel-edge" />
+    <ns0:path d="M690 204.8 L729.2 227.4 L729.2 272.6 L690 295.2 L650.8 272.6 L650.8 227.4 Z" class="mel-groove" />
+    <ns0:path d="M690 200.4 L733 225.2 L733 274.8 L690 299.6 L647 274.8 L647 225.2 Z" class="mel-hairline" />
+    </ns0:g>
+  </ns0:g></ns0:svg>

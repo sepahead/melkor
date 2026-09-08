@@ -1,0 +1,51 @@
+<ns0:svg xmlns:ns0="http://www.w3.org/2000/svg" viewBox="628 188 124 124" width="124" height="124" role="img" aria-labelledby="melkor-archive-title melkor-archive-desc"><ns0:title id="melkor-archive-title">MELKOR historical profile mark</ns0:title><ns0:desc id="melkor-archive-desc">Archived design extracted from a historical portfolio SVG. This image makes no current product or release claim.</ns0:desc><ns0:defs><ns0:radialGradient id="melSplat" cx="50%" cy="50%" r="50%">
+      <ns0:stop offset="0%" stop-color="#fdba74" stop-opacity="0.95" />
+      <ns0:stop offset="55%" stop-color="#fb923c" stop-opacity="0.55" />
+      <ns0:stop offset="100%" stop-color="#fb923c" stop-opacity="0" />
+    </ns0:radialGradient>
+    <ns0:filter id="nodeShadow" x="-40%" y="-40%" width="180%" height="180%">
+      <ns0:feDropShadow dx="0" dy="1.5" stdDeviation="2.4" flood-color="#000000" flood-opacity="0.38" />
+    </ns0:filter>
+    <ns0:filter id="soft" x="-60%" y="-60%" width="220%" height="220%">
+      <ns0:feGaussianBlur stdDeviation="4" result="b" />
+      <ns0:feMerge><ns0:feMergeNode in="b" /><ns0:feMergeNode in="SourceGraphic" /></ns0:feMerge>
+    </ns0:filter>
+    </ns0:defs><ns0:style>:root{--hub-accent: #34d399; --cube-accent: #fb923c; --tri-accent: #a78bfa;}
+.mel-plate{fill: url(#melPlate);}
+.mel-scan{fill: none; stroke: #fb923c; stroke-opacity: 0.09; stroke-width: 1;}
+.mel-rock{fill: #050302;}
+.mel-ridge{fill: none; stroke: #fdba74; stroke-opacity: 0.7; stroke-width: 1.3; stroke-linejoin: round; stroke-linecap: round;}
+.mel-facet{fill: #211008;}
+.mel-spark{fill: #fde68a;}
+.mel-edge{fill: none; stroke: url(#melBezel); stroke-width: 2.4; stroke-linejoin: miter;}
+.mel-groove{fill: none; stroke: #05070b; stroke-opacity: 0.5; stroke-width: 1;}
+.mel-hairline{fill: none; stroke: #2b333d; stroke-opacity: 0.55; stroke-width: 1;}</ns0:style><ns0:g class="nodes"><ns0:g>
+    <ns0:defs>
+      <ns0:linearGradient id="melPlate" x1="0" y1="202" x2="0" y2="298" gradientUnits="userSpaceOnUse">
+        <ns0:stop offset="0%" stop-color="#2b1a10" /><ns0:stop offset="55%" stop-color="#170d07" /><ns0:stop offset="100%" stop-color="#0b0604" />
+      </ns0:linearGradient>
+      <ns0:radialGradient id="melHeat" gradientUnits="userSpaceOnUse" cx="690" cy="272" r="62">
+        <ns0:stop offset="0%" stop-color="#c2410c" stop-opacity="0.72" /><ns0:stop offset="45%" stop-color="#9a3412" stop-opacity="0.38" /><ns0:stop offset="100%" stop-color="#7c2d12" stop-opacity="0" />
+      </ns0:radialGradient>
+      <ns0:linearGradient id="melBezel" x1="0" y1="202" x2="0" y2="298" gradientUnits="userSpaceOnUse">
+        <ns0:stop offset="0%" stop-color="#fed7aa" /><ns0:stop offset="45%" stop-color="#b45309" /><ns0:stop offset="100%" stop-color="#571c07" />
+      </ns0:linearGradient>
+      <ns0:clipPath id="melClip"><ns0:path d="M690 202 L731.6 226 L731.6 274 L690 298 L648.4 274 L648.4 226 Z" /></ns0:clipPath>
+    </ns0:defs>
+    <ns0:g filter="url(#nodeShadow)"><ns0:path d="M690 202 L731.6 226 L731.6 274 L690 298 L648.4 274 L648.4 226 Z" class="mel-plate" /></ns0:g>
+    <ns0:g clip-path="url(#melClip)">
+      <ns0:path d="M690 202 L731.6 226 L731.6 274 L690 298 L648.4 274 L648.4 226 Z" fill="url(#melHeat)" />
+      <ns0:path class="mel-scan" d="M648 236 H732 M648 252 H732 M648 268 H732" />
+      <ns0:path d="M660 274 L678 228 L690 248 L702 216 L720 274 Z" class="mel-rock" />
+      <ns0:path d="M702 216 L706 274 L694 274 Z" class="mel-facet" />
+      <ns0:path d="M660 274 L678 228 L690 248 L702 216" class="mel-ridge" />
+      <ns0:ellipse cx="706.5" cy="222.2" rx="4" ry="1.6" transform="rotate(72.8 706.5 222.2)" fill="url(#melSplat)" opacity="1" /><ns0:ellipse cx="704.4" cy="233.1" rx="4.8" ry="1.9" transform="rotate(72.8 704.4 233.1)" fill="url(#melSplat)" opacity="0.9" /><ns0:ellipse cx="701.1" cy="238.5" rx="2.4" ry="1" transform="rotate(72.8 701.1 238.5)" fill="url(#melSplat)" opacity="0.35" /><ns0:ellipse cx="713.2" cy="241.2" rx="4.2" ry="1.7" transform="rotate(72.8 713.2 241.2)" fill="url(#melSplat)" opacity="0.78" /><ns0:ellipse cx="709.7" cy="253" rx="5.2" ry="2" transform="rotate(72.8 709.7 253)" fill="url(#melSplat)" opacity="0.62" /><ns0:ellipse cx="706.5" cy="259.1" rx="2" ry="0.9" transform="rotate(72.8 706.5 259.1)" fill="url(#melSplat)" opacity="0.28" /><ns0:ellipse cx="719.3" cy="261.5" rx="3.8" ry="1.5" transform="rotate(72.8 719.3 261.5)" fill="url(#melSplat)" opacity="0.5" /><ns0:ellipse cx="715.1" cy="271.7" rx="3.2" ry="1.2" transform="rotate(72.8 715.1 271.7)" fill="url(#melSplat)" opacity="0.4" />
+      <ns0:circle cx="702" cy="216" r="1.8" class="mel-spark" filter="url(#soft)">
+        <ns0:animate attributeName="opacity" values="0.55;1;0.55" dur="3.2s" repeatCount="indefinite" />
+      </ns0:circle>
+    </ns0:g>
+    <ns0:path d="M690 202 L731.6 226 L731.6 274 L690 298 L648.4 274 L648.4 226 Z" class="mel-edge" />
+    <ns0:path d="M690 204.8 L729.2 227.4 L729.2 272.6 L690 295.2 L650.8 272.6 L650.8 227.4 Z" class="mel-groove" />
+    <ns0:path d="M690 200.4 L733 225.2 L733 274.8 L690 299.6 L647 274.8 L647 225.2 Z" class="mel-hairline" />
+    </ns0:g>
+  </ns0:g></ns0:svg>

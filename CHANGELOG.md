@@ -37,6 +37,8 @@ See [`docs/audit/production-blockers.md`](docs/audit/production-blockers.md) for
 
 ### Changed
 
+- The animated logo now uses solid twin peaks, a graphite frame, and a slow inspection sweep.
+
 - Governance now distinguishes temporary development wrappers from the planned manifest-based adapter contract.
 - The benchmark policy now covers only current product surfaces and labels unimplemented benchmark directories.
 - COLMAP migration guidance now covers the integrated global mapper and optional view-graph calibration.
