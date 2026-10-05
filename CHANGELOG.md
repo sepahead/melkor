@@ -37,6 +37,8 @@ See [`docs/audit/production-blockers.md`](docs/audit/production-blockers.md) for
 
 ### Changed
 
+- `AGENTS.md` is now the complete agent operating contract. It adds authority, workflow,
+  artifact classes, and gates to the writing rules. `CLAUDE.md` imports it.
 - The animated logo now uses solid twin peaks, a graphite frame, and a slow inspection sweep.
 
 - Governance now distinguishes temporary development wrappers from the planned manifest-based adapter contract.
