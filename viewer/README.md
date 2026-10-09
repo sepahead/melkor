@@ -174,7 +174,7 @@ Development mode starts the Bun server:
 bun run app
 ```
 
-For a local desktop build, use Rust 1.88 and Tauri CLI 2.11.4:
+For a local desktop build, use Rust 1.90 and Tauri CLI 2.11.4:
 
 ```bash
 ./fetch-assets.sh --runtime-only

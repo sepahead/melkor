@@ -50,10 +50,10 @@ bun run test -- --project=chromium
 bun stage-dist.js
 
 cd src-tauri
-rustup run 1.88.0 cargo fmt --check
-rustup run 1.88.0 cargo clippy --locked --all-targets -- -D warnings
-rustup run 1.88.0 cargo test --locked
-rustup run 1.88.0 cargo check --locked
+rustup run 1.90.0 cargo fmt --check
+rustup run 1.90.0 cargo clippy --locked --all-targets -- -D warnings
+rustup run 1.90.0 cargo test --locked
+rustup run 1.90.0 cargo check --locked
 ```
 
 Run the pinned `cargo-deny` and `cargo-about` checks from CI.

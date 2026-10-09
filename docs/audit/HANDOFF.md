@@ -79,7 +79,7 @@ ASAN_OPTIONS=detect_leaks=0 UBSAN_OPTIONS=print_stacktrace=1 \
 ```
 
 CI jobs (in `.github/workflows/ci.yml`): `build-macos`, `build-linux`, `build-linux-cuda`,
-`sanitize-macos`, `Fuzz smoke (libFuzzer)`, `Tauri / Rust 1.88`, `Viewer / Playwright`,
+`sanitize-macos`, `Fuzz smoke (libFuzzer)`, `Tauri / Rust 1.90`, `Viewer / Playwright`,
 `Python and shell checks`, `Full-history secret scan`, and the aggregate **`CI Gate`**.
 
 ## 3. Architecture in one screen
