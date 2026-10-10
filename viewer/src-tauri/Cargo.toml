@@ -6,7 +6,7 @@ authors = ["Sepehr Mahmoudian"]
 license = "MIT"
 repository = "https://github.com/sepahead/melkor"
 edition = "2021"
-rust-version = "1.88"
+rust-version = "1.90"
 publish = false
 
 [lib]

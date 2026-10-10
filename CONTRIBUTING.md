@@ -96,9 +96,9 @@ npm audit --audit-level=high
 bun run test -- --project=chromium
 
 cd src-tauri
-rustup run 1.88.0 cargo fmt --all -- --check
-rustup run 1.88.0 cargo clippy --locked --all-targets --all-features -- -D warnings
-rustup run 1.88.0 cargo test --locked --all-targets --all-features
+rustup run 1.90.0 cargo fmt --all -- --check
+rustup run 1.90.0 cargo clippy --locked --all-targets --all-features -- -D warnings
+rustup run 1.90.0 cargo test --locked --all-targets --all-features
 ```
 
 Do not add Tauri IPC permission without a documented need and a security review.

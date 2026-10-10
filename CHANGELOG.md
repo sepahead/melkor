@@ -8,6 +8,10 @@ See [`docs/audit/production-blockers.md`](docs/audit/production-blockers.md) for
 
 ### Breaking
 
+### Breaking
+
+- The desktop viewer requires Rust 1.90. Tauri 2.11.6 and tauri-build 2.7.1 declare
+  that minimum, so CI, the contributor guide and the release checklist move from 1.88.
 - The CLI now accepts only the explicit `inspect` and `convert` commands.
 - The native product no longer includes GPU backends, training, mesh conversion, or scene completion.
 - The installed SDK now exposes only the stable C ABI and version constants.
