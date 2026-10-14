@@ -1,0 +1,52 @@
+{
+  "schema": "sepahead.agent-index.v1",
+  "repository": "sepahead/melkor",
+  "summary": "Melkor: a bounded C++17 toolkit that inspects, converts and locally views Gaussian-splat assets across PLY, SPZ and glTF, with a stable C ABI, a CLI, JSON schemas, profiles and a local-only viewer. Version 2.0.0-dev has no supported production release. AGENTS.md is the operating contract; this index restates its facts for tools.",
+  "entry_documents": [
+    {"path": "AGENTS.md", "role": "operating contract for agents"},
+    {"path": "README.md", "role": "scope, format contract and C SDK"},
+    {"path": "CONTRIBUTING.md", "role": "architecture rules, repository checks and pull request checklist"},
+    {"path": "GOVERNANCE.md", "role": "roles, decisions, independent review and release approval"},
+    {"path": "docs/CLI.md", "role": "CLI reference"},
+    {"path": "docs/INSPECT.md", "role": "asset inspection"},
+    {"path": "docs/RELEASE.md", "role": "release process"},
+    {"path": "docs/audit/production-blockers.md", "role": "current production blockers"},
+    {"path": "docs/audit/v2-progress.md", "role": "current v2 progress"},
+    {"path": "viewer/README.md", "role": "viewer guide"}
+  ],
+  "delivery": {
+    "default_branch": "main",
+    "merge": "Commit, push and merge to main after the local gate; self-merge is the normal path and is not peer review. A design-first change needs a written proposal and explicit maintainer agreement first.",
+    "signing": "required: sign every commit; the repository configuration signs with the owner's SSH key",
+    "attribution": "no AI attribution or co-author trailers",
+    "owner_only": [
+      "release",
+      "tag",
+      "package-index publication",
+      "signing identity",
+      "repository setting change",
+      "production-support claim"
+    ]
+  },
+  "gates": [
+    {"id": "native-dev", "when": "native code, schemas, profiles or CMake files change", "command": "cmake --preset dev -DPython3_EXECUTABLE=\"$VIRTUAL_ENV/bin/python\" && cmake --build --preset dev --parallel && ctest --preset dev", "cost": "full"},
+    {"id": "native-spz-off", "when": "native code, schemas, profiles or CMake files change", "command": "cmake --preset spz-off && cmake --build --preset spz-off --parallel && ctest --preset spz-off", "cost": "full"},
+    {"id": "repository-checks", "when": "any change", "command": "ruff check . --no-unsafe-fixes && python3 tools/verify_third_party.py --check && python3 tools/generate_notices.py --check && python3 tools/check_version_sync.py --check && python3 tools/build_source_bundle.py --check && python3 tools/check_profiles.py && python3 tools/check_claims.py && python3 tools/check_docs_links.py && python3 tools/check_docs_style.py && python3 tests/test_tools.py", "cost": "medium"},
+    {"id": "viewer", "when": "viewer/ changes", "command": "cd viewer && npm ci --ignore-scripts && npm audit --audit-level=high && bun run test -- --project=chromium", "cost": "medium"},
+    {"id": "agent-index", "when": "agent-index.json or a path it names changes", "command": "python3 scripts/check_agent_index.py", "cost": "fast"},
+    {"id": "diff-hygiene", "when": "any change", "command": "git diff --check", "cost": "fast"}
+  ],
+  "generated": [
+    {"path": "NOTICE", "regenerate": "python3 tools/generate_notices.py --write"},
+    {"path": "THIRD_PARTY_LICENSES.md", "regenerate": "python3 tools/generate_notices.py --write"}
+  ],
+  "frozen": [
+    {"path": "third_party/manifest.lock.json", "reason": "pinned dependency snapshot; change only deliberately and verify with tools/verify_third_party.py --check"},
+    {"path": "third_party/specifications.lock.json", "reason": "pinned specification snapshot; change only deliberately and verify with tools/verify_third_party.py --check"},
+    {"path": "docs/audit/", "reason": "point-in-time records keep their old paths, commands and counts, except production-blockers.md and v2-progress.md"},
+    {"path": "fuzz/corpus/", "reason": "fuzz seed corpus with recorded provenance; follow its corpus guide"}
+  ],
+  "ecosystem": [
+    {"repository": "sepahead/crebain", "relation": "converts Gaussian-splat scenes for simulation scenes"}
+  ]
+}

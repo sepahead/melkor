@@ -139,3 +139,9 @@ Do not rewrite these items as project prose:
 When you edit documentation, verify commands, links, version statements, and
 capability claims against the repository. Preserve Markdown structure and valid
 link targets.
+
+## Agent index
+
+[`agent-index.json`](agent-index.json) restates the operational facts of this file for tools.
+Update it when a gate or a named path changes.
+Then run `python3 scripts/check_agent_index.py`.
