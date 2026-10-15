@@ -71,7 +71,7 @@ jobs:
           python3 scripts/build_release_evidence.py verify \
             "$RUNNER_TEMP/melkor-release-evidence"
       - name: Upload review evidence
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: melkor-release-evidence-${{ steps.source.outputs.sha }}
           path: ${{ runner.temp }}/melkor-release-evidence/
